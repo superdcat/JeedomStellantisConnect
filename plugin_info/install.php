@@ -18,13 +18,13 @@
 require_once dirname(__FILE__) . '/../../../core/php/core.inc.php';
 
 // Fonction exécutée automatiquement après l'installation du plugin
-function template_install() {
+function stellantis_install() {
 }
 
 // Fonction exécutée automatiquement après la mise à jour du plugin
-function template_update() {
+function stellantis_update() {
 }
 
 // Fonction exécutée automatiquement après la suppression du plugin
-function template_remove() {
+function stellantis_remove() {
 }

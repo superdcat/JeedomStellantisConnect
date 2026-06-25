@@ -4,62 +4,75 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Présentation
 
-Plugin **Jeedom** (id `imou`, catégorie `security`) qui pilote des **caméras IMOU** :
-allumer/éteindre, activer/désactiver la surveillance, PTZ, et à terme projecteur/sirène,
-alarmes, stockage, etc.
+Plugin **Jeedom** (id cible `stellantis`) qui connecte les **véhicules Stellantis / ex-Groupe PSA**
+(**Peugeot, Citroën, DS, Opel, Vauxhall**) à Jeedom : remonter la **télémétrie** (batterie/SOC, charge,
+autonomie, carburant, position GPS, kilométrage, état portes/verrouillage, pression pneus,
+préconditionnement) et, à terme, **piloter à distance** (réveil, charge, préconditionnement,
+verrouillage, klaxon, feux).
 
-Le pilotage se fait en appelant directement l'**IMOU Open API** (cloud), **en PHP natif**,
-**sans démon et sans Python** — décision d'architecture documentée dans
-`.memory/analyse/imou-api-vs-imouapi.md` (« Solution A »). L'API IMOU n'offre pas de flux push :
-l'état des caméras est rafraîchi par **polling** dans le cron Jeedom.
+**Décision d'architecture structurante** (détail : `.memory/analyse/stellantis-api-architecture.md`) :
+- Il existe **deux API** ; l'**officielle** (`developer.groupe-psa.io`, propre) est **inaccessible** à un
+  particulier → on vise l'**API consommateur** reverse-engineered (celle des apps MyPeugeot/MyCitroën…),
+  comme `psa_car_controller`. **Auth = OAuth2 Authorization Code + PKCE** par marque, **pas** un simple
+  appId/secret. Il y a **deux systèmes de tokens** distincts : OAuth2 (REST, lecture) et un *remote token*
+  OTP/SMS (MQTT, commandes).
+- **Architecture hybride, PHP d'abord, démon différé** :
+  - **MVP = lecture seule, 100 % PHP, sans démon** (`hasOwnDeamon:false`). OAuth2 + REST v4 +
+    **polling** dans le cron Jeedom (l'API n'a **pas de push** accessible). C'est l'essentiel de la valeur.
+  - **Commandes à distance = post-MVP, via démon Python MQTT** (`resources/demond`, `paho-mqtt`) : le
+    canal MQTT persistant + OTP justifie un démon (contrairement à une API purement REST). On réactive
+    alors `resources/` et `hasOwnDeamon:true`.
 
-Un plugin Jeedom **n'est pas autonome** : il s'installe dans un serveur Jeedom sous
-`<jeedom>/plugins/imou/`, et tout le PHP dépend du core Jeedom, atteint via l'include relatif
-`require_once __DIR__ . '/../../../../core/php/core.inc.php';`. Pas de build local ; la
-validation se fait en CI (voir « Workflows / CI »).
+Un plugin Jeedom **n'est pas autonome** : il s'installe sous `<jeedom>/plugins/stellantis/`, et tout le
+PHP dépend du core Jeedom, atteint via `require_once __DIR__ . '/../../../../core/php/core.inc.php';`.
+Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
+
+> **État du code (2026-06-25)** : le dépôt est encore le **squelette `plugin-template` de Jeedom**
+> (classes `template`/`templateCmd`, `info.json` id `template`). **Rien n'est implémenté.** Première
+> étape technique : renommer l'id `template` → `stellantis` (assistant `plugin_info/helperConfiguration.php`,
+> ou rename manuel cohérent sur tous les fichiers/classes/hooks). Toute la suite suit les specs.
 
 ## Feuille de route & specs
 
-L'implémentation est découpée en petites tâches/UC, **à lire avant de coder une fonctionnalité** :
+L'implémentation est découpée en UC (use cases), **à lire avant de coder une fonctionnalité** :
 
-- `.memory/specs/README.md` — index, MVP, roadmap, conventions, statut de fiabilité des endpoints.
-- `.memory/specs/MVP/01..10` — socle livrable en premier (ordre strict) : config → client HTTP →
-  token → test → découverte → équipements → commandes → on/off → surveillance → cron.
-- `.memory/specs/post-mvp/` — UC suivantes par domaine (pilotage avancé, vidéo/images, alarmes,
-  stockage, gestion appareils, contrôle d'accès, supervision/robustesse, livraison).
-
-État du code : **squelette** (classes `imou`/`imouCmd` quasi vides). La logique est à implémenter
-en suivant les specs ; ne pas considérer les fichiers actuels comme une fonctionnalité finie.
+- `.memory/specs/README.md` — index, MVP, roadmap, conventions, **statut de fiabilité** des endpoints.
+- `.memory/specs/MVP/01..10` — socle livrable en premier (ordre strict, 100 % PHP/REST, lecture) :
+  config → client HTTP → OAuth2/token → test → découverte véhicules → équipements → commandes info
+  télémétrie → cron refresh → fraîcheur/online → robustesse.
+- `.memory/specs/post-mvp/` — UC suivantes par domaine : `10-commandes-distance` (démon MQTT),
+  `20-energie-charge`, `30-localisation-trajets`, `40-entretien-alertes`, `50-gestion-vehicules`,
+  `70-supervision-robustesse`, `80-livraison`.
 
 ## Architecture
 
-Disposition Jeedom fixe (type MVC). Pièces principales, toutes nommées d'après l'id `imou` :
+Disposition Jeedom fixe (type MVC). Pièces principales, toutes nommées d'après l'id `stellantis` :
 
-- **`core/class/imou.class.php`** — le cœur. Deux classes :
-  - `imou extends eqLogic` — une instance par caméra/canal (clé `logicalId = "<deviceId>_<channelId>"`).
-    Hooks de cycle de vie appelés par Jeedom : `preSave/postSave`, `preRemove/postRemove`, etc.
-    Crons (`cron`, `cron5`, …) appelés par le planificateur ; `cron5()` portera le polling d'état.
-    `$_encryptConfigKey` chiffre les champs sensibles.
-  - `imouCmd extends cmd` — une commande (info ou action). `execute($_options)` exécute les actions
-    (allumer/éteindre, surveillance, PTZ…) en appelant l'API.
-- **Client API `imouApi`** (à créer dans `core/class/imou.class.php`, cf. `.memory/specs/MVP/02`,`03`) —
-  **brique unique** par laquelle passent tous les appels HTTP : signature
-  `md5("time:…,nonce:…,appSecret:…")`, enveloppe `system`, POST cURL, gestion du token (cache + refresh),
-  mapping des erreurs. Aucune autre partie du code ne doit appeler l'API directement.
-- **`desktop/php/imou.php`** — page de configuration admin (HTML), protégée par `isConnect('admin')`.
-  Liste les équipements + formulaire de config. Liaison au modèle via `data-l1key`/`data-l2key`
-  (ex. `data-l1key="configuration" data-l2key="deviceId"`). i18n via `{{...}}`. Se termine en
-  incluant le JS du plugin puis le JS générique de page plugin **fourni par le core**
-  (`include_file('core', 'plugin.template', 'js')` → `core/js/plugin.template.js`, asset du core,
-  à ne pas modifier).
-- **`desktop/js/imou.js`** — comportement front-end de la page (lignes de commandes, tri, helpers `jeedom.*`).
-- **`core/ajax/imou.ajax.php`** — endpoint AJAX : inclut le core, vérifie `isConnect('admin')`,
-  `ajax::init()`, puis aiguille sur `init('action')`. Les actions front (test de connexion,
-  synchronisation des caméras…) s'ajoutent ici en branches `if (init('action') == '...')`.
-
-- **`plugin_info/configuration.php`** — formulaire de la page de config plugin (ouverte par
-  `gotoPluginConf`). Champs liés en `class="configKey" data-l1key="<clé>"` (auto-load/save core
-  via `config::byKey/save(..., 'imou')`).
+- **`core/class/stellantis.class.php`** — le cœur. Plusieurs classes (1 classe ↔ 1 logique) :
+  - `stellantis extends eqLogic` — **une instance par véhicule** (clé `logicalId = VIN`). Hooks de cycle
+    de vie (`preSave/postSave`, `preRemove/postRemove`…) ; crons (`cron`/`cron5`) → **polling REST** de la
+    télémétrie ; `$_encryptConfigKey` chiffre les champs sensibles.
+  - `stellantisCmd extends cmd` — commande (info ou action). `execute($_options)` exécute les actions
+    (réveil, charge, préconditionnement, verrouillage…) — **post-MVP**, en passant par le démon MQTT.
+- **Client API `stellantisApi`** (à créer dans `core/class/stellantis.class.php`, cf. `MVP/02`,`03`) —
+  **brique unique** par laquelle passent **tous** les appels HTTP REST : OAuth2 PKCE (URL d'autorisation,
+  échange du `code`, refresh), enveloppe Bearer + header `x-introspect-realm`, base
+  `api.groupe-psa.com/connectedcar/v4`, parsing, mapping d'erreurs (401/invalid_grant/rate-limit).
+  **Aucune autre partie du code n'appelle l'API directement.**
+- **`desktop/php/stellantis.php`** — page de configuration admin (HTML), protégée par `isConnect('admin')`.
+  Liste les véhicules + formulaire. Liaison au modèle via `data-l1key`/`data-l2key`. i18n via `{{...}}`.
+  Se termine en incluant le JS du plugin puis le JS générique de page plugin **fourni par le core**
+  (`include_file('core', 'plugin.template', 'js')` → asset du core, **à ne pas renommer/modifier**).
+- **`desktop/js/stellantis.js`** — front-end (lignes de commandes, tri, helpers `jeedom.*`).
+- **`core/ajax/stellantis.ajax.php`** — endpoint AJAX (admin-only) : inclut le core, `isConnect('admin')`,
+  `ajax::init()`, aiguillage sur `init('action')` (ex. génération de l'URL OAuth, soumission du `code`,
+  test de connexion, synchronisation des véhicules) en branches `if (init('action') == '...')`.
+- **`plugin_info/configuration.php`** — formulaire de la page de config plugin (`gotoPluginConf`).
+  Champs liés en `class="configKey" data-l1key="<clé>"` (auto-load/save core via
+  `config::byKey/save(..., 'stellantis')`).
+- **`resources/demond/`** — **démon Python MQTT** (post-MVP commandes uniquement). Réutilise le squelette
+  `demond.py` + lib `jeedom/` (socket `jeedom_socket` PHP→démon, `jeedom_com` démon→Jeedom). MVP : dossier
+  non utilisé (`hasOwnDeamon:false`).
 
 > ⚠️ **Accès restreint à `plugin_info/configuration.php`** — Claude Code **ne peut pas lire ni
 > éditer** ce fichier via les outils Read/Edit/Write (refusé par les permissions de session).
@@ -77,70 +90,65 @@ Disposition Jeedom fixe (type MVC). Pièces principales, toutes nommées d'aprè
 >   À refaire systématiquement à chaque changement — ne jamais laisser les deux fichiers diverger.
 
 Configuration & secrets :
-- Identifiants développeur IMOU (`appId`, `appSecret`, datacenter) stockés au **niveau plugin**
-  via `config::save/byKey(..., 'imou')` ; `appSecret` chiffré, jamais loggué.
-- `deviceId`/`channelId`/capacités stockés dans la `configuration` de chaque eqLogic.
-- Token mis en cache via la classe `cache` de Jeedom.
+- **Par plugin** (`config::save/byKey(..., 'stellantis')`) : **marque** (détermine TLD `idpcvs.{}` +
+  realm `clientsB2C…`), `client_id`, `client_secret` (extraits de l'APK par l'utilisateur via un outil
+  externe — cf. analyse), `redirect_uri`. `client_secret` **chiffré**, jamais loggué.
+- **Par véhicule** (`configuration` de l'eqLogic) : `id` API, `vin`, `brand`, motorisation, capacités.
+- **Tokens** OAuth2 (access/refresh) + (post-MVP) remote token OTP : en cache **chiffré** (classe `cache`).
+  ⚠️ `access_token` à durée courte (~15 min) → refresh proactif/réactif.
 
 Support :
 - **`plugin_info/info.json`** — manifeste (id, version, `require`, OS, `category`, dépendances, langues, compat).
-- **`plugin_info/install.php`** — `imou_install/update/remove()` au cycle de vie du plugin ;
-  `pre_install.php` → `imou_pre_update()`.
-- **`plugin_info/packages.json`** — dépendances installées par Jeedom. La cible étant 100 % PHP,
-  ce fichier doit rester minimal (cf. `.memory/specs/post-mvp/80-livraison/82-packaging-doc.md`).
+- **`plugin_info/install.php`** — `stellantis_install/update/remove()` ; `pre_install.php` → `stellantis_pre_update()`.
+- **`plugin_info/packages.json`** — dépendances. **MVP : vide** (100 % PHP). **Post-MVP commandes** :
+  `pip3 paho-mqtt` (cf. `.memory/specs/post-mvp/80-livraison/82-packaging-doc.md`).
 
 ## Workflows / CI
 
 CI déléguée aux workflows réutilisables de Jeedom (`jeedom/workflows`) :
 - **`.github/workflows/work.yml`** — check complet du plugin sur push/PR vers `beta`, PR vers `master`.
 - **`.github/workflows/prettier.yml`** — pousser sur la branche **`prettier`** déclenche un bot qui
-  reformate le code et commite sur cette branche (moyen de formatage automatique).
+  reformate le code et commite (moyen de formatage automatique ; pas de config prettier locale).
 
 Pas de commande de lint/test locale ; la validation tourne dans ces workflows contre un Jeedom réel.
 Recette fonctionnelle manuelle : `.memory/specs/post-mvp/80-livraison/81-validation-manuelle.md`.
 
 ## Conventions
 
-- **Français = langue source** : code, commentaires, noms de variables, messages de `log::add`
-  et chaînes UI sont écrits en français. Le français est aussi la langue **par défaut** de Jeedom
-  (aucun fichier `core/i18n/fr_FR.json` n'est nécessaire — la source EST la traduction française).
+- **Français = langue source** : code, commentaires, noms de variables, messages de `log::add` et chaînes
+  UI sont écrits en français (langue **par défaut** de Jeedom — pas de `fr_FR.json`).
+- **Autoload Jeedom (règle critique, fatale au runtime, invisible à `php -l`)** : l'autoloader mappe
+  **1 classe ↔ 1 fichier** `<NomClasse>.class.php`. Toute classe référencée depuis un **point d'entrée
+  externe** (`core/ajax/*.ajax.php`, hooks cron, `desktop/php/*.php`, `install.php`) doit avoir son propre
+  fichier OU transiter par `stellantis`/`stellantisCmd` (dont `stellantis.class.php` charge aussi
+  `stellantisApi`/`stellantisException`). Un appel **direct** `stellantisApi::` / `stellantisException`
+  depuis un point d'entrée externe = `Fatal error: Class not found`.
+- **Tout appel HTTP REST passe par `stellantisApi`** ; toute commande à distance passe par le démon
+  (post-MVP). Pas de cURL ni de MQTT épars.
 - Indentation 2 espaces (PHP/JS).
-- Logs via `log::add('imou', 'debug'|'info'|'warning'|'error', $msg)` ; **jamais** de secret/token en clair.
-- Les `.htaccess` de `core/php`, `core/class`, `core/ajax`, … interdisent l'accès web direct — les conserver.
-- `docs/<langue>/` = documentation **utilisateur** du plugin (une langue par dossier) ;
-  `.memory/` = analyse & specs **internes** (français uniquement, jamais traduites).
-  > ℹ️ Ce dossier de connaissance interne s'appelle désormais **`.memory/`** (dossier caché), renommé
-  > depuis `memory/`. Toutes les références (specs, analyse, doc externe, `/feature`, skill `dev`)
-  > pointent sur `.memory/`. **Ne plus utiliser `memory/`** ni présumer son existence : lire/écrire
-  > la connaissance interne sous `.memory/` (`.memory/specs/`, `.memory/analyse/`, `.memory/external/`).
+- Logs via `log::add('stellantis', 'debug'|'info'|'warning'|'error', $msg)` ; **jamais** de
+  secret/token/`client_secret`/VIN-en-clair-sensible exposé.
+- **Robustesse cron** : un véhicule en erreur n'interrompt pas la boucle (try/catch par véhicule) ;
+  respecter les **guardrails** anti-ban / batterie 12 V (cf. analyse § 1.4 et UC 70-supervision).
+- Les `.htaccess` de `core/php`, `core/class`, `core/ajax`, `resources/`… interdisent l'accès web direct
+  — les conserver.
+- `docs/<langue>/` = documentation **utilisateur** ; `.memory/` = analyse & specs **internes** (français).
 
 ## Internationalisation (i18n) — natif multilingue
 
-Le plugin est **nativement multilingue**. Langues supportées (cf. `plugin_info/info.json` → `language`) :
-**`fr_FR` (source/défaut)**, **`en_US`**, **`de_DE`**, **`es_ES`**.
+Le plugin est **nativement multilingue**. Langues : **`fr_FR` (source/défaut)**, **`en_US`**, **`de_DE`**,
+**`es_ES`**.
 
-Mécanisme Jeedom :
-- Toute chaîne destinée à l'utilisateur est **enveloppée** : `{{Texte français}}` en HTML/JS,
-  `__('Texte français', __FILE__)` en PHP. La clé est **toujours le texte source français**.
+- Toute chaîne UI est **enveloppée** : `{{Texte français}}` en HTML/JS, `__('Texte français', __FILE__)`
+  en PHP. La clé est **toujours le texte source français**.
 - Les traductions vivent dans `core/i18n/<langue>.json`, **un fichier par langue cible**
   (`en_US.json`, `de_DE.json`, `es_ES.json` — **pas** de `fr_FR.json`). Format :
-
   ```json
-  {
-    "plugins/imou/<chemin/relatif/fichier>": { "Texte français": "Traduction" },
-    "info.json": { "Description française": "Traduction" }
-  }
+  { "plugins/stellantis/<chemin/relatif/fichier>": { "Texte français": "Traduction" },
+    "info.json": { "Description française": "Traduction" } }
   ```
-
-- La `description` de `plugin_info/info.json` est fournie pour **les 4 langues**.
-- Les docs sont **dupliquées par langue** : `docs/fr_FR/`, `docs/en_US/`, `docs/de_DE/`, `docs/es_ES/`.
-
-**Règle d'or — toute clé UI doit, *in fine*, avoir ses 3 traductions** (`en_US.json`, `de_DE.json`,
-`es_ES.json`), sous le bon chemin `plugins/imou/<fichier>` : une clé **livrée** sans ses 3 traductions
-est un **défaut bloquant**. *Quand* les produire dépend du contexte :
-- **Dans le workflow `/feature`** : la traduction est faite **en fin de cycle par le sous-agent
-  `translator`** (sur le code figé, contexte isolé). Pendant le dev, on **enveloppe** les chaînes en
-  français mais on **ne touche pas** aux `*.json` — c'est volontaire (économie de contexte, pas de
-  re-traduction de chaînes qui changent encore).
-- **Hors de ce workflow** : ajouter/mettre à jour la clé dans les 3 fichiers dès qu'on l'introduit ou
-  qu'on la modifie (sinon la traduction devient orpheline ou manquante).
+- La `description` d'`info.json` est fournie pour **les 4 langues** ; docs dupliquées par langue.
+- **Règle d'or** : toute clé UI **livrée** doit avoir ses **3 traductions**. *Quand* les produire :
+  - **Dans `/feature`** : traduction faite **en fin de cycle par le sous-agent `translator`** (code figé,
+    contexte isolé) ; pendant le dev on enveloppe en français mais on **ne touche pas** aux `*.json`.
+  - **Hors workflow** : ajouter/mettre à jour la clé dans les 3 fichiers dès qu'on l'introduit.

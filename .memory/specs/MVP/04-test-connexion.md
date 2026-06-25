@@ -1,27 +1,31 @@
-# 04 — Test de connexion depuis la config plugin
+# 04 — Test de connexion
 
-**Phase :** MVP · **Dépend de :** 03 · **Fichiers :** page config plugin, `core/ajax/imou.ajax.php`, `core/class/imou.class.php`
+**Phase :** MVP · **Dépend de :** 03 · **Fichiers :** `core/ajax/stellantis.ajax.php`, `core/class/stellantis.class.php`, `desktop/php/stellantis.php` + `desktop/js/stellantis.js`
 
 ## Objectif
-Donner un retour immédiat sur la validité des identifiants : un bouton « Tester la connexion »
-dans la page de configuration du plugin.
+Donner à l'utilisateur un bouton « Tester la connexion » qui valide bout-en-bout que les credentials et
+le token fonctionnent : on appelle un endpoint léger (liste des véhicules) et on affiche un retour clair.
 
 ## Périmètre
-- **Inclus** : bouton UI + action AJAX + appel `getToken()` + message succès/erreur.
-- **Exclu** : découverte des appareils (tâche 05).
+- **Inclus** : bouton + action AJAX `testConnection`, appel réel minimal, message succès/échec lisible.
+- **Exclu** : création des équipements (→ 06), parsing complet du statut (→ 07).
 
 ## Détails techniques
-- AJAX : ajouter dans `imou.ajax.php` une branche `init('action') == 'testConnection'` →
-  `imou::testConnection()` qui appelle `imouApi::getToken(true)` et retourne `ajax::success()`
-  ou `ajax::error()` avec un message lisible.
-- UI : bouton dans la config plugin déclenchant un appel `$.ajax` vers
-  `plugins/imou/core/ajax/imou.ajax.php` ; afficher le résultat via `$('#div_alert').showAlert(...)`.
-- Garde : `isConnect('admin')` côté AJAX (déjà présent dans le squelette).
+- Méthode `stellantis::testConnection(): array` → `stellantisApi::callWithToken('GET','/user/vehicles')`
+  et renvoie un résumé `['ok'=>bool, 'count'=>int, 'message'=>string]`.
+- ⚠️ **Fidélité du chemin d'appel** : l'AJAX appelle `stellantis::testConnection()`, **pas** directement
+  `stellantisApi::callWithToken()` (respect de l'autoload : passage par la classe principale).
+- Mapping des erreurs en messages utilisateur **actionnables** :
+  - non configuré (pas de client_id) → « Renseignez la configuration » ;
+  - pas de token / `invalid_grant` → « Connectez-vous (OAuth) / ré-authentifiez-vous » ;
+  - `429` → « Trop de requêtes, réessayez plus tard » ;
+  - `401` après refresh → « Token invalide » ; autre → message API tronqué.
+- UI : bouton sur la page plugin, action AJAX `testConnection`, affichage via `$('#div_alert').showAlert`.
 
 ## Critères d'acceptation
-- [ ] Avec des identifiants valides → message de succès (ex. « Connexion IMOU réussie »).
-- [ ] Avec des identifiants invalides → message d'erreur clair (code/msg IMOU traduit si possible).
-- [ ] Aucun secret affiché dans le message ni dans la console réseau.
+- [ ] Avec une config valide et un token, le test affiche « OK » + nombre de véhicules trouvés.
+- [ ] Sans config / sans token, le test affiche un message d'aide clair (pas une stack trace).
+- [ ] Aucun secret/token affiché dans le message ni dans le DOM.
 
 ## Notes / risques
-- Bon point d'entrée pour valider de bout en bout les tâches 01→03 avant d'aller plus loin.
+- Le test consomme **1 appel API** (et un éventuel refresh) — acceptable, déclenché manuellement.

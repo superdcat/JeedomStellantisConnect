@@ -1,27 +1,24 @@
-# UC — Icône du plugin
+# 83 — Icône du plugin
 
-**Domaine :** Livraison / packaging · **Dépend de :** — · **Complémentaire de :** UC82 (packaging/doc) · **Statut :** à spécifier (tech)
+**Domaine :** Livraison · **Dépend de :** — · **Statut :** à faire
 
 ## Objectif / valeur
-Doter le plugin d'une **icône propre** (identité visuelle dans le store de plugins et l'en-tête de
-configuration) à la place de l'icône par défaut générée à la création du squelette.
+Doter le plugin d'une **icône** conforme aux exigences du Market Jeedom (obligatoire pour publication),
+évoquant le véhicule connecté Stellantis, **sans** réutiliser les codes couleur des icônes officielles
+Jeedom ni un logo de marque protégé.
 
 ## Périmètre
-- **Inclus** : génération d'une icône respectant les **prérequis Jeedom**, intégration dans le plugin,
-  remplacement de l'icône par défaut.
-- **Exclu** : les images des **équipements** (par modèle de caméra) — couvert par UC55.
+- **Inclus** : `plugin_info/<id>_icon.png` (et déclaration), visuel véhicule/voiture connectée neutre.
+- **Exclu** : branding par marque (Peugeot/Citroën… = marques déposées → éviter les logos officiels).
 
-## Esquisse Jeedom
-- Emplacement/format de l'icône plugin **à confirmer en tech** (typiquement un PNG sous `plugin_info/`,
-  référencé par le core ; vérifier dimensions, fond transparent, et le champ éventuel d'`info.json`).
-- Générer une icône cohérente avec le thème « caméra / sécurité IMOU ».
+## Détails techniques
+- Respecter les contraintes Jeedom (cf. doc « Icône de plugin ») : format/taille, pas de collision
+  couleur avec les icônes du core.
+- Visuel suggéré : silhouette de voiture + signal/connexion (générique), pas de logo constructeur.
 
 ## Critères d'acceptation
-- [ ] La nouvelle icône s'affiche dans la liste des plugins et l'en-tête de configuration.
-- [ ] L'icône respecte les contraintes Jeedom (format, dimensions, transparence).
-- [ ] L'icône par défaut du squelette n'est plus utilisée.
+- [ ] Le plugin a une icône valide conforme aux exigences Market.
+- [ ] Pas de logo de marque déposée ni de code couleur réservé Jeedom.
 
-## À confirmer
-- Chemin et nom de fichier exacts de l'icône plugin attendus par Jeedom (et déclaration dans `info.json`
-  si requise) → consulter la doc Jeedom packaging.
-- Contraintes précises (taille en px, format PNG/SVG, poids).
+## Notes
+- Réf. doc : `.memory/external/doc/jeedom/INDEX.md` → `Icone_de_plugin`.

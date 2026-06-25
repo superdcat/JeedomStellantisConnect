@@ -1,15 +1,15 @@
 # Jeedom — page de plugin au menu (panel) & toggle d'affichage natif
 
-> Vérifié en UC27 (panneau caméras). Sujet : comment ajouter une **page** de plugin au menu Jeedom
+> Connaissance **générique Jeedom** (indépendante du domaine), utile ici pour une page **carte
+> « Mes véhicules »** au menu d'accueil. Sujet : comment ajouter une **page** de plugin au menu Jeedom
 > (≠ widget de commande, ≠ page de gestion admin), et comment son affichage est **conditionné
-> nativement** par le core. Distinct de `jeedom-widgets-commandes.md` (widgets de commande sur
-> dashboard).
+> nativement** par le core. Distinct de `jeedom-widgets-commandes.md` (widgets de commande sur dashboard).
 
 ## 1. Trois choses différentes à ne pas confondre
 
 | Élément | Fichier | Où ça apparaît |
 |---|---|---|
-| **Page de gestion** du plugin | `desktop/php/<id>.php` (ex. `imou.php`) | menu **Plugins** (admin), via `gotoPluginConf` / liste des plugins |
+| **Page de gestion** du plugin | `desktop/php/<id>.php` (ex. `stellantis.php`) | menu **Plugins** (admin), via `gotoPluginConf` / liste des plugins |
 | **Page-panneau** (vue utilisateur) | `desktop/php/<fichier>.php` déclaré par `info.json "display"` | menu **d'accueil** Jeedom |
 | **Widget** de commande | `core/template/.../cmd.<type>.<subType>.<nom>.html` | sur un **dashboard**, posé sur une commande |
 
@@ -42,18 +42,18 @@ statique** d'`info.json`, **sans** condition : le conditionnel vient **uniquemen
 `structure_info_json` ne décrit que `display`/`mobile`, pas le mécanisme de toggle — il est dans le
 code du core.)
 
-## 4. Contrat de la page panel & sélection par équipement (UC27)
+## 4. Contrat de la page panel & sélection par équipement
 
 - En-tête : `require_once .../core/php/core.inc.php` + `include_file('core','authentification','php')` ;
   `isConnect()` (utilisateur connecté, **pas** admin → usage quotidien). Refus = `throw new Exception`.
-- Contrôle d'accès **par eqLogic** : n'afficher une cellule que si `hasRight('r')` (+ `getIsEnable()`).
-  Même politique que `core/ajax/imouStream.ajax.php`.
+- Contrôle d'accès **par eqLogic** : n'afficher une cellule/un véhicule que si `hasRight('r')`
+  (+ `getIsEnable()`).
 - **Sélection** d'un équipement dans le panel = case **par équipement**
   `getConfiguration('isVisiblePanel')` (pattern GSL). Défaut posé **par le plugin** à la création
-  (jamais par le core) ; backfill une-fois au re-sync pour les équipements antérieurs (cf.
-  `imou::syncEquipments`, UC27).
-- Live/commandes : la page **réutilise** l'endpoint same-origin et les commandes existantes
-  (`jeedom.cmd.execute`) — aucun nouvel appel cloud (cf. UC25 et `jeedom-widgets-commandes.md` § 7).
+  (jamais par le core) ; backfill une-fois au re-sync pour les équipements antérieurs.
+- Contenu : la page **réutilise** les commandes existantes (`jeedom.cmd.execute`) et, pour afficher une
+  **carte** (tuile véhicule), un endpoint same-origin (cf. `jeedom-widgets-commandes.md` § 7 — la CSP
+  interdit une tuile de carte externe directe).
 
 ## Sources
 - Core : `core/class/plugin.class.php` (`getDisplay()`), `desktop/js/plugin.js` (cases panel).

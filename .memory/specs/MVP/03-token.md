@@ -1,33 +1,48 @@
-# 03 — Gestion du token d'accès
+# 03 — Authentification OAuth2 PKCE & gestion du token
 
-**Phase :** MVP · **Dépend de :** 02 · **Fichiers :** `core/class/imou.class.php`
+**Phase :** MVP · **Dépend de :** 02 · **Fichiers :** `core/class/stellantis.class.php` (`stellantisApi`), `core/ajax/stellantis.ajax.php`, page de config
 
 ## Objectif
-Obtenir, mettre en cache et renouveler automatiquement l'`accessToken` requis par tous les
-appels métier, de façon transparente.
+Mettre en place le flow **OAuth2 Authorization Code + PKCE** (obligatoire depuis 2023, plus de grant
+`password`) et la gestion du token : génération de l'URL d'autorisation, échange du `code` collé par
+l'utilisateur, **stockage chiffré** des tokens, **refresh** proactif/réactif.
 
 ## Périmètre
-- **Inclus** : appel `accessToken`, cache avec TTL, refresh proactif et réactif.
-- **Exclu** : usage métier du token (tâches 05+).
+- **Inclus** : génération URL d'autorisation (PKCE), échange code→tokens, cache chiffré, refresh,
+  invalidation sur changement de credentials.
+- **Exclu** : remote token OTP/MQTT (post-MVP) ; appels métier (05+).
 
 ## Détails techniques
-- Méthode `imouApi::getToken(bool $force = false): string`.
-- Appel `accessToken` (signé, sans token) → réponse `{ accessToken, expireTime }`.
-  `expireTime` est une durée en secondes (à confirmer) ou un timestamp ; normaliser en
-  « instant d'expiration ».
-- Cache via la classe Jeedom `cache` :
-  `cache::set('imou::token', json(['token'=>…,'exp'=>…]))` / lecture `cache::byKey('imou::token')`.
-- Refresh **proactif** : renouveler si `now >= exp - marge` (marge = 300 s).
-- Refresh **réactif** : si un appel métier échoue pour cause de token invalide/expiré
-  (code IMOU correspondant), appeler `getToken(true)` puis **rejouer une fois** l'appel.
-- Sérialiser l'obtention pour éviter les appels concurrents inutiles (best effort).
+- **Setup interactif** (pas de login silencieux) :
+  1. Le plugin génère un `code_verifier` (≥43 chars aléatoires) + `code_challenge = base64url(sha256(verifier))`
+     + `state`. Construit l'URL : `https://idpcvs.{marque.tld}/am/oauth2/authorize?client_id=…&
+     response_type=code&scope=openid%20profile&redirect_uri=…&state=…&code_challenge=…&code_challenge_method=S256`
+     (+ `local`/locale selon marque). Affichée à l'utilisateur (action AJAX `getAuthUrl`).
+  2. L'utilisateur se connecte sur le site de sa marque, est redirigé vers `redirect_uri?code={UUID}&…`,
+     et **colle le `code`** dans un champ (action AJAX `submitAuthCode`).
+  3. Échange : `POST https://idpcvs.{marque.tld}/am/oauth2/access_token`,
+     `Authorization: Basic base64(client_id:client_secret)`, body `grant_type=authorization_code&code=…&
+     redirect_uri=…&code_verifier=…`. Réponse `{access_token, refresh_token, expires_in, id_token}`.
+- **Cache chiffré** (`cache::set('stellantis::token', …)`, valeurs chiffrées) :
+  `{access_token, refresh_token, exp}` où `exp = time() + expires_in`.
+- **`getToken(bool $force=false): string`** : token caché valide (`time() < exp - MARGE`) → le rendre
+  (aucun réseau) ; sinon **refresh** (`grant_type=refresh_token`) + MAJ cache. ⚠️ `expires_in` court
+  (**~890 s / 15 min**) → refresh fréquent.
+- **`callWithToken($method,$path,$params)`** : `getToken()` + `call()` ; sur `401`/token error →
+  `getToken(true)` (refresh) puis **rejeu unique** ; sur `invalid_grant` (refresh token mort) → erreur
+  claire « ré-authentification requise » (pas de boucle).
+- `code_verifier`/`state` stockés temporairement (cache court) entre étapes 1 et 2.
+- Invalidation : `postConfig_client_id`/`postConfig_brand` → purge `stellantis::token`.
 
 ## Critères d'acceptation
-- [ ] Le 1er appel récupère un token ; les suivants réutilisent le cache (pas de nouvel appel `accessToken`).
-- [ ] À l'approche de l'expiration, le token est renouvelé sans erreur visible.
-- [ ] Un token invalidé côté serveur déclenche un refresh + rejeu transparent (1 seule fois).
-- [ ] Le token n'est jamais écrit en clair dans les logs.
+- [ ] L'utilisateur obtient une URL d'autorisation valide et, après collage du `code`, le plugin stocke
+      `access_token` + `refresh_token` (chiffrés).
+- [ ] `getToken()` rend un token valide sans appel réseau tant qu'il n'est pas proche de l'expiration.
+- [ ] Un `access_token` expiré est rafraîchi automatiquement ; rejeu réactif borné à **1**.
+- [ ] Un `refresh_token` mort (`invalid_grant`) remonte « ré-auth requise », sans boucle.
+- [ ] Aucun token ni `client_secret` en clair dans les logs / le DOM.
 
 ## Notes / risques
-- Confirmer la sémantique de `expireTime` (durée vs timestamp) — défaut prudent si ambigu.
-- Le cache Jeedom peut être purgé : toujours pouvoir re-générer un token à la volée.
+- Contrat exact (PKCE, noms de params, `redirect_uri` par marque, header Basic) à **confirmer** contre
+  `psa_car_controller` (`psa_client.py`, PR #754) — cf. `stellantis-api-architecture.md` § 1.1.
+- Voir le compagnon `03-token-tech.md`.

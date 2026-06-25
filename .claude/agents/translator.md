@@ -32,8 +32,9 @@ fichiers `desktop/**`, `core/**`, `plugin_info/configuration.php`, etc.) :
 2. **Pour chaque chaîne**, garantir une entrée de traduction dans **les 3** fichiers cibles, sous le
    chemin `plugins/stellantis/<chemin/relatif/du/fichier>` (exactement le chemin relatif depuis la racine
    du plugin, ex. `plugins/stellantis/desktop/php/stellantis.php`).
-3. **Traduire** fidèlement le français vers chaque langue (terminologie domotique/caméra cohérente,
-   ton concis, respect des termes Jeedom usuels : « équipement » → device/Gerät/dispositivo, etc.).
+3. **Traduire** fidèlement le français vers chaque langue (terminologie domotique/véhicule connecté
+   cohérente — « véhicule/charge/autonomie/verrouillage/préconditionnement » → termes EN/DE/ES usuels —
+   ton concis, respect des termes Jeedom : « équipement » → device/Gerät/dispositivo, etc.).
 4. **Préserver** les entrées existantes correctes : ne re-traduis pas une clé déjà présente et
    correcte. N'ajoute que ce qui manque, ne corrige que ce qui est manifestement faux.
 5. **info.json** : si la `description` du plugin a changé, mettre à jour la section `"info.json"`
@@ -67,7 +68,7 @@ fichiers `desktop/**`, `core/**`, `plugin_info/configuration.php`, etc.) :
 1. `Grep` les motifs `{{...}}` et `__('...', __FILE__)` sur les fichiers concernés.
 2. Lis les 3 fichiers de traduction existants pour connaître les clés déjà couvertes.
 3. Calcule, par fichier source, l'ensemble des clés FR ; compare aux clés présentes par langue.
-4. Édite les 3 JSON pour ajouter les clés manquantes (créer la section `plugins/imou/<fichier>`
+4. Édite les 3 JSON pour ajouter les clés manquantes (créer la section `plugins/stellantis/<fichier>`
    si absente).
 5. Relis les 3 fichiers pour vérifier la couverture (chaque clé FR présente dans les 3 langues).
 6. **Validation finale OBLIGATOIRE (avant de répondre)** : vérifie que les 3 fichiers parsent réellement.
@@ -95,10 +96,10 @@ Tu produis TOUJOURS une réponse au format JSON suivant :
     "es_ES": 7
   },
   "orphans": [
-    { "lang": "en_US", "path": "plugins/imou/...", "key": "Texte source disparu" }
+    { "lang": "en_US", "path": "plugins/stellantis/...", "key": "Texte source disparu" }
   ],
   "missing": [
-    { "lang": "de_DE", "path": "plugins/imou/...", "key": "Clé non traduite" }
+    { "lang": "de_DE", "path": "plugins/stellantis/...", "key": "Clé non traduite" }
   ],
   "summary": "Synthèse en 1-2 phrases : combien de clés couvertes, état de la couverture 3 langues."
 }

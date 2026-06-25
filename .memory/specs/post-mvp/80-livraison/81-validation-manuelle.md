@@ -1,35 +1,30 @@
-# 18 — Checklist de validation manuelle (golden master)
+# 81 — Recette fonctionnelle manuelle
 
-**Phase :** Post-MVP · **Dépend de :** 10 (puis enrichie au fil des tâches) · **Fichiers :** `docs/` / cette spec
+**Domaine :** Livraison · **Dépend de :** (toutes) · **Statut :** vivant (à compléter au fil des UC)
 
-## Objectif
-Disposer d'un scénario de recette reproductible à dérouler sur une vraie caméra avant chaque
-release, faute de tests automatisés (le plugin tourne dans un Jeedom réel contre un cloud réel).
+## Objectif / valeur
+Comme il n'y a **ni tests unitaires ni Jeedom local garanti**, fournir une **checklist de recette
+manuelle** sur un Jeedom réel : la « preuve » qu'une UC marche vraiment (lint OK ≠ feature OK).
 
 ## Périmètre
-- **Inclus** : scénario de bout en bout + cas d'erreur.
-- **Exclu** : tests unitaires (non pertinents pour les appels cloud).
+- **Inclus** : scénarios de recette par UC livrée (étapes observables + résultat attendu).
+- **Exclu** : automatisation (hors de portée).
 
-## Scénario de recette
-1. Config plugin : saisir appId/appSecret/datacenter → « Tester la connexion » = succès.
-2. Identifiants erronés → message d'erreur clair.
-3. « Synchroniser » → les caméras apparaissent en équipements (pas de doublon en re-sync).
-4. Renommer une caméra + re-sync → le nom personnalisé est préservé.
-5. « Éteindre » la caméra → image coupée dans l'app IMOU ; `camera_state` = 0.
-6. « Allumer » → image rétablie ; `camera_state` = 1.
-7. « Activer surveillance » / « Désactiver » → reflété dans l'app ; `surveillance_state` à jour.
-8. Changer un état depuis l'app IMOU → Jeedom se met à jour au prochain cron (≤ 5 min).
-9. Débrancher une caméra → passe offline (tâche 11).
-10. Couper le réseau brièvement pendant un cron → pas d'erreur fatale, reprise auto (tâche 16).
-11. (UC22 flux live) Rendre visibles `live_get`/`live_release`/`live_url` → « Obtenir le flux live » →
-    `live_url` contient une URL HLS lisible (lecteur HLS/VLC) ; « Libérer le flux live » → `live_url` vidée.
-12. (UC22) « Obtenir le flux live » deux fois de suite sans libérer → réutilise le binding (pas d'erreur,
-    URL toujours valide). Cas limite : si l'appareil ne fournit pas de flux, `live_url` reste vide (pas de fatal).
-13. (UC22) « Libérer le flux live » sans avoir obtenu de flux (cache vide) → aucune erreur (no-op).
+## Détails techniques — checklist (extrait, à compléter)
+- **Auth (MVP/01-04)** : config marque+credentials → générer l'URL → login marque → coller le `code` →
+  « Tester la connexion » = OK + nb véhicules.
+- **Découverte/équipements (05-06)** : « Synchroniser » crée 1 eqLogic/VIN ; 2e sync = 0 doublon, nom
+  perso conservé.
+- **Télémétrie (07-08)** : après un trajet/charge, les infos (SOC, autonomie, km, position) évoluent au
+  cron ; un véhicule injoignable n'interrompt pas les autres.
+- **Robustesse (09-10)** : couper la config → message clair, pas de crash ; provoquer un 401 → refresh
+  transparent.
+- **Commandes (post-MVP 10-x)** : OTP réalisée une fois ; wakeup throttlé ; lock/charge → ack remonté ;
+  refus véhicule signalé.
+- **Anti-ban/batterie (72/73)** : vérifier qu'aucune rafale n'est émise ; auto-wakeup off par défaut.
 
 ## Critères d'acceptation
-- [ ] Tous les points du scénario passent sur au moins un modèle de caméra réel.
-- [ ] Les secrets ne fuient nulle part (logs, DOM, réseau).
+- [ ] Chaque UC livrée a au moins un scénario de recette observable, vérifié sur Jeedom réel.
 
-## Notes / risques
-- Tenir cette checklist à jour à chaque nouvelle capacité (PTZ, snapshot, live…).
+## Notes
+- Ne **jamais** prétendre qu'un comportement runtime est validé sans l'avoir constaté ici.

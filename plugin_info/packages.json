@@ -8,13 +8,13 @@
     "requests" : {"reinstall" : true}
   },
   "npm": {
-    "plugins/template/ressources/demond"  : {}
+    "plugins/stellantis/ressources/demond"  : {}
   },
   "composer": {
-       "plugins/template"  : {}
+       "plugins/stellantis"  : {}
   },
   "yarn": {
-    "plugins/template/ressources/demond"  : {}
+    "plugins/stellantis/ressources/demond"  : {}
   },
   "plugin": {
   },

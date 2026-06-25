@@ -70,17 +70,18 @@ Classes PHP référencées par la page `core` (détail = source du core, pas de 
 `jeeObject.class.php`, `eqLogic.class.php`, `cmd.class.php`, `cron.class.php`,
 `config.class.php`, `scenario.class.php`, `DB.class.php`.
 
-Classes core utilisées par le plugin IMOU (à lire dans la source si doute sur une signature) :
+Classes core utilisées par le plugin Stellantis (à lire dans la source si doute sur une signature) :
 
 | Classe | Usage dans le plugin |
 |---|---|
-| `eqLogic` | Classe mère de `imou` (cycle de vie, crons, configuration) |
-| `cmd` | Classe mère de `imouCmd` (`execute()`) |
-| `config` | `config::save/byKey(..., 'imou')` — config plugin (appId/appSecret/datacenter) |
-| `cache` | `cache::set/byKey/delete` — cache du token IMOU |
-| `utils` | `utils::encrypt/decrypt` — secrets (appSecret, token au repos) |
-| `log` | `log::add('imou', niveau, msg)` — journalisation |
-| `ajax` | `ajax::init()` + `isConnect('admin')` dans `core/ajax/imou.ajax.php` |
+| `eqLogic` | Classe mère de `stellantis` (cycle de vie, crons, configuration ; 1 eqLogic = 1 véhicule, clé VIN) |
+| `cmd` | Classe mère de `stellantisCmd` (`execute()` pour les commandes à distance) |
+| `config` | `config::save/byKey(..., 'stellantis')` — config plugin (marque, client_id/secret, redirect_uri) |
+| `cache` | `cache::set/byKey/delete` — cache des tokens OAuth2 (access/refresh) |
+| `utils` | `utils::encrypt/decrypt` — secrets (client_secret, tokens au repos) |
+| `log` | `log::add('stellantis', niveau, msg)` — journalisation |
+| `ajax` | `ajax::init()` + `isConnect('admin')` dans `core/ajax/stellantis.ajax.php` |
+| `cron` | crons `stellantis::cron`/`cron5` — polling REST de la télémétrie (pas de push) |
 
 ## 3. Évolutions du core (migration / compat)
 

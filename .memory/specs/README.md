@@ -1,82 +1,79 @@
-# Specs — Plugin Jeedom IMOU (Solution A : API directe en PHP)
+# Specs — Plugin Jeedom Stellantis (véhicules connectés PSA)
 
-> Décision d'architecture : voir `.memory/analyse/imou-api-vs-imouapi.md`.
-> Approche : appeler l'**IMOU Open API** directement en PHP, sans démon, sans Python.
+> Décision d'architecture : voir `.memory/analyse/stellantis-api-architecture.md`.
+> Approche : **API consommateur** PSA/Stellantis (OAuth2 PKCE + REST v4). **MVP = lecture seule en PHP
+> pur, sans démon** (polling cron) ; **commandes à distance = post-MVP via démon Python MQTT**.
 
 ## Organisation
 
-- **`MVP/`** — le socle livrable en premier : se connecter, synchroniser les caméras,
-  allumer/éteindre, activer/désactiver la surveillance, rafraîchir l'état.
-- **`post-mvp/`** — toutes les UC suivantes, regroupées par domaine fonctionnel
-  (`01-…` à `06-…`) + les chantiers transverses (`07-…`, `08-…`). Ordre = roadmap
-  **suggérée** (ajustable).
+- **`MVP/`** — socle livrable en premier : se connecter (OAuth2), découvrir les véhicules, remonter la
+  **télémétrie** (batterie, charge, autonomie, carburant, position, km, portes), rafraîchir par cron.
+  **100 % lecture, 100 % PHP.**
+- **`post-mvp/`** — UC suivantes par domaine. Ordre = roadmap **suggérée** (ajustable).
 
 ```
 .memory/specs/
-├── MVP/                            Socle (tâches 01→10, ordre interne strict)
-└── post-mvp/                       UC suivantes (regroupées par domaine)
-    ├── 10-pilotage-avance/         11 switches dynamiques (✅), 12 projecteur/sirène (✅ sirène via IoT),
-    │                               13 commandes-iot-et-proprietes (socle IoT), 14 projecteur minuterie, 15 PTZ (✅),
-    │                               16 commandes affichées par défaut
-    ├── 20-video-images/            21 snapshot (❌ RETIRÉE — affichage dashboard bloqué par CSP + redondant avec le live ; capture reste via UC55), 22 flux live (✅), 23 vision nocturne,
-    │                               24 réglages image (flip/WDR/OSD/LED…),
-    │                               25 widgets d'affichage (✅ pavé PTZ + live-snapshot frames HLS/ffmpeg same-origin + boutons soignés ; ✅ limiteur de concurrence multi-caméras FIFO, config liveMaxConcurrent défaut 3),
-    │                               26 live en plein écran (✅ clic pour agrandir, 100 % front réutilise UC25 ; tuile en overlay prioritaire sur le limiteur),
-    │                               27 panneau caméras (PAGE dédiée dans le menu : grille de live + barre PTZ sans zoom / sirène / projecteur, activable via config plugin)
-    ├── 30-alarmes-evenements/      31 messages alarme, 32 zones/sensibilité, 33 plans, 34 détection humaine/IA, 35 temps réel (push)
-    ├── 40-enregistrement-stockage/ 41 carte SD, 42 enregistrement cloud, 43 relecture
-    ├── 50-gestion-appareils/       51 identifiants deviceId/productId (✅), 52 redémarrage/renommage (endpoint restartDevice), 53 firmware, 54 association,
-    │                               55 miniature de la caméra (source au choix cliché live/cover, récup. immédiate + aperçu, rafraîchissement manuel), 56 affichage nom de modèle (code + nom commercial),
-    │                               57 batterie & réveil appareil dormant (getDevicePowerInfo / wakeUpDevice)
-    ├── 60-controle-acces/          61 sonnette vidéo, 62 ouverture de porte (selon matériel)
-    ├── 70-supervision-robustesse/  71 online/santé (+ skip-offline quota), 72 rate limiting/retries/i18n + redirection datacenter (transverse), 73 synchronisation sélective par caméra (✅),
-    │                               74 statistiques d'utilisation / quota d'appels API (✅ quota MENSUEL global ≈30000 free tier + config + alerte),
-    │                               75 rafraîchissement auto par défaut à la création (aligné UC16),
-    │                               76 ❌ optimisation polling IoT (CLÔTURÉE sans code : getIotDeviceDetailInfo = découverte de capacités, PAS snapshot de valeurs),
-    │                               77 régulation auto de la fréquence de refresh selon le budget quota (✅ calcul événementiel + recalibrage nocturne, consomme UC74),
-    │                               78 estimation conso data flux live (informatif/estimatif : temps visionnage × débit supposé, quota défaut 3 Go, reset = jour UC74 ; vraie conso = portail IMOU)
-    └── 80-livraison/               81 recette manuelle, 82 packaging/doc utilisateur, 83 icône du plugin
+├── MVP/                            Socle lecture (01→10, ordre interne strict, PHP/REST)
+└── post-mvp/
+    ├── 10-commandes-distance/      ⚠️ introduit le DÉMON Python MQTT. 11 socle démon, 12 OTP/remote token,
+    │                               13 wakeup, 14 charge, 15 préconditionnement, 16 portes, 17 klaxon/feux,
+    │                               18 retour d'état asynchrone
+    ├── 20-energie-charge/          21 détail batterie/charge, 22 programmation de charge, 23 carburant/hybride,
+    │                               24 suivi/statistiques de charge
+    ├── 30-localisation-trajets/    31 position GPS, 32 panneau carte « Mes véhicules », 33 historique trajets,
+    │                               34 geofencing/alertes de zone
+    ├── 40-entretien-alertes/       41 kilométrage & entretien, 42 pression pneus, 43 alertes véhicule
+    │                               (AdBlue/lave-glace/révision), 44 ouvrants détaillés
+    ├── 50-gestion-vehicules/       51 identité véhicule (VIN/marque/modèle), 52 image du modèle,
+    │                               53 multi-véhicules/comptes, 54 multi-marques
+    ├── 70-supervision-robustesse/  71 santé & fraîcheur, 72 rate-limiting/anti-ban, 73 protection batterie 12V,
+    │                               74 renouvellement & alertes de token, 75 mode privacy, 76 sync sélective,
+    │                               77 statistiques d'appels API
+    └── 80-livraison/               81 recette manuelle, 82 packaging/doc (démon, paho-mqtt), 83 icône,
+                                    84 i18n multilingue
 ```
 
-> **Numérotation** : dossiers par dizaines (10, 20, …), fichiers par unités dans chaque dossier
-> (`11-…`, `12-…`). Les UC déjà livrées sont aux premiers numéros (11, 12, 51).
-
-> **Note IoT « Things » (2026-06-17)** : certaines caméras (`productId` non vide) exposent un modèle
-> IoT (`getProductModel`) avec des **services** (`iotDeviceControl`) et **propriétés** enum/int au-delà
-> des capability switches. Mécanisme + capacités découvertes : `.memory/analyse/imou-iot-things-model.md`.
-> Pré-requis transverse aux UC IoT : `10-pilotage-avance/13-commandes-iot-et-proprietes.md`.
+> **Numérotation** : dossiers par dizaines, fichiers par unités. Chaque UC = un fichier fonctionnel
+> `NN-nom.md` ; les UC dont l'implémentation est précisée ont un compagnon technique `NN-nom-tech.md`.
 
 ## MVP — ordre des tâches (dépendances strictes)
 
 | # | Titre | Dépend de |
 |---|---|---|
-| 01 | Configuration globale du plugin | — |
-| 02 | Client HTTP IMOU bas niveau | 01 |
-| 03 | Gestion du token d'accès | 02 |
+| 01 | Configuration du plugin (marque, client_id/secret, redirect_uri) | — |
+| 02 | Client HTTP REST bas niveau (`stellantisApi`) | 01 |
+| 03 | Authentification OAuth2 PKCE & gestion du token | 02 |
 | 04 | Test de connexion | 03 |
-| 05 | Découverte des appareils | 03 |
-| 06 | Création / mise à jour des équipements | 05 |
-| 07 | Lecture des capacités & création des commandes | 06 |
-| 08 | Action : allumer / éteindre la caméra | 07 |
-| 09 | Action : activer / désactiver la surveillance | 07 |
-| 10 | Rafraîchissement périodique (cron5) | 07 |
+| 05 | Découverte des véhicules | 03 |
+| 06 | Création / mise à jour des équipements (clé VIN) | 05 |
+| 07 | Commandes info de télémétrie | 06 |
+| 08 | Rafraîchissement périodique (cron) | 07 |
+| 09 | État de connexion & fraîcheur de la donnée | 07 |
+| 10 | Robustesse & gestion d'erreurs (token, rate-limit, dégradé) | 07 |
 
-> Les UC des dossiers thématiques dépendent toutes du socle MVP (client HTTP 02, token 03,
-> équipements 06, commandes 07). Elles sont **indépendantes entre elles** sauf mention contraire.
+> Toutes les UC post-MVP dépendent du socle MVP (client 02, token 03, équipements 06, infos 07). Le
+> dossier `10-commandes-distance` dépend en plus du **démon** (UC11) et de l'**OTP** (UC12).
 
 ## Conventions transverses
 
 - Langue FR ; i18n `{{...}}` (HTML/JS) et `__('...', __FILE__)` (PHP).
-- Classes `imou` / `imouCmd` dans `core/class/imou.class.php` ; tous les appels HTTP passent par
-  la brique unique `imouApi` (MVP/02).
-- Logs via `log::add('imou', …)` ; **jamais** de secret/token en clair.
-- Pas de démon, pas de Python : tout en PHP (cron Jeedom + `cmd::execute()`).
-- Une UC = un commit/PR, tests verts entre chaque.
+- Classes `stellantis` / `stellantisCmd` dans `core/class/stellantis.class.php` ; **tout appel REST**
+  passe par la brique unique `stellantisApi` (MVP/02).
+- Logs via `log::add('stellantis', …)` ; **jamais** de secret/token/`client_secret` en clair.
+- **MVP sans démon** (PHP + cron + REST) ; **démon Python MQTT** uniquement à partir de
+  `post-mvp/10-commandes-distance`.
+- **Guardrails obligatoires** (anti-ban / batterie 12 V) dès qu'on touche au polling/wakeup
+  (cf. analyse § 1.4, UC72/73).
+- Une UC = un commit/PR, vérifications vertes entre chaque.
 
 ## ⚠️ Statut de fiabilité des specs
 
-- **MVP** : endpoints et paramètres vérifiés lors de l'étude (signature, accessToken,
-  set/getDeviceCameraStatus, liste des appareils).
-- **Dossiers thématiques** : domaines **confirmés présents** dans l'API IMOU (cf. analyse), mais
-  les noms exacts d'endpoints/paramètres sont à **valider dans la doc** au moment de l'implémentation
-  (et/ou via le code source de `imouapi`). Chaque spec le signale.
+- **MVP** : le **flow OAuth2 PKCE** (endpoints par marque, realms, refresh) et les **endpoints REST v4**
+  (`/user/vehicles`, `/status`, `/lastPosition`) sont **confirmés** par la recherche (doc officielle +
+  `psa_car_controller`). Les **noms de champs exacts** du statut sont à **reconfirmer** contre une
+  réponse réelle / les modèles `psa_car_controller` (cf. `.memory/analyse/stellantis-data-model.md`).
+- **Commandes (post-MVP)** : domaines **confirmés** (MQTT `mwa.mpsa.com:8885`, payloads connus) mais les
+  **payloads exacts** et le contrat OTP sont à valider contre le code de référence au moment de coder
+  (cf. `.memory/analyse/stellantis-implementations-reference.md`). Chaque spec le signale.
+- ⚠️ **Risque produit** : l'API consommateur est reverse-engineered (ToS, instabilité backend Stellantis).
+  Le plugin doit être **résilient** et le **risque documenté pour l'utilisateur** (cf. analyse).

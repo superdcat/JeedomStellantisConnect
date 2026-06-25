@@ -1,0 +1,201 @@
+# Étude d'architecture : connecter des véhicules Stellantis/PSA à Jeedom
+
+> Analyse réalisée le 2026-06-25 pour le plugin Jeedom **stellantis**.
+> Objectif du plugin : remonter dans Jeedom la télémétrie des véhicules **Peugeot / Citroën / DS /
+> Opel / Vauxhall** (batterie/SOC, charge, autonomie, carburant, position GPS, kilométrage, état
+> portes/verrouillage, pression pneus, préconditionnement) et, à terme, **piloter à distance**
+> (réveil, charge, préconditionnement, verrouillage, klaxon, feux).
+> Question posée : **quelle voie d'accès à l'API** (officielle vs reverse-engineered) et **quelle
+> architecture Jeedom** (PHP natif vs démon Python) ?
+>
+> ⚠️ **Statut des sources** : synthèse de 3 axes de recherche web aboutis (auth OAuth2, commandes/MQTT,
+> limites/viabilité), recoupés sur la doc officielle `developer.groupe-psa.io` + le code de
+> `flobz/psa_car_controller` + forums HA/Jeedom. La **passe de vérification adversariale n'a pas pu
+> tourner** (limite de session). Les faits `confidence: high` sont sourcés ; tout ce qui touche aux
+> **noms exacts d'endpoints/champs côté API consommateur est à reconfirmer** contre le code de
+> `psa_car_controller` au moment d'implémenter (cf. `.memory/external/doc/stellantis/INDEX.md`).
+
+---
+
+## ⚠️ Le constat qui change tout : il y a DEUX API, pas une
+
+Contrairement à IMOU (une seule API cloud signée, simple), Stellantis/PSA expose **deux mondes
+radicalement différents**, et le choix entre les deux conditionne toute l'architecture :
+
+| | **A. API OFFICIELLE** (`developer.groupe-psa.io`) | **B. API CONSOMMATEUR** (reverse-engineered) |
+|---|---|---|
+| Public visé | Partenaires B2B/flottes & B2C « sur dossier » | Apps mobiles MyPeugeot/MyCitroën/… détournées |
+| Auth | OAuth2 + **certificat TLS mutuel signé par Stellantis** (CA, CSR `OU=Programs Partners`) | OAuth2 **PKCE** avec `client_id/secret` **extraits de l'APK** |
+| Accès réel pour un particulier | ❌ **Impossible en pratique** : process Mobilisights opaque, **jamais répondu** même à `psa_car_controller` (1 M téléchargements) | ✅ **Seule voie fonctionnelle** en 2026 |
+| Transport commandes | REST POST + **webhook callback** (push HTTP) | **MQTT** (`mwa.mpsa.com:8885`) + token OTP |
+| Push / Monitors | ✅ disponible (callbacks HTTP, MQTT WebPortal) **mais accréditation requise** | ❌ pas de push accessible → **polling** |
+| Faisable en PHP pur | ✅ (REST + récepteur webhook) | ✅ pour la **lecture** REST ; ❌ pour les **commandes** (MQTT) |
+| Légalité | ✅ contractuel | ⚠️ contraire aux ToS des apps mobiles (risque sur l'utilisateur final) |
+
+➡️ **Décision de voie** : l'API officielle étant **inaccessible** à un particulier (confirmé : la
+demande d'accès B2C de `psa_car_controller` est restée sans réponse — GitHub Stellantis issue #128),
+le plugin **doit** viser l'**API consommateur** (voie B), comme le font `psa_car_controller`,
+`homeassistant-stellantis-vehicles` et le plugin Jeedom existant `plugin_peugeotcars`.
+La légalité (ToS) est un **risque assumé et documenté pour l'utilisateur**, pas un secret.
+
+---
+
+## 1. L'API consommateur (la fondation commune) — ce qu'il faut savoir
+
+### 1.1 Authentification = DEUX couches de tokens orthogonales
+
+C'est **le** piège conceptuel. Il y a deux systèmes de tokens **indépendants**, à gérer séparément :
+
+**Couche 1 — OAuth2 PKCE (API REST, télémétrie) :**
+- Flow **Authorization Code + PKCE** (`code_challenge_method=S256`) depuis **janvier 2023** (le grant
+  `password` n'existe plus → **interaction navigateur manuelle obligatoire** au 1er setup).
+- Endpoints **par marque** : `https://idpcvs.{marque.tld}/am/oauth2/{authorize|access_token|token/revoke}`.
+  - Peugeot `idpcvs.peugeot.com` · Citroën `idpcvs.citroen.com` · DS `idpcvs.driveds.com` ·
+    Opel `idpcvs.opel.com` · Vauxhall `idpcvs.vauxhall.co.uk`.
+- **Realm** par marque (header `x-introspect-realm` sur les appels REST) :
+  `clientsB2CPeugeot`, `clientsB2CCitroen` (sans tréma), `clientsB2CDS`, `clientsB2COpel`, `clientsB2CVauxhall`.
+- Échange code→token : `POST .../access_token`, `Authorization: Basic base64(client_id:client_secret)`,
+  `grant_type=authorization_code` + `code` + `redirect_uri`. Réponse :
+  `{access_token, refresh_token, expires_in, id_token}`.
+- **TTL access_token ≈ 890 s (~15 min)** → refresh fréquent indispensable (`grant_type=refresh_token`).
+- `scope = "openid profile"`. `redirect_uri` = schéma custom de marque (ex. `mymXX://oauth2redirect/{pays}`).
+- **`client_id`/`client_secret` ne sont PAS fournis aux particuliers** : extraits de l'APK mobile
+  (script `app_decoder.py` de psa_car_controller, APK sur `github.com/flobz/psa_apk`). L'APK contient
+  aussi des certificats client (`public.pem`/`private.pem`) et `host_brandid_prod`, `site_code`, `culture`.
+
+**Couche 2 — Remote token OTP (commandes MQTT, POST-MVP uniquement) :**
+- **Distinct** du token OAuth2. Obtenu par **activation OTP** : SMS + **PIN 4 chiffres de l'app mobile**.
+- Produit `remote_token` + `remote_refresh_token` (stockés à part).
+- Serveur OTP `https://otp.mpsa.com`, codes base36 4 chiffres. **Limite dure : 6 codes / 24 h**
+  (et **20 activations SMS / compte** au total → un compte peut se **bloquer** définitivement).
+- À l'expiration : « redo otp procedure » (impossible à automatiser → **alerter l'utilisateur**, ne pas
+  re-tenter en boucle).
+
+### 1.2 API REST (lecture) — base `connected_car v4`
+
+- Base : `https://api.groupe-psa.com/connectedcar/v4`.
+- Headers : `Authorization: Bearer {access_token}` + `x-introspect-realm: {realm}` + `client_id` en query.
+- Liste véhicules : `GET /user/vehicles` → `id` (id API ≠ VIN), `vin`, `brand`, `label`/`model`.
+- Statut : `GET /user/vehicles/{id}/status` → tout l'état (cf. `.memory/analyse/stellantis-data-model.md`).
+- Dernière position : `GET /user/vehicles/{id}/lastPosition` (GeoJSON).
+- ⚠️ La voiture **ne remonte PAS spontanément** après quelques minutes moteur coupé : `GET /status`
+  renvoie le **dernier état connu** (mis à jour sur événements : fin de trajet, jalons de charge…).
+  Pour **forcer** une lecture fraîche → **wakeup** (= commande MQTT, couche 2, post-MVP).
+
+### 1.3 Commandes à distance — MQTT (couche 2)
+
+- Broker **`mwa.mpsa.com:8885`** (TLS, MQTT v3.1.1, lib Python `paho-mqtt`).
+- Publish : `psa/RemoteServices/from/cid/{customer_id}/{commande}` ; réponses :
+  `psa/RemoteServices/to/cid/{customer_id}/#` ; événements véhicule : `.../events/MPHRTServices/{vin}`.
+- Auth MQTT : `username = "IMA_OAUTH_ACCESS_TOKEN"`, `password = access_token` courant ; le token est
+  **aussi** réinjecté dans le payload. Réponse `return_code='400'` ⇒ token expiré → refresh + re-publish.
+- Modèle **asynchrone** : publish → exécution véhicule → notification `to/cid` (`return_code`). États
+  intermédiaires Accepted → Waking-Up → Send → Success/Failure.
+- Payloads (classe `RemoteClient`) : wakeup `{"action":"state"}` ; charge `{"program":{hour,minute},"type":…}` ;
+  précond `{"asap":…,"programs":[…]}` ; portes `{"action":"lock|unlock"}` ; klaxon
+  `{"nb_horn":n,"action":"activate"}` ; feux `{"action":"activate","duration":s}`.
+- **wakeup limité à 6 / 20 min**. psa_car_controller envoie un wakeup auto toutes les 24 h pour garder
+  la session vivante.
+
+### 1.4 Limites & pièges à connaître (valent quelle que soit l'option Jeedom)
+
+- **Pas de push accessible** sans accréditation B2C officielle → **polling REST** obligatoire.
+- **Ban API** documenté si wakeup ~toutes les 2 min (issue #1130) → `RateLimitException` persistante qui
+  **bloque aussi le refresh du remote token**. Cadence sûre communautaire : **5 min en charge, 60 min en
+  veille** ; **jamais** de wakeup à chaque cron.
+- **Vidage batterie 12 V réel** (confirmé HA) : wakeups trop fréquents → keyless HS. Guardrail obligatoire.
+- **Mode privacy véhicule** (« Plane Mode ») : l'utilisateur peut couper data/géoloc côté voiture →
+  API muette, **indépendamment du plugin** → détecter et informer plutôt que retry.
+- **TTL access_token ~15 min** → refresh agressif.
+- **Seuil de charge** : certaines commandes exigent batterie principale > ~50 %.
+- **Instabilité backend** : régressions Stellantis non documentées en 2024-2025 (erreurs 400,
+  `NoneType` sur `get_vehicles()`) → logger finement les réponses HTTP, prévoir un **mode dégradé**.
+- **FCA hors périmètre** : Jeep/Fiat/Dodge/Ram/Alfa = infra différente (Uconnect/Smartcar), pas `idpcvs`.
+
+---
+
+## 2. Confrontation avec l'architecture Jeedom (décisif)
+
+La lecture (REST) et l'écriture (commandes) n'ont **pas** les mêmes contraintes :
+
+| Besoin | Transport | Faisable en PHP natif ? |
+|---|---|---|
+| **Télémétrie** (SOC, position, portes, km…) | OAuth2 + REST polling (`cron`) | ✅ **Oui, trivialement** (cURL + JSON, comme IMOU) |
+| **Commandes** (wakeup, charge, précond, portes…) | **MQTT** persistant + OTP + reconnexion | ⚠️ **Difficile/fragile** (`php-mqtt/client` existe mais pas de persistance QoS, gestion d'état lourde) |
+
+**Pour les commandes**, deux sous-options :
+- **B1 — MQTT en PHP** (`php-mqtt/client`) : garde la philosophie « sans Python », mais un client MQTT
+  long-running avec OTP/refresh/reconnexion **n'a pas de processus hôte** dans un plugin PHP (PHP-FPM est
+  requête-réponse). Fragile, non éprouvé pour ce cas.
+- **B2 — Démon Python MQTT** (`resources/demond`, `paho-mqtt`) : le **standard de facto communautaire**
+  (psa_car_controller). Un démon long-running est **exactement** ce que réclament MQTT + OTP + reconnexion.
+
+> 🔑 **Différence clé avec IMOU** : pour IMOU on avait tranché « **sans démon** » car l'API n'avait
+> **aucun push** → le démon n'aurait rien apporté. Ici, **MQTT EST un canal persistant** (commandes +
+> ack temps réel) : le démon **retrouve sa raison d'être**. C'est pourquoi la décision s'inverse pour
+> la partie commandes.
+
+---
+
+## 3. Recommandation : architecture **hybride, PHP d'abord, démon différé**
+
+### ✅ MVP — Lecture seule, 100 % PHP, sans démon (`hasOwnDeamon:false`)
+
+OAuth2 PKCE + REST v4 + polling dans `cron`. C'est l'analogue de la « Solution A » d'IMOU : zéro runtime
+externe, tout en PHP/cron. Délivre **l'essentiel de la valeur** (batterie, charge, autonomie, position,
+portes, km dans Jeedom) et est **entièrement réalisable en PHP**. Limite assumée et documentée : on lit le
+**dernier état remonté** par la voiture, **sans pouvoir forcer** un rafraîchissement (le wakeup = MQTT).
+
+- `core/class/stellantis.class.php` : client `stellantisApi` (OAuth2 PKCE, cache token, refresh),
+  `cron()`/`cron5()` → `GET /status` pour rafraîchir les commandes *info*.
+- Setup interactif sur la page de config : générer l'URL d'autorisation → l'utilisateur se connecte sur
+  le site de sa marque → **colle le `code`** de l'URL de redirection → échange contre tokens.
+- `client_id`/`client_secret`/tokens stockés **chiffrés** (`$_encryptConfigKey` + `cache`).
+
+### 🎯 Post-MVP — Commandes via **démon Python MQTT** (`resources/demond` réactivé)
+
+Quand on attaque les commandes (réveil, charge, précond, portes, klaxon, feux), introduire un **démon
+Python `paho-mqtt`** (passe `hasOwnDeamon:true`, `packages.json` pip `paho-mqtt`). Le démon gère la
+connexion MQTT persistante, le remote token OTP, la reconnexion, et **remonte les ack** ; il dialogue
+avec le PHP via le **socket Jeedom** (`jeedom_socket`/`jeedom_com`, déjà présents dans `resources/`).
+`stellantisCmd::execute()` (action) → message socket → démon → publish MQTT.
+
+> **La vraie astuce** (comme pour IMOU avec `imouapi`) : **lire le code de `flobz/psa_car_controller`**
+> (modules `psacc`/`remote`, classe `RemoteClient`, `app_decoder.py`) comme **implémentation de
+> référence** du protocole (endpoints exacts, payloads MQTT, gestion OTP) — puis réimplémenter
+> proprement (client PHP pour la lecture, démon Python minimal pour MQTT). Ne pas dépendre du projet à
+> l'exécution ; s'en servir comme spec vivante.
+
+### Esquisse `packages.json`
+- **MVP** : aucune dépendance (PHP + cURL natif). `hasDependency:false`, `hasOwnDeamon:false`.
+- **Post-MVP commandes** : `pip3 paho-mqtt` (+ éventuellement `cryptography` pour l'OTP). `hasOwnDeamon:true`.
+
+---
+
+## 4. Sujets à trancher (laissés explicites pour la suite)
+
+1. **Origine des `client_id`/`client_secret`** : (a) l'utilisateur les saisit (récupérés via un outil
+   externe type `app_decoder.py`/`psa-token-helper`) — **recommandé** (léger, pas d'APK dans le plugin) ;
+   (b) le plugin embarque l'extraction APK (lourd, `androguard`, juridiquement plus exposé). → **(a)**.
+2. **Lecture seule vs démon dès le MVP** : on **diffère** le démon (MVP lecture pure). Alternative :
+   tout-en-un avec démon dès le départ (plus puissant, mais bloque la livraison d'un MVP simple et fiable).
+3. **`php-mqtt/client` (B1) vs démon Python (B2)** pour les commandes : **B2** (robustesse éprouvée).
+   B1 resterait envisageable pour rester « sans Python » si le démon pose problème de packaging.
+4. **Couverture multi-marques** dès le MVP (paramètre marque) vs Peugeot d'abord : viser **multi-marques
+   dès le MVP** (le seul impact est une table TLD/realm), faible coût.
+
+---
+
+## Sources principales
+- Stellantis Developer Portal — B2C overview / auth / app-registration : https://developer.groupe-psa.io/webapi/b2c/overview/about/ ; .../quickstart/enroll-users/ ; .../quickstart/app-registration/
+- Stellantis Developer Portal — B2B auth & remotes : https://developer.groupe-psa.io/webapi/b2b/quickstart/authentication/ ; https://developer.groupe-psa.io/webapi/b2b/remote/set-up/
+- Stellantis Developer Portal — Connected-vehicles (privacy, remotes, changelog) : https://developer.groupe-psa.io/connected-vehicles/about/ ; .../privacy/ ; https://developer.groupe-psa.io/changelog/
+- Stellantis Developer Portal — MQTT WebPortal : https://developer.groupe-psa.io/webportal/v1/advanced-features/mqtt/
+- psa_car_controller (flobz) — code & docs : https://github.com/flobz/psa_car_controller ; PR #754 (PKCE) ; `psa_client.py` ; `app_decoder.py` ; FAQ.md ; https://deepwiki.com/flobz/psa_car_controller/5.1-mqtt-remote-client
+- Dépôt APK par marque : https://github.com/flobz/psa_apk
+- Rate-limit / ban / batterie 12V : psa_car_controller issues #859, #967, #1130 ; HA forum https://community.home-assistant.io/t/stellantis-vehicles-peugeot-citroen-ds-opel-vauxhall-integration-homeassistant/838675
+- Intégration HA native : https://github.com/andreadegiovine/homeassistant-stellantis-vehicles
+- Plugin Jeedom existant : https://github.com/lelas33/plugin_peugeotcars ; https://community.jeedom.com/t/connecter-psa-car-controller-a-jeedom/101751
+- Accès B2C inaccessible (sans réponse) : https://github.com/Stellantis/stellantis.github.io/issues/128
+- Binding openHAB (polling 5 min) : https://www.openhab.org/addons/bindings/groupepsa/
+- `php-mqtt/client` : https://github.com/php-mqtt/client

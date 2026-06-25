@@ -24,32 +24,43 @@ if (!isConnect()) {
 ?>
 <form class="form-horizontal">
   <fieldset>
+    <legend><i class="fas fa-key"></i> {{Connexion API Stellantis / PSA}}</legend>
     <div class="form-group">
-      <label class="col-md-4 control-label">{{Global param 1}}
-        <sup><i class="fas fa-question-circle tooltips" title="{{Renseignez le paramètre 1 du plugin}}"></i></sup>
+      <label class="col-md-4 control-label">{{Marque}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{Détermine le serveur d'authentification (idpcvs) et le realm utilisés}}"></i></sup>
       </label>
       <div class="col-md-4">
-        <input class="configKey form-control" data-l1key="param1"/>
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="col-md-4 control-label">{{Global param 2}}
-        <sup><i class="fas fa-question-circle tooltips" title="{{Renseignez le paramètre 2 du plugin}}"></i></sup>
-      </label>
-      <div class="col-md-4">
-        <input class="configKey form-control" data-l1key="param2"/>
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="col-md-4 control-label">{{Global param 3}}
-        <sup><i class="fas fa-question-circle tooltips" title="{{Sélectionnez du paramètre 3 du plugin}}"></i></sup>
-      </label>
-      <div class="col-md-4">
-        <select class="configKey form-control" data-l1key="param3">
-          <option value=""></option>
-          <option value="value1">value1</option>
-          <option value="value2">value2</option>
+        <select class="configKey form-control" data-l1key="brand">
+          <option value="peugeot">Peugeot</option>
+          <option value="citroen">Citroën</option>
+          <option value="ds">DS</option>
+          <option value="opel">Opel</option>
+          <option value="vauxhall">Vauxhall</option>
         </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{Client ID}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{Identifiant client OAuth2 de l'application mobile de la marque (extrait via un outil externe)}}"></i></sup>
+      </label>
+      <div class="col-md-4">
+        <input class="configKey form-control" data-l1key="client_id"/>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{Client Secret}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{Secret client OAuth2 (stocké chiffré, jamais affiché en clair)}}"></i></sup>
+      </label>
+      <div class="col-md-4">
+        <input type="password" class="configKey form-control" data-l1key="client_secret"/>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{URL de redirection}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{redirect_uri OAuth2 (schéma de l'app mobile de la marque, ex. mymap://oauth2redirect/fr)}}"></i></sup>
+      </label>
+      <div class="col-md-4">
+        <input class="configKey form-control" data-l1key="redirect_uri"/>
       </div>
     </div>
   </fieldset>

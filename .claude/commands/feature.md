@@ -19,8 +19,11 @@ propre mode d'emploi en en-tête, ne le redécris pas ici :
 1. **Connaissance interne d'abord** (local, gratuit, propre au projet) : `.memory/analyse/INDEX.md`
    (§ 0 = incertitude → fichier), puis ouvre **uniquement** le fichier pointé. `.memory/specs/README.md`
    donne le **statut de fiabilité** des endpoints.
-2. **Doc IMOU** (contrat exact de l'API cloud) : `.memory/external/doc/imou/INDEX.md` (§ 0 =
-   déclencheur → page), puis **un seul `WebFetch`** sur l'URL de la page. Jamais `start.html` d'abord.
+2. **Doc Stellantis/PSA** (contrat de l'API) : `.memory/external/doc/stellantis/INDEX.md` (§ 0 =
+   déclencheur → source). ⚠️ L'API consommateur **n'a pas de doc officielle** : la source de vérité est
+   le **code de référence** (`psa_car_controller`) listé dans
+   `.memory/analyse/stellantis-implementations-reference.md`. Fais **un seul `WebFetch`** ciblé sur la
+   page/source utile.
 3. **Doc Jeedom** (contrat du core) : `.memory/external/doc/jeedom/INDEX.md`. Pour une signature de
    classe core (`cache::`, `config::`, hooks `eqLogic`/`cmd`…), lis la **source du core**, pas le wiki.
 
@@ -38,8 +41,9 @@ Confirme en 1-2 phrases ce que tu as chargé.
 
 Sur la base de la spec, propose un plan concis :
 
-- **Contrat API IMOU** : pour chaque appel cloud, l'endpoint, les paramètres et le format de réponse.
-  En cas de doute, applique *Consultation à la demande* (interne d'abord, puis doc IMOU) **avant** de
+- **Contrat API Stellantis/PSA** : pour chaque appel (REST OAuth2, ou commande MQTT via démon),
+  l'endpoint/topic, les paramètres/payload et le format de réponse. En cas de doute, applique
+  *Consultation à la demande* (interne d'abord, puis code de référence `psa_car_controller`) **avant** de
   figer le plan — pas en cours d'implémentation.
 - Type de composant ; architecture (fichiers à créer/modifier) ; logique de validation ;
   appels AJAX / actions nécessaires ; dépendances éventuelles.
@@ -94,9 +98,9 @@ pendant le codage, applique *Consultation à la demande* plutôt que de deviner.
 
 ## Étape 7 — Vérification
 
-Vérifie que le plugin continuera de fonctionner dans Jeedom. Pour les appels cloud, **valide** que
-endpoints, paramètres et parsing codés correspondent au contrat réel (recoupe interne + doc IMOU au
-moindre doute résiduel ; signale tout écart code/spec/analyse/doc).
+Vérifie que le plugin continuera de fonctionner dans Jeedom. Pour les appels API, **valide** que
+endpoints/topics, paramètres/payloads et parsing codés correspondent au contrat réel (recoupe interne +
+code de référence `psa_car_controller` au moindre doute résiduel ; signale tout écart code/spec/analyse/doc).
 
 i18n à ce stade : vérifie **uniquement l'enveloppage français** (aucune chaîne en dur). La couverture
 des 3 langues n'est **pas** attendue ici (étape 10) — ne la compte pas comme un défaut.
@@ -123,7 +127,7 @@ Attends la réponse. Si fix demandés : applique-les puis relance les reviews.
 
 Le code FR est figé et validé. Invoque le sous-agent `translator` sur les fichiers créés/modifiés. Il doit :
 - extraire toutes les clés UI françaises (`{{...}}` / `__()`) introduites/modifiées ;
-- remplir/mettre à jour `core/i18n/{en_US,de_DE,es_ES}.json` sous `plugins/imou/<fichier>` ;
+- remplir/mettre à jour `core/i18n/{en_US,de_DE,es_ES}.json` sous `plugins/stellantis/<fichier>` ;
 - garantir la **couverture complète des 3 langues**, signaler toute **clé orpheline** ;
 - **valider lui-même que les 3 JSON parsent** avant de rendre la main (il dispose de `Bash` et lance la
   validation Python ; il ne rend `pass` que si les 3 fichiers parsent). **Tu n'as donc PAS à re-valider
@@ -152,10 +156,11 @@ complète et JSON valides. Présente la synthèse (clés ajoutées par langue, o
 **uniquement si c'est réellement nouveau**. Si tout est déjà couvert (specs, `CLAUDE.md`, code, doc
 locale, git), **n'écris rien** (ni fichier, ni ligne, ni note « rien de neuf ») et clôture.
 
-**Que retenir** (typique ici) : contrat API IMOU non évident confirmé en doc (casse d'un `enableType`,
-type réel d'un champ, prérequis, absence de `data`…) ; code d'erreur IMOU et son sens réel ;
-comportement empirique d'un quota/limite ; piège du core Jeedom (hook, récursion `save`, autoload) ;
-décision d'archi prise pendant le dev.
+**Que retenir** (typique ici) : contrat API Stellantis/PSA non évident confirmé contre le code de
+référence (nom/type réel d'un champ `/status`, payload exact d'une commande MQTT, prérequis OTP, schéma
+OAuth PKCE…) ; code d'erreur/`return_code` et son sens réel ; comportement empirique d'un quota/limite
+(ban wakeup, batterie 12 V, expiration token) ; piège du core Jeedom (hook, récursion `save`, autoload,
+démon/socket) ; décision d'archi prise pendant le dev.
 
 **Où écrire** (selon la nature) :
 1. **Mémoire persistante inter-sessions** (`MEMORY.md` + fichier sous le dossier mémoire de l'agent,
