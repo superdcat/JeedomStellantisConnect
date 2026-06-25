@@ -68,7 +68,10 @@ URL = préfixe `https://developer.groupe-psa.io/`.
 | Liste véhicules | `GET https://api.groupe-psa.com/connectedcar/v4/user/vehicles` |
 | Statut véhicule | `GET .../connectedcar/v4/user/vehicles/{id}/status` |
 | Dernière position | `GET .../connectedcar/v4/user/vehicles/{id}/lastPosition` |
-| Commandes (MQTT) | broker `mwa.mpsa.com:8885`, topic `psa/RemoteServices/from/cid/{cid}/{cmd}` |
+| Alertes (pneus, défauts, ouvrants…) | `GET .../user/vehicles/{id}/alerts` (AlertMsgEnum ~80 types) |
+| Entretien (révision) | `GET .../user/vehicles/{id}/maintenance` |
+| Push webhook (B2C officiel only) | `POST .../user/vehicles/{id}/monitors` (inaccessible particulier) |
+| Commandes (MQTT) | broker `mw-{brand}-m2c.mym.awsmpsa.com:8885`, publish `psa/RemoteServices/from/cid/{CID}/{ServiceType}/state` |
 
 Marques (TLD / realm) : Peugeot `idpcvs.peugeot.com` / `clientsB2CPeugeot` · Citroën `idpcvs.citroen.com`
 / `clientsB2CCitroen` · DS `idpcvs.driveds.com` / `clientsB2CDS` · Opel `idpcvs.opel.com` /
@@ -81,11 +84,13 @@ Marques (TLD / realm) : Peugeot `idpcvs.peugeot.com` / `clientsB2CPeugeot` · Ci
 | `github.com/flobz/psa_car_controller` — `psacc/application/psa_client.py` | OAuth2 PKCE, realms, scope, refresh |
 | idem — `psa/setup/app_decoder.py` | extraction `client_id`/`client_secret`/certs depuis l'APK |
 | idem — classe `RemoteClient` (cf. `deepwiki.com/flobz/psa_car_controller/5.1-mqtt-remote-client`) | MQTT : broker, topics, auth, **payloads des commandes** |
-| idem — `psa/connected_car_api/models/*` | **data model** (champs exacts du statut) |
-| idem — `docs/psacc_api.md`, `FAQ.md` | API REST locale + procédure OTP / dépannage token |
+| idem — `psa/connected_car_api/models/*` + `api_spec.md` | **data model** (champs exacts du statut, OpenAPI informel) |
+| idem — issues #1121/#811/#393/#839, discussions #700/#678 | **dumps JSON réels** + changelog v4.15.1 + pièges |
+| idem — `docs/psacc_api.md`, `FAQ.md`, `psa/oauth.py` | API REST locale + OTP + `@rate_limit(6,1800)` |
 | `github.com/flobz/psa_apk` | APK par marque (source des credentials) |
-| `github.com/andreadegiovine/homeassistant-stellantis-vehicles` | mapping capteurs, cadences/guardrails récents |
-| `github.com/lelas33/plugin_peugeotcars` | **faire l'API PSA en PHP** (précédent Jeedom) |
+| `github.com/andreadegiovine/homeassistant-stellantis-vehicles` | **mapping capteurs→entités** le plus à jour (`const.py`/`configs.json`) |
+| `github.com/Mips2648/jeedom-daemon-py` | **lib démon Python Jeedom** (post-MVP MQTT) |
+| `github.com/lelas33/plugin_peugeotcars` | ancien plugin Jeedom PHP (⚠️ **abandonné** ; miner le changelog pour les bugs à éviter) |
 
 > **Règle tokens** : `grep` cet index pour la ligne utile plutôt que de le `Read` en entier. **Cite**
 > l'info retenue (endpoint, champ, payload) et sa source. Si une source **contredit** une spec/analyse

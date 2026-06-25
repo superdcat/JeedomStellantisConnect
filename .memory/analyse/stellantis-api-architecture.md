@@ -8,12 +8,15 @@
 > Question posée : **quelle voie d'accès à l'API** (officielle vs reverse-engineered) et **quelle
 > architecture Jeedom** (PHP natif vs démon Python) ?
 >
-> ⚠️ **Statut des sources** : synthèse de 3 axes de recherche web aboutis (auth OAuth2, commandes/MQTT,
-> limites/viabilité), recoupés sur la doc officielle `developer.groupe-psa.io` + le code de
-> `flobz/psa_car_controller` + forums HA/Jeedom. La **passe de vérification adversariale n'a pas pu
-> tourner** (limite de session). Les faits `confidence: high` sont sourcés ; tout ce qui touche aux
-> **noms exacts d'endpoints/champs côté API consommateur est à reconfirmer** contre le code de
-> `psa_car_controller` au moment d'implémenter (cf. `.memory/external/doc/stellantis/INDEX.md`).
+> ⚠️ **Statut des sources** : synthèse de **7 axes** de recherche web aboutis (auth OAuth2,
+> commandes/MQTT, limites/viabilité, portail officiel, psa_car_controller détaillé, data-model exhaustif,
+> écosystème Jeedom/HA), recoupés sur la doc officielle `developer.groupe-psa.io`, le code de
+> `flobz/psa_car_controller` (+ dumps JSON réels d'issues), les intégrations HA/openHAB et les forums
+> Jeedom. Les axes 4-7 se **corroborent mutuellement** avec les axes 1-3 (auth, MQTT, viabilité). Une
+> **passe de vérification adversariale dédiée n'a pas été exécutée séparément** (faite par recoupement
+> manuel). Les faits `confidence: high` sont sourcés ; les **noms exacts d'endpoints/champs côté API
+> consommateur restent à reconfirmer au runtime** (varient selon millésime/motorisation/forfait), cf.
+> `[[stellantis-data-model]]` et `.memory/external/doc/stellantis/INDEX.md`.
 
 ---
 
@@ -57,8 +60,18 @@ C'est **le** piège conceptuel. Il y a deux systèmes de tokens **indépendants*
 - Échange code→token : `POST .../access_token`, `Authorization: Basic base64(client_id:client_secret)`,
   `grant_type=authorization_code` + `code` + `redirect_uri`. Réponse :
   `{access_token, refresh_token, expires_in, id_token}`.
-- **TTL access_token ≈ 890 s (~15 min)** → refresh fréquent indispensable (`grant_type=refresh_token`).
-- `scope = "openid profile"`. `redirect_uri` = schéma custom de marque (ex. `mymXX://oauth2redirect/{pays}`).
+- **TTL access_token court** — **~15 min** (communauté/CLAUDE.md projet) à **~1 h** (DeepWiki) selon
+  source/IdP/marque → **à mesurer** ; refresh fréquent indispensable (`grant_type=refresh_token`).
+  **refresh_token ~30 j avec rotation** à chaque usage. ⚠️ **Rate-limit de référence : 6 refresh / 30 min**
+  (`@rate_limit(6,1800)` dans `oauth.py` de psa_car_controller) → **à reproduire** (anti-ban). Header
+  d'échange : `Authorization: Basic base64(client_id:client_secret)`.
+- `scope` ≈ `"openid profile"` (+ selon impl. `VehicleState_read localisation_read`). `redirect_uri` =
+  schéma custom **par famille de marque** : `mymap://oauth2redirect/{pays}` (Peugeot/Citroën/DS),
+  `mymopsdk://oauth2redirect/{pays}` (Opel/Vauxhall).
+- ⚠️ **PKCE = spécifique à l'API CONSOMMATEUR** (celle qu'on utilise) ; l'API **officielle B2C** est
+  OAuth2 Authorization Code **sans PKCE** (avec `client_secret`). Ne pas confondre les deux contrats.
+- ⚠️ **Orthographe des realms à confirmer** : `clientsB2CPeugeot` (psa_car_controller) vs `clientsB2CPeugot`
+  (doc portail officiel — sans 'e') ; realms OTP `OTP<Marque>`. Vérifier au runtime.
 - **`client_id`/`client_secret` ne sont PAS fournis aux particuliers** : extraits de l'APK mobile
   (script `app_decoder.py` de psa_car_controller, APK sur `github.com/flobz/psa_apk`). L'APK contient
   aussi des certificats client (`public.pem`/`private.pem`) et `host_brandid_prod`, `site_code`, `culture`.
@@ -84,9 +97,14 @@ C'est **le** piège conceptuel. Il y a deux systèmes de tokens **indépendants*
 
 ### 1.3 Commandes à distance — MQTT (couche 2)
 
-- Broker **`mwa.mpsa.com:8885`** (TLS, MQTT v3.1.1, lib Python `paho-mqtt`).
-- Publish : `psa/RemoteServices/from/cid/{customer_id}/{commande}` ; réponses :
-  `psa/RemoteServices/to/cid/{customer_id}/#` ; événements véhicule : `.../events/MPHRTServices/{vin}`.
+- Broker **`mw-{brand_code}-m2c.mym.awsmpsa.com:8885`** (TLS) — ex. `mw-vx-m2c` (Vauxhall),
+  `mw-ap-m2c` (autres). `mwa.mpsa.com:8885` aussi cité (dépannage). Lib Python **`paho-mqtt` ≥1.5,<2.0**
+  (⚠️ **paho-mqtt 2.0 casse `RemoteClient`** → épingler `<2.0.0` dans `packages.json`).
+- Topics : publish `psa/RemoteServices/from/cid/{CID}/{ServiceType}/state` ; subscribe
+  `psa/RemoteServices/to/cid/{CID}/#` + `psa/RemoteServices/events/MPHRTServices/`. `CID` = format
+  `AP-ACNT…` (Peugeot/Citroën/DS) ou `OV-ACNT…` (Opel/Vauxhall).
+- **Codes d'acquittement** (payload `{process_date,vin,correlation_id,process_code,process_message}`) :
+  **900** = requête acceptée, **901** = véhicule en veille, **903** = transmise au véhicule.
 - Auth MQTT : `username = "IMA_OAUTH_ACCESS_TOKEN"`, `password = access_token` courant ; le token est
   **aussi** réinjecté dans le payload. Réponse `return_code='400'` ⇒ token expiré → refresh + re-publish.
 - Modèle **asynchrone** : publish → exécution véhicule → notification `to/cid` (`return_code`). États

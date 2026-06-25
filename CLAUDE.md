@@ -101,7 +101,8 @@ Support :
 - **`plugin_info/info.json`** — manifeste (id, version, `require`, OS, `category`, dépendances, langues, compat).
 - **`plugin_info/install.php`** — `stellantis_install/update/remove()` ; `pre_install.php` → `stellantis_pre_update()`.
 - **`plugin_info/packages.json`** — dépendances. **MVP : vide** (100 % PHP). **Post-MVP commandes** :
-  `pip3 paho-mqtt` (cf. `.memory/specs/post-mvp/80-livraison/82-packaging-doc.md`).
+  `pip3 paho-mqtt` **épinglé `<2.0.0`** (2.0 casse le client MQTT de référence ; Debian 12 → virtualenv /
+  `--break-system-packages`) (cf. `.memory/specs/post-mvp/80-livraison/82-packaging-doc.md`).
 
 ## Workflows / CI
 

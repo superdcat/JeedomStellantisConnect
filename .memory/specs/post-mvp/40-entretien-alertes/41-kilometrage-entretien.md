@@ -13,7 +13,9 @@ maintenance via Jeedom (rappels, scénarios).
 
 ## Détails techniques
 - `odometer.mileage` (data-model § 2.3) historisé → graphe d'usage.
-- Échéances de maintenance : disponibilité variable selon API/modèle → créer **conditionnellement**.
+- Échéances de maintenance : endpoint dédié **`GET /user/vehicles/{id}/maintenance`** (confirmé) →
+  prochaine révision / distance avant entretien ; disponibilité variable selon modèle/forfait → créer
+  **conditionnellement**.
 - Info dérivée `service_due` (binary) si `service_distance < seuil` ou `service_days < seuil` (config).
 
 ## Critères d'acceptation

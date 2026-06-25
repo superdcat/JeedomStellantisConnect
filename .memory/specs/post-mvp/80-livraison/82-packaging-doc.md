@@ -16,8 +16,10 @@ sur une API **non officielle** (risque à expliciter).
 ## Détails techniques
 - **`packages.json`** :
   - **MVP (lecture)** : **vide** (100 % PHP). `hasDependency:false`, `hasOwnDeamon:false`.
-  - **Post-MVP commandes** : `pip3 paho-mqtt` (+ `cryptography` si OTP l'exige). `hasOwnDeamon:true`,
-    `hasDependency:true`, `maxDependancyInstallTime` réintroduit.
+  - **Post-MVP commandes** : `pip3 paho-mqtt` **épinglé `<2.0.0`** (⚠️ 2.0 casse `RemoteClient`) (+
+    `cryptography` si l'OTP l'exige). `hasOwnDeamon:true`, `hasDependency:true`, `maxDependancyInstallTime`
+    réintroduit. ⚠️ **Debian 12** : pip « externally managed » → virtualenv ou `--break-system-packages`,
+    `system::getCmdPython3(__CLASS__)`. Lib démon : `Mips2648/jeedom-daemon-py` (`jeedomdaemon~=1.2.0`).
 - **Doc utilisateur** (FR + 3 langues, cf. UC84) : procédure d'obtention des credentials (outil externe
   type `app_decoder.py`/`psa-token-helper`), copier-coller du `code` OAuth, activation OTP, **avertissement
   ToS/risque** (API non officielle, peut casser, légalement à la charge de l'utilisateur), limites

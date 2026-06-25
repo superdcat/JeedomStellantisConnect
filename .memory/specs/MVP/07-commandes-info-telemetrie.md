@@ -39,6 +39,9 @@ kilométrage, position, état portes/verrouillage, fraîcheur.
 - [ ] Les valeurs reflètent le `/status` réel (SOC, autonomie, km, verrouillage, position).
 
 ## Notes / risques
-- Noms de champs exacts **à confirmer** (cf. data-model) ; isoler le mapping dans `parseStatus()` pour
-  pouvoir le corriger sans toucher au reste.
+- Noms de champs : voir `[[stellantis-data-model]]` (chemins confirmés sur dumps réels). **Pièges
+  connus** : objet `preconditionning` (à **double n** dans l'API réelle), position GeoJSON `[lon,lat]`
+  (**pas** `[lat,lon]`), **ne pas** envoyer `?extension=odometer/kinetic` (HTTP 400 depuis v4.15 ; champs
+  à la racine), lire `energies[]` (v4.15+) avec fallback `energy[]`. Isoler tout le mapping dans
+  `parseStatus()` pour le corriger sans toucher au reste.
 - Ne créer que ce qui est présent : éviter des commandes « toujours vides » qui polluent l'UI.

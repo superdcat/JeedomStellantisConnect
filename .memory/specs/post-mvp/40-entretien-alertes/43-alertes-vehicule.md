@@ -12,8 +12,10 @@ divers) pour notifier l'utilisateur via Jeedom.
 - **Exclu** : interprétation médicale fine de chaque code constructeur (best effort + libellé brut).
 
 ## Détails techniques
-- Champs d'alertes/voyants (data-model § 2.6) : structure variable → mapping défensif (créer une commande
-  par type rencontré, libellé brut conservé).
+- Source : **`GET /user/vehicles/{id}/alerts`** (confirmé) → `alerts[].{id, type (AlertMsgEnum), active,
+  started_at, end_at}`. **AlertMsgEnum ~80 types** (moteur, carburant/AdBlue, pneus, freinage, ouvrants,
+  éclairage — cf. `[[stellantis-data-model]]` § 3). Mapping défensif : une commande binaire par type
+  rencontré, libellé brut conservé.
 - Info `alerts_count` (numeric) pour un widget de synthèse + scénario « au moins une alerte ».
 
 ## Critères d'acceptation
