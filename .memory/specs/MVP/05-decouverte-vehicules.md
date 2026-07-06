@@ -13,7 +13,9 @@ motorisation) pour pouvoir créer les équipements.
 
 ## Détails techniques
 - Méthode `stellantis::discoverVehicles(): array` retournant une liste de :
-  `['id','vin','brand','label','model','energy']` (motorisation : Electric / Hybrid / Thermal si dispo).
+  `['id','vin','brand','label','energy']` (motorisation normalisée : Electric / Hybrid / Thermal / '').
+  *`model` retiré du contrat le 2026-07-06 : l'API n'a pas ce champ (vérifié `vehicle.py`) ; `label`
+  est le surnom renommable côté app, pré-rempli avec la désignation commerciale.*
 - Endpoint : `GET /user/vehicles` via `stellantisApi::callWithToken`. Gérer la **pagination** si l'API
   pagine (`_links`/`offset`) et concaténer.
 - `id` (id API ≠ VIN) **conservé** : nécessaire pour les appels `/status`/`/lastPosition`. `vin` =
@@ -23,7 +25,7 @@ motorisation) pour pouvoir créer les équipements.
 
 ## Critères d'acceptation
 - [ ] `stellantis::discoverVehicles()` renvoie tous les véhicules du compte (pagination incluse).
-- [ ] Chaque entrée contient au minimum `id`, `vin`, `brand` (+ `label`/`model` si fournis).
+- [ ] Chaque entrée contient au minimum `id`, `vin`, `brand` (+ `label` si fourni).
 - [ ] Gère proprement un compte sans véhicule (tableau vide, pas d'erreur).
 
 ## Notes / risques

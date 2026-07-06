@@ -135,13 +135,88 @@ class stellantis extends eqLogic {
     } catch (stellantisException $e) {
       return array('ok' => false, 'count' => 0, 'message' => self::messageDepuisException($e));
     }
-    $vehicules = (isset($reponse['_embedded']['vehicles']) && is_array($reponse['_embedded']['vehicles'])) ? $reponse['_embedded']['vehicles'] : array();
-    $count = count($vehicules);
+    $count = count(self::vehiculesBrutsDepuisReponse($reponse));
     return array(
       'ok' => true,
       'count' => $count,
       'message' => sprintf(__('Connexion OK : %d véhicule(s) trouvé(s) sur le compte', __FILE__), $count),
     );
+  }
+
+  /**
+   * Récupère et normalise la liste des véhicules du compte.
+   * Retourne une liste de ['id','vin','brand','label','energy'] — energy en vocabulaire projet
+   * normalisé (Electric|Thermal|Hybrid|''), cf. analyse data-model § 1. Compte vide → [].
+   * Laisse remonter stellantisException (les appelants mappent les erreurs).
+   * @throws stellantisException
+   */
+  public static function discoverVehicles(): array {
+    $reponse = stellantisApi::callWithToken('GET', '/user/vehicles');
+    $bruts = self::vehiculesBrutsDepuisReponse($reponse);
+    $vehicules = array();
+    foreach ($bruts as $brut) {
+      // Données externes non fiables : exiger des scalaires non vides pour les clés d'identité
+      // (un cast (string) sur un tableau produirait silencieusement "Array" → collision de logicalId)
+      if (!is_array($brut)
+        || !isset($brut['id']) || !is_scalar($brut['id']) || trim((string) $brut['id']) == ''
+        || !isset($brut['vin']) || !is_scalar($brut['vin']) || trim((string) $brut['vin']) == '') {
+        $idApi = (is_array($brut) && isset($brut['id']) && is_scalar($brut['id'])) ? trim((string) $brut['id']) : '';
+        log::add('stellantis', 'warning', 'Véhicule ignoré à la découverte : entrée au format inattendu (id ou vin absent/invalide)'
+          . ($idApi != '' ? ' (id API ' . $idApi . ')' : ''));
+        continue;
+      }
+      // La validation de forme de l'id pour un usage en path (/user/vehicles/{id}/...) est déléguée
+      // à la regex de chemin de stellantisApi::call() — ne pas relâcher cette garantie côté call()
+      $vehicules[] = array(
+        'id' => trim((string) $brut['id']),
+        'vin' => trim((string) $brut['vin']),
+        'brand' => (isset($brut['brand']) && is_scalar($brut['brand'])) ? (string) $brut['brand'] : '',
+        'label' => (isset($brut['label']) && is_scalar($brut['label'])) ? (string) $brut['label'] : '',
+        'energy' => self::energieDepuisEngine((isset($brut['engine']) && is_array($brut['engine'])) ? $brut['engine'] : array()),
+      );
+    }
+    // Pagination jamais observée dans le code de référence : non gérée, mais détectée (cf. spec 05-tech)
+    if (isset($reponse['_links']['next'])) {
+      log::add('stellantis', 'warning', 'Réponse /user/vehicles paginée détectée : seuls les '
+        . count($vehicules) . ' premiers véhicules sont pris en compte (pagination non gérée, à signaler)');
+    }
+    log::add('stellantis', 'info', 'Découverte : ' . count($vehicules) . ' véhicule(s) sur le compte');
+    return $vehicules;
+  }
+
+  // Extrait la liste brute _embedded.vehicles d'une réponse HAL /user/vehicles (seul point de
+  // parsing de l'enveloppe : à faire évoluer ici si le schéma HAL change)
+  private static function vehiculesBrutsDepuisReponse(array $_reponse): array {
+    return (isset($_reponse['_embedded']['vehicles']) && is_array($_reponse['_embedded']['vehicles'])) ? $_reponse['_embedded']['vehicles'] : array();
+  }
+
+  /**
+   * Dérive la motorisation normalisée du plugin (Electric|Thermal|Hybrid|'') depuis engine[] de
+   * /user/vehicles. Basé sur la PRÉSENCE des classes (un bi-moteur électrique a 2 entrées Electric),
+   * insensible à la casse (variations de schéma PSA avérées). L'UC07 mappe energies[].type du
+   * /status vers ce même vocabulaire — table unique, cf. data-model § 1.
+   */
+  private static function energieDepuisEngine(array $_engines): string {
+    $aElectrique = false;
+    $aThermique = false;
+    foreach ($_engines as $engine) {
+      $classe = (is_array($engine) && isset($engine['class'])) ? strtolower((string) $engine['class']) : '';
+      if ($classe == 'electric') {
+        $aElectrique = true;
+      } elseif ($classe == 'thermic') {
+        $aThermique = true;
+      }
+    }
+    if ($aElectrique && $aThermique) {
+      return 'Hybrid';
+    }
+    if ($aElectrique) {
+      return 'Electric';
+    }
+    if ($aThermique) {
+      return 'Thermal';
+    }
+    return '';
   }
 
   // Traduit une erreur API typée en message utilisateur actionnable (chaîne UI → enveloppée __()).

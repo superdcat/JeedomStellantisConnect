@@ -14,8 +14,11 @@ jour les eqLogic véhicules **sans doublon**.
 - **Identité d'un équipement = `logicalId = VIN`** (clé d'idempotence stable).
 - Méthode `stellantis::syncVehicles(): array` :
   - pour chaque véhicule découvert, `eqLogic::byLogicalId($vin, 'stellantis')` ; créer si absent.
-  - renseigner `name` (si création : `brand` + `label`/`model`), `eqType_name='stellantis'`, `isEnable`,
-    `logicalId=$vin`, configuration `apiId` (id API), `vin`, `brand`, `energy`/motorisation ; `save()`.
+  - renseigner `name` (si création : `brand` + `label` — pas de champ `model` dans l'API, cf. UC05
+    2026-07-06 ; `label` = surnom renommable côté app), `eqType_name='stellantis'`, `isEnable`,
+    `logicalId=$vin`, configuration `apiId` (id API), `vin`, `brand`, `energy` (vocabulaire normalisé
+    UC05 : Electric/Thermal/Hybrid/'', **indicatif** — source de vérité au fil de l'eau = `/status`
+    UC07, même vocabulaire) ; `save()`.
   - **ne pas écraser** le nom personnalisé ni l'objet parent lors d'une re-sync.
 - UI : bouton « Synchroniser les véhicules » (page plugin), action AJAX `sync`, puis rafraîchir la liste.
 - Conserver les champs de config standard par équipement (objet parent, activer/visible).

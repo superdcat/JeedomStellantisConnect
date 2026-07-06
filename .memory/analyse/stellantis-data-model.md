@@ -31,8 +31,18 @@
 
 ## 1. Liste des véhicules — `GET /user/vehicles` (HAL)
 
-`_embedded.vehicles[]` → `{ id (id API), vin, brand, label, engine/motorization, pictures, _links }`.
+`_embedded.vehicles[]` → `{ id (id API), vin, brand, label, engine, pictures, createdAt, _links }`
+(précisé 2026-07-06 contre `models/vehicle.py` : **pas** de champ `model`/`motorization` ; `label` =
+surnom renommable côté app ; `engine` = liste de `{class: Thermic|Electric, energy: GPL|Gasoil|Petrol|
+Biologic}` — `energy` absent sur Electric).
 `id` ≠ VIN. Stocker `id` (config eqLogic `apiId`) et `vin` (`logicalId`).
+
+> **Vocabulaire motorisation normalisé du plugin** (décision UC05, 2026-07-06) :
+> `Electric` / `Thermal` / `Hybrid` / `''` (inconnu) — dérivé par **présence** des classes dans
+> `engine[]` (comparaison insensible à la casse). L'UC07 mappe `energies[].type` du `/status`
+> (`Fuel`/`Electric`) vers **ce même vocabulaire** (`Fuel → Thermal`) : une seule table de
+> correspondance (`stellantis::energieDepuisEngine()` et équivalent statut), jamais deux enums
+> parallèles. Le `energy` stocké à la découverte est indicatif ; le `/status` fait foi au fil de l'eau.
 
 ## 2. Statut — `GET /user/vehicles/{id}/status`
 
