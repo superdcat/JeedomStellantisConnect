@@ -27,13 +27,69 @@ class stellantis extends eqLogic {
   public static $_widgetPossibility = array();
   */
 
-  /*
-  * Permet de crypter/décrypter automatiquement des champs de configuration du plugin
-  * Exemple : "param1" & "param2" seront cryptés mais pas "param3"
-  public static $_encryptConfigKey = array('param1', 'param2');
-  */
+  // Champs de configuration du plugin chiffrés automatiquement par le core (config::save/byKey)
+  public static $_encryptConfigKey = array('client_secret');
+
+  // Table des marques : TLD du serveur d'authentification idpcvs.{tld}, realm B2C et redirect_uri
+  // par défaut ({pays} substitué par le code pays configuré). Possédée par cette classe, consommée
+  // par stellantisApi (UC02/03) via getApiConfig() — ne pas la dupliquer.
+  // ⚠️ Orthographe du realm Peugeot à confirmer au runtime (clientsB2CPeugeot chez psa_car_controller
+  // vs clientsB2CPeugot sur le portail officiel).
+  const BRANDS = array(
+    'peugeot' => array('tld' => 'peugeot.com', 'realm' => 'clientsB2CPeugeot', 'redirectUri' => 'mymap://oauth2redirect/{pays}'),
+    'citroen' => array('tld' => 'citroen.com', 'realm' => 'clientsB2CCitroen', 'redirectUri' => 'mymacsdk://oauth2redirect/{pays}'),
+    'ds' => array('tld' => 'driveds.com', 'realm' => 'clientsB2CDS', 'redirectUri' => 'mymdssdk://oauth2redirect/{pays}'),
+    'opel' => array('tld' => 'opel.com', 'realm' => 'clientsB2COpel', 'redirectUri' => 'mymopsdk://oauth2redirect/{pays}'),
+    'vauxhall' => array('tld' => 'vauxhall.co.uk', 'realm' => 'clientsB2CVauxhall', 'redirectUri' => 'mymvxsdk://oauth2redirect/{pays}'),
+  );
+
+  // Base commune de l'API REST consommateur (identique pour toutes les marques)
+  const API_BASE_URL = 'https://api.groupe-psa.com/connectedcar/v4';
 
   /*     * ***********************Methode static*************************** */
+
+  /**
+   * Retourne la configuration API prête à l'emploi (défauts propres, jamais d'exception).
+   * @param string|null $_brand marque explicite ; null = marque configurée (mono-marque MVP,
+   *                            paramètre prévu pour le multi-marques post-MVP)
+   */
+  public static function getApiConfig(?string $_brand = null): array {
+    $brand = ($_brand === null) ? config::byKey('brand', 'stellantis') : $_brand;
+    $brand = strtolower(trim((string) $brand));
+    if ($brand == '') {
+      $brand = 'peugeot';
+    } elseif (!isset(self::BRANDS[$brand])) {
+      log::add('stellantis', 'warning', 'Marque configurée inconnue « ' . $brand . ' », repli sur peugeot');
+      $brand = 'peugeot';
+    }
+    $brandConfig = self::BRANDS[$brand];
+    $country = strtolower(trim((string) config::byKey('country', 'stellantis', 'fr')));
+    if ($country == '') {
+      $country = 'fr';
+    }
+    $redirectUri = trim((string) config::byKey('redirect_uri', 'stellantis'));
+    if ($redirectUri == '') {
+      $redirectUri = str_replace('{pays}', $country, $brandConfig['redirectUri']);
+    }
+    return array(
+      'brand' => $brand,
+      'clientId' => trim((string) config::byKey('client_id', 'stellantis')),
+      'clientSecret' => trim((string) config::byKey('client_secret', 'stellantis')),
+      'country' => $country,
+      'realm' => $brandConfig['realm'],
+      'authBaseUrl' => 'https://idpcvs.' . $brandConfig['tld'] . '/am/oauth2',
+      'apiBaseUrl' => self::API_BASE_URL,
+      'redirectUri' => $redirectUri,
+    );
+  }
+
+  /**
+   * Vrai si les identifiants minimaux (client_id + client_secret) sont renseignés.
+   */
+  public static function isConfigured(): bool {
+    return trim((string) config::byKey('client_id', 'stellantis')) != ''
+      && trim((string) config::byKey('client_secret', 'stellantis')) != '';
+  }
 
   /*
   * Fonction exécutée automatiquement toutes les minutes par Jeedom

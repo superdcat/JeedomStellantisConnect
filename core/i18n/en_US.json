@@ -1,0 +1,18 @@
+{
+    "plugins/stellantis/plugin_info/configuration.php": {
+        "Connexion API Stellantis / PSA": "Stellantis / PSA API connection",
+        "Plugin non configuré : renseignez au minimum le Client ID et le Client Secret.": "Plugin not configured: please enter at least the Client ID and Client Secret.",
+        "Les identifiants Client ID et Client Secret ne sont pas fournis par Stellantis aux particuliers : ils doivent être extraits de l'application mobile de votre marque (APK) à l'aide d'un outil externe. Consultez la documentation du plugin pour la procédure.": "The Client ID and Client Secret credentials are not provided by Stellantis to individuals: they must be extracted from your brand's mobile application (APK) using an external tool. Refer to the plugin documentation for the procedure.",
+        "Marque": "Brand",
+        "Détermine le serveur d'authentification (idpcvs) et le realm utilisés": "Determines the authentication server (idpcvs) and realm used",
+        "Client ID": "Client ID",
+        "Identifiant client OAuth2 de l'application mobile de la marque (extrait via un outil externe)": "OAuth2 client identifier of the brand's mobile application (extracted using an external tool)",
+        "Client Secret": "Client Secret",
+        "Secret client OAuth2 (stocké chiffré, jamais affiché en clair)": "OAuth2 client secret (stored encrypted, never displayed in clear text)",
+        "Pays": "Country",
+        "Code pays à 2 lettres (ex. fr) utilisé pour construire l'URL de redirection par défaut": "2-letter country code (e.g. fr) used to build the default redirect URL",
+        "URL de redirection": "Redirect URL",
+        "redirect_uri OAuth2 (schéma de l'app mobile de la marque, ex. mymap://oauth2redirect/fr)": "OAuth2 redirect_uri (brand's mobile app scheme, e.g. mymap://oauth2redirect/fr)",
+        "Laisser vide pour utiliser le défaut de la marque": "Leave empty to use the brand's default"
+    }
+}

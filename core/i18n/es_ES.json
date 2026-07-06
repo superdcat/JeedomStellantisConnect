@@ -1,0 +1,18 @@
+{
+    "plugins/stellantis/plugin_info/configuration.php": {
+        "Connexion API Stellantis / PSA": "Conexión API Stellantis / PSA",
+        "Plugin non configuré : renseignez au minimum le Client ID et le Client Secret.": "Plugin no configurado: introduzca al menos el Client ID y el Client Secret.",
+        "Les identifiants Client ID et Client Secret ne sont pas fournis par Stellantis aux particuliers : ils doivent être extraits de l'application mobile de votre marque (APK) à l'aide d'un outil externe. Consultez la documentation du plugin pour la procédure.": "Las credenciales Client ID y Client Secret no las proporciona Stellantis a particulares: deben extraerse de la aplicación móvil de su marca (APK) mediante una herramienta externa. Consulte la documentación del plugin para conocer el procedimiento.",
+        "Marque": "Marca",
+        "Détermine le serveur d'authentification (idpcvs) et le realm utilisés": "Determina el servidor de autenticación (idpcvs) y el realm utilizados",
+        "Client ID": "Client ID",
+        "Identifiant client OAuth2 de l'application mobile de la marque (extrait via un outil externe)": "Identificador de cliente OAuth2 de la aplicación móvil de la marca (extraído mediante una herramienta externa)",
+        "Client Secret": "Client Secret",
+        "Secret client OAuth2 (stocké chiffré, jamais affiché en clair)": "Secreto de cliente OAuth2 (almacenado cifrado, nunca se muestra en texto claro)",
+        "Pays": "País",
+        "Code pays à 2 lettres (ex. fr) utilisé pour construire l'URL de redirection par défaut": "Código de país de 2 letras (p. ej. fr) utilizado para construir la URL de redirección por defecto",
+        "URL de redirection": "URL de redirección",
+        "redirect_uri OAuth2 (schéma de l'app mobile de la marque, ex. mymap://oauth2redirect/fr)": "redirect_uri OAuth2 (esquema de la app móvil de la marca, p. ej. mymap://oauth2redirect/fr)",
+        "Laisser vide pour utiliser le défaut de la marque": "Dejar vacío para usar el valor por defecto de la marca"
+    }
+}

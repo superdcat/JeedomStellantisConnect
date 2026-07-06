@@ -29,8 +29,9 @@ l'utilisateur, **stockage chiffré** des tokens, **refresh** proactif/réactif.
   (aucun réseau) ; sinon **refresh** (`grant_type=refresh_token`) + MAJ cache. ⚠️ `expires_in` court
   (**~15 min à ~1 h** selon source/IdP — à mesurer) → refresh fréquent ; `refresh_token` ~30 j **avec
   rotation** (persister le nouveau). ⚠️ **≤ 6 refresh / 30 min** (`@rate_limit(6,1800)` psa_cc, cf. UC72).
-  `redirect_uri` par famille : `mymap://oauth2redirect/{pays}` (Peugeot/Citroën/DS),
-  `mymopsdk://oauth2redirect/{pays}` (Opel/Vauxhall).
+  `redirect_uri` propre à chaque marque (corrigé 2026-07-06 contre `constants.py`/`realm_info` de
+  psa_car_controller) : `mymap`(Peugeot)/`mymacsdk`(Citroën)/`mymdssdk`(DS)/`mymopsdk`(Opel)/
+  `mymvxsdk`(Vauxhall)`://oauth2redirect/{pays}` — table `stellantis::BRANDS` (UC01).
 - **`callWithToken($method,$path,$params)`** : `getToken()` + `call()` ; sur `401`/token error →
   `getToken(true)` (refresh) puis **rejeu unique** ; sur `invalid_grant` (refresh token mort) → erreur
   claire « ré-authentification requise » (pas de boucle).

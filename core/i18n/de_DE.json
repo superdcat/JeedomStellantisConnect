@@ -1,0 +1,18 @@
+{
+    "plugins/stellantis/plugin_info/configuration.php": {
+        "Connexion API Stellantis / PSA": "Stellantis-/PSA-API-Verbindung",
+        "Plugin non configuré : renseignez au minimum le Client ID et le Client Secret.": "Plugin nicht konfiguriert: Bitte geben Sie mindestens die Client-ID und das Client-Secret ein.",
+        "Les identifiants Client ID et Client Secret ne sont pas fournis par Stellantis aux particuliers : ils doivent être extraits de l'application mobile de votre marque (APK) à l'aide d'un outil externe. Consultez la documentation du plugin pour la procédure.": "Die Anmeldedaten Client-ID und Client-Secret werden von Stellantis nicht an Privatpersonen herausgegeben: Sie müssen mithilfe eines externen Tools aus der mobilen App Ihrer Marke (APK) extrahiert werden. Das Vorgehen finden Sie in der Plugin-Dokumentation.",
+        "Marque": "Marke",
+        "Détermine le serveur d'authentification (idpcvs) et le realm utilisés": "Bestimmt den verwendeten Authentifizierungsserver (idpcvs) und den Realm",
+        "Client ID": "Client-ID",
+        "Identifiant client OAuth2 de l'application mobile de la marque (extrait via un outil externe)": "OAuth2-Client-Kennung der mobilen App der Marke (mit einem externen Tool extrahiert)",
+        "Client Secret": "Client-Secret",
+        "Secret client OAuth2 (stocké chiffré, jamais affiché en clair)": "OAuth2-Client-Secret (verschlüsselt gespeichert, wird nie im Klartext angezeigt)",
+        "Pays": "Land",
+        "Code pays à 2 lettres (ex. fr) utilisé pour construire l'URL de redirection par défaut": "Zweistelliger Ländercode (z. B. fr), der zur Erstellung der Standard-Weiterleitungs-URL verwendet wird",
+        "URL de redirection": "Weiterleitungs-URL",
+        "redirect_uri OAuth2 (schéma de l'app mobile de la marque, ex. mymap://oauth2redirect/fr)": "OAuth2 redirect_uri (App-Schema der mobilen App der Marke, z. B. mymap://oauth2redirect/fr)",
+        "Laisser vide pour utiliser le défaut de la marque": "Leer lassen, um den Standardwert der Marke zu verwenden"
+    }
+}

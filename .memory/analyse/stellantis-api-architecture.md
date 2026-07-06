@@ -66,8 +66,10 @@ C'est **le** piège conceptuel. Il y a deux systèmes de tokens **indépendants*
   (`@rate_limit(6,1800)` dans `oauth.py` de psa_car_controller) → **à reproduire** (anti-ban). Header
   d'échange : `Authorization: Basic base64(client_id:client_secret)`.
 - `scope` ≈ `"openid profile"` (+ selon impl. `VehicleState_read localisation_read`). `redirect_uri` =
-  schéma custom **par famille de marque** : `mymap://oauth2redirect/{pays}` (Peugeot/Citroën/DS),
-  `mymopsdk://oauth2redirect/{pays}` (Opel/Vauxhall).
+  schéma custom **propre à chaque marque** (corrigé 2026-07-06, vérifié dans `constants.py` /
+  `realm_info` de psa_car_controller — l'ancien regroupement « par famille » était faux) :
+  Peugeot `mymap://oauth2redirect/{pays}`, Citroën `mymacsdk://…`, DS `mymdssdk://…`,
+  Opel `mymopsdk://…`, Vauxhall `mymvxsdk://…`. Table implémentée : `stellantis::BRANDS` (UC01).
 - ⚠️ **PKCE = spécifique à l'API CONSOMMATEUR** (celle qu'on utilise) ; l'API **officielle B2C** est
   OAuth2 Authorization Code **sans PKCE** (avec `client_secret`). Ne pas confondre les deux contrats.
 - ⚠️ **Orthographe des realms à confirmer** : `clientsB2CPeugeot` (psa_car_controller) vs `clientsB2CPeugot`
