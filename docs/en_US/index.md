@@ -43,8 +43,24 @@ mobile application. The proven method, from the open source project
 This extraction happens **outside of Jeedom** (on your computer); the plugin does not download or
 analyze any APK. The credentials do not expire, this operation only needs to be done once.
 
+## Connecting your account
+
+Once the configuration is saved, connect the plugin to your account (the "Account connection"
+section of the configuration page):
+
+1. Click **Generate authorization URL**, then open the displayed link in your browser.
+2. Log in with the credentials of your brand's mobile application (email + password).
+3. After logging in, the browser tries to open the mobile application and displays an **error
+   page: this is normal**. Copy the **full URL** of this page (address bar), which starts with the
+   application's scheme (e.g. `mymap://oauth2redirect/fr?code=...`).
+4. Paste this URL into the **Authorization code** field and click **Validate code**.
+
+The status changes to "Connected to account". The plugin then manages the access token refresh on
+its own; you will only need to repeat this procedure if the connection is revoked (message
+"re-authentication required"), after a change of brand or credentials, or after a full Jeedom
+cache clear.
+
 ## Next steps
 
-Once the plugin is configured, connect your account (authentication button), then launch the
-vehicle discovery — these steps are described in the corresponding sections of this
+Vehicle discovery and telemetry retrieval are described in the corresponding sections of this
 documentation as the plugin versions are released.

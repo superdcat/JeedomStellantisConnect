@@ -91,6 +91,23 @@ class stellantis extends eqLogic {
       && trim((string) config::byKey('client_secret', 'stellantis')) != '';
   }
 
+  // Purge des tokens SEULEMENT si la valeur change réellement : le formulaire de config soumet tous
+  // les champs à chaque save, une purge inconditionnelle casserait le token à chaque sauvegarde.
+  // En preConfig, config::byKey retourne encore l'ancienne valeur.
+  public static function preConfig_client_id($_value) {
+    if ((string) $_value !== (string) config::byKey('client_id', 'stellantis')) {
+      stellantisApi::purgeTokenCache();
+    }
+    return $_value;
+  }
+
+  public static function preConfig_brand($_value) {
+    if ((string) $_value !== (string) config::byKey('brand', 'stellantis')) {
+      stellantisApi::purgeTokenCache();
+    }
+    return $_value;
+  }
+
   /*
   * Fonction exécutée automatiquement toutes les minutes par Jeedom
   public static function cron() {}
@@ -290,6 +307,15 @@ class stellantisApi {
   // Méthodes HTTP acceptées par la façade call()
   const METHODES_AUTORISEES = array('GET', 'POST', 'PUT', 'DELETE');
 
+  // Cycle de vie du token OAuth2
+  const TOKEN_CACHE_KEY = 'stellantis::token';
+  const OAUTH_PENDING_KEY = 'stellantis::oauth_pending';
+  const TOKEN_MARGE = 60;
+  // Quota local anti-ban aligné sur @rate_limit(6,1800) du code de référence psa_car_controller
+  const REFRESH_QUOTA_KEY = 'stellantis::refresh_quota';
+  const REFRESH_QUOTA_MAX = 6;
+  const REFRESH_QUOTA_FENETRE = 1800;
+
   /**
    * Appel authentifié à l'API connectedcar v4 : client_id en query (toutes méthodes),
    * Bearer + x-introspect-realm en headers, Accept hal+json.
@@ -325,12 +351,256 @@ class stellantisApi {
     return self::httpRequest($method, $url, $headers, $rawBody);
   }
 
+  /*     * ******************* OAuth2 PKCE & cycle de vie du token ******************* */
+
+  // Génère un code_verifier PKCE : 64 caractères base64url depuis une source cryptographique
+  private static function genCodeVerifier(): string {
+    return rtrim(strtr(base64_encode(random_bytes(48)), '+/', '-_'), '=');
+  }
+
+  private static function genCodeChallenge(string $_verifier): string {
+    return rtrim(strtr(base64_encode(hash('sha256', $_verifier, true)), '+/', '-_'), '=');
+  }
+
+  /**
+   * Construit l'URL d'autorisation OAuth2 PKCE et mémorise {verifier, state} en cache chiffré (10 min).
+   * @throws stellantisException
+   */
+  public static function buildAuthUrl(): string {
+    if (!stellantis::isConfigured()) {
+      throw new stellantisException('Plugin non configuré : renseignez le Client ID et le Client Secret', 0, 'auth_required');
+    }
+    $config = stellantis::getApiConfig();
+    $verifier = self::genCodeVerifier();
+    $state = bin2hex(random_bytes(16));
+    cache::set(self::OAUTH_PENDING_KEY, utils::encrypt(json_encode(array('verifier' => $verifier, 'state' => $state))), 600);
+    // RFC3986 : l'espace du scope doit être encodé %20 (pas « + »)
+    return $config['authBaseUrl'] . '/authorize?' . http_build_query(array(
+      'client_id' => $config['clientId'],
+      'response_type' => 'code',
+      'scope' => 'openid profile',
+      'redirect_uri' => $config['redirectUri'],
+      'state' => $state,
+      'code_challenge' => self::genCodeChallenge($verifier),
+      'code_challenge_method' => 'S256',
+    ), '', '&', PHP_QUERY_RFC3986);
+  }
+
+  /**
+   * Échange le code d'autorisation contre les tokens.
+   * Chemin nominal : $_input = URL de redirection complète collée → state toujours vérifié.
+   * Chemin dégradé : code brut seul → accepté, state invérifiable (loggué en warning).
+   * @throws stellantisException
+   */
+  public static function exchangeCode(string $_input): void {
+    $input = trim($_input);
+    if ($input == '') {
+      throw new stellantisException('Aucun code d\'autorisation fourni', 0, 'auth_required');
+    }
+    $pendingBrut = (string) cache::byKey(self::OAUTH_PENDING_KEY)->getValue('');
+    $pending = ($pendingBrut == '') ? null : json_decode(utils::decrypt($pendingBrut), true);
+    if (!is_array($pending) || !isset($pending['verifier']) || !isset($pending['state'])) {
+      throw new stellantisException('Demande d\'autorisation absente ou expirée : générez une nouvelle URL', 0, 'auth_required');
+    }
+    $code = $input;
+    $state = null;
+    if (strpos($input, '://') !== false) {
+      $params = array();
+      $query = parse_url($input, PHP_URL_QUERY);
+      if (is_string($query)) {
+        parse_str($query, $params);
+      }
+      if (!isset($params['code']) || $params['code'] == '') {
+        throw new stellantisException('Code d\'autorisation introuvable dans l\'URL collée', 0, 'auth_required');
+      }
+      if (!isset($params['state']) || $params['state'] == '') {
+        // Une URL de redirection contient toujours le state renvoyé par l'IdP : son absence est anormale
+        throw new stellantisException('Paramètre state absent de l\'URL collée : générez une nouvelle URL et recommencez', 0, 'auth_required');
+      }
+      $code = $params['code'];
+      $state = (string) $params['state'];
+    }
+    if ($state !== null) {
+      if (!hash_equals($pending['state'], $state)) {
+        throw new stellantisException('Paramètre state invalide : générez une nouvelle URL et recommencez', 0, 'auth_required');
+      }
+    } else {
+      // Chemin dégradé « code seul » : state invérifiable, mais le PKCE couvre le risque — le code ne
+      // peut être échangé qu'avec le code_verifier stocké côté serveur (généré par l'admin lui-même).
+      // Ne pas supprimer cette garantie : elle remplace la vérification du state ici.
+      log::add('stellantis', 'warning', 'Échange OAuth : state non vérifié (entrée = code seul ; collez plutôt l\'URL de redirection complète)');
+    }
+    $config = stellantis::getApiConfig();
+    $reponse = self::requestToken(array(
+      'grant_type' => 'authorization_code',
+      'code' => $code,
+      'redirect_uri' => $config['redirectUri'],
+      'code_verifier' => $pending['verifier'],
+    ));
+    self::storeTokenResponse($reponse, null);
+    cache::delete(self::OAUTH_PENDING_KEY);
+    log::add('stellantis', 'info', 'Authentification OAuth2 réussie, tokens enregistrés');
+  }
+
+  /**
+   * Rend un access_token valide, sans appel réseau si possible.
+   * @param bool $_force ignorer la validité du token en cache (après un 401)
+   * @param string|null $_failedToken token qui vient d'échouer chez l'appelant : si le cache en
+   *                    contient déjà un autre (refresh concurrent), il est rendu sans réseau ni quota
+   * @throws stellantisException
+   */
+  public static function getToken(bool $_force = false, ?string $_failedToken = null): string {
+    $token = self::readTokenCache();
+    if ($token !== null) {
+      if (!$_force && time() < $token['exp'] - self::TOKEN_MARGE) {
+        return $token['access_token'];
+      }
+      if ($_force && $_failedToken !== null && $token['access_token'] !== $_failedToken) {
+        return $token['access_token'];
+      }
+    }
+    $token = self::refreshToken();
+    return $token['access_token'];
+  }
+
+  /**
+   * Appel métier authentifié : getToken() + call(), avec refresh réactif et rejeu unique
+   * sur token expiré. auth_required remonte tel quel (pas de boucle).
+   * @throws stellantisException
+   */
+  public static function callWithToken(string $_method, string $_path, array $_params = array()): array {
+    $accessToken = self::getToken();
+    try {
+      return self::call($_method, $_path, $_params, $accessToken);
+    } catch (stellantisException $e) {
+      if ($e->getApiType() != 'token_expired') {
+        throw $e;
+      }
+      $accessToken = self::getToken(true, $accessToken);
+      return self::call($_method, $_path, $_params, $accessToken);
+    }
+  }
+
+  // Statut non sensible pour l'UI (aucun token exposé)
+  public static function getTokenInfo(): array {
+    $token = self::readTokenCache();
+    if ($token === null) {
+      return array('authenticated' => false, 'expiresIn' => null);
+    }
+    return array('authenticated' => true, 'expiresIn' => max(0, $token['exp'] - time()));
+  }
+
+  // Purge tokens + demande d'autorisation en attente (changement de credentials ou de marque)
+  public static function purgeTokenCache(): void {
+    cache::delete(self::TOKEN_CACHE_KEY);
+    cache::delete(self::OAUTH_PENDING_KEY);
+    log::add('stellantis', 'info', 'Tokens purgés (changement de configuration)');
+  }
+
+  /**
+   * Rafraîchit l'access_token (rotation du refresh_token persistée).
+   * Concurrence sans mutex : sur invalid_grant, si le refresh_token en cache diffère de celui qui a
+   * échoué, un process concurrent a déjà tourné le token → on rend le cache (un seul niveau, pas de
+   * boucle). auth_required seulement si le refresh_token mort est bien celui du cache.
+   * @throws stellantisException
+   */
+  private static function refreshToken(): array {
+    $token = self::readTokenCache();
+    if ($token === null || !isset($token['refresh_token']) || $token['refresh_token'] == '') {
+      throw new stellantisException('Aucun refresh token : ré-authentification requise', 0, 'auth_required');
+    }
+    self::consommerQuotaRefresh();
+    try {
+      $reponse = self::requestToken(array(
+        'grant_type' => 'refresh_token',
+        'refresh_token' => $token['refresh_token'],
+      ));
+    } catch (stellantisException $e) {
+      if ($e->getApiType() == 'auth_required') {
+        $enCache = self::readTokenCache();
+        if ($enCache !== null && isset($enCache['refresh_token']) && $enCache['refresh_token'] !== $token['refresh_token']) {
+          log::add('stellantis', 'debug', 'Refresh concurrent détecté : réutilisation du token déjà rafraîchi');
+          return $enCache;
+        }
+        cache::delete(self::TOKEN_CACHE_KEY);
+        log::add('stellantis', 'warning', 'Refresh token expiré ou révoqué : ré-authentification requise');
+        throw new stellantisException('Refresh token expiré ou révoqué : ré-authentification requise', $e->getHttpCode(), 'auth_required');
+      }
+      throw $e;
+    }
+    self::storeTokenResponse($reponse, $token['refresh_token']);
+    $nouveau = self::readTokenCache();
+    log::add('stellantis', 'info', 'Token rafraîchi (expire dans ' . ($nouveau['exp'] - time()) . ' s)');
+    return $nouveau;
+  }
+
+  /**
+   * POST vers l'endpoint token (échange ou refresh) : Authorization Basic + corps form-urlencoded.
+   * @throws stellantisException
+   */
+  private static function requestToken(array $_body): array {
+    $config = stellantis::getApiConfig();
+    $headers = array(
+      'Authorization: Basic ' . base64_encode($config['clientId'] . ':' . $config['clientSecret']),
+      'Content-Type: application/x-www-form-urlencoded',
+      'Accept: application/json',
+    );
+    return self::httpRequest('POST', $config['authBaseUrl'] . '/access_token', $headers, http_build_query($_body), true);
+  }
+
+  // Persiste la réponse token ; conserve l'ancien refresh_token si la réponse n'en fournit pas
+  private static function storeTokenResponse(array $_reponse, ?string $_ancienRefresh): void {
+    if (!isset($_reponse['access_token']) || $_reponse['access_token'] == '') {
+      throw new stellantisException('Réponse token invalide (access_token absent)');
+    }
+    $refresh = (isset($_reponse['refresh_token']) && $_reponse['refresh_token'] != '') ? $_reponse['refresh_token'] : (string) $_ancienRefresh;
+    // Plancher > TOKEN_MARGE : un expires_in anormalement bas rendrait chaque getToken() « expiré »
+    // dès l'écriture et épuiserait le quota de refresh à lui seul
+    $expiresIn = (int) (isset($_reponse['expires_in']) ? $_reponse['expires_in'] : 0);
+    if ($expiresIn > 0 && $expiresIn < 120) {
+      log::add('stellantis', 'warning', 'expires_in inhabituellement court reçu de l\'IdP : ' . $expiresIn . ' s (plancher 120 s appliqué)');
+    }
+    $exp = time() + max(120, $expiresIn);
+    cache::set(self::TOKEN_CACHE_KEY, utils::encrypt(json_encode(array(
+      'access_token' => $_reponse['access_token'],
+      'refresh_token' => $refresh,
+      'exp' => $exp,
+    ))), 0);
+  }
+
+  // Relit le cache token déchiffré ; null si absent ou illisible
+  private static function readTokenCache(): ?array {
+    $brut = (string) cache::byKey(self::TOKEN_CACHE_KEY)->getValue('');
+    if ($brut == '') {
+      return null;
+    }
+    $token = json_decode(utils::decrypt($brut), true);
+    return (is_array($token) && isset($token['access_token']) && isset($token['exp'])) ? $token : null;
+  }
+
+  // Quota local anti-ban en fenêtre fixe : dépassement → rate_limited SANS appel réseau
+  private static function consommerQuotaRefresh(): void {
+    $quota = json_decode((string) cache::byKey(self::REFRESH_QUOTA_KEY)->getValue(''), true);
+    $maintenant = time();
+    if (!is_array($quota) || !isset($quota['windowStart']) || $maintenant - $quota['windowStart'] > self::REFRESH_QUOTA_FENETRE) {
+      $quota = array('windowStart' => $maintenant, 'count' => 0);
+    }
+    if ($quota['count'] >= self::REFRESH_QUOTA_MAX) {
+      throw new stellantisException('Quota de rafraîchissement de token atteint (' . self::REFRESH_QUOTA_MAX . ' par 30 min) : réessayez plus tard', 429, 'rate_limited');
+    }
+    $quota['count']++;
+    cache::set(self::REFRESH_QUOTA_KEY, json_encode($quota), self::REFRESH_QUOTA_FENETRE);
+  }
+
   /**
    * Transport HTTP bas niveau : cURL, timeouts, décodage JSON, mapping d'erreurs, logs redactés
    * (jamais de token/secret, jamais la query string — le client_id y figure).
+   * @param bool $_reponseSensible réponse pouvant contenir des tokens (endpoint OAuth) : le corps
+   *             brut n'est alors jamais loggué ni réinjecté dans le message d'exception — seuls les
+   *             champs error/error_description sont relayés
    * @throws stellantisException
    */
-  private static function httpRequest(string $_method, string $_url, array $_headers = array(), ?string $_rawBody = null): array {
+  private static function httpRequest(string $_method, string $_url, array $_headers = array(), ?string $_rawBody = null, bool $_reponseSensible = false): array {
     $urlSansQuery = strtok($_url, '?');
     $ch = curl_init();
     curl_setopt_array($ch, array(
@@ -361,7 +631,9 @@ class stellantisApi {
       if (json_last_error() !== JSON_ERROR_NONE) {
         $decoded = null;
         if ($httpCode >= 200 && $httpCode < 300) {
-          log::add('stellantis', 'debug', 'Corps non-JSON sur HTTP ' . $httpCode . ' : ' . $body);
+          if (!$_reponseSensible) {
+            log::add('stellantis', 'debug', 'Corps non-JSON sur HTTP ' . $httpCode . ' : ' . $body);
+          }
           throw new stellantisException('Réponse API illisible (JSON invalide, HTTP ' . $httpCode . ')', $httpCode);
         }
       }
@@ -369,8 +641,18 @@ class stellantisApi {
     if ($httpCode >= 200 && $httpCode < 300) {
       return is_array($decoded) ? $decoded : array();
     }
-    log::add('stellantis', 'debug', 'Corps d\'erreur HTTP ' . $httpCode . ' : ' . $body);
     $type = stellantisException::typeFromResponse($httpCode, is_array($decoded) ? $decoded : null);
+    if ($_reponseSensible) {
+      // Jamais le corps brut d'une réponse OAuth (peut contenir des artefacts de session/token)
+      $detail = '';
+      if (is_array($decoded)) {
+        $detail = trim((isset($decoded['error']) ? $decoded['error'] : '') . ' '
+          . (isset($decoded['error_description']) ? $decoded['error_description'] : ''));
+      }
+      log::add('stellantis', 'debug', 'Erreur HTTP ' . $httpCode . ' sur endpoint sensible' . ($detail != '' ? ' : ' . $detail : ' (corps non loggué)'));
+      throw new stellantisException('Erreur OAuth HTTP ' . $httpCode . ($detail != '' ? ' : ' . $detail : ''), $httpCode, $type);
+    }
+    log::add('stellantis', 'debug', 'Corps d\'erreur HTTP ' . $httpCode . ' : ' . $body);
     throw new stellantisException('Erreur API HTTP ' . $httpCode . ' : ' . $body, $httpCode, $type);
   }
 }

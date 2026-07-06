@@ -43,8 +43,24 @@ mobile de chaque marque. La méthode éprouvée, issue du projet open source
 Cette extraction se fait **en dehors de Jeedom** (sur votre ordinateur) ; le plugin ne télécharge ni
 n'analyse aucun APK. Les identifiants n'expirent pas, l'opération n'est à faire qu'une fois.
 
+## Connexion au compte
+
+Une fois la configuration sauvegardée, connectez le plugin à votre compte (section « Connexion au
+compte » de la page de configuration) :
+
+1. Cliquez sur **Générer l'URL d'autorisation**, puis ouvrez le lien affiché dans votre navigateur.
+2. Connectez-vous avec les identifiants de l'application mobile de votre marque (email + mot de passe).
+3. Après connexion, le navigateur tente d'ouvrir l'application mobile et affiche une **page d'erreur :
+   c'est normal**. Copiez l'**URL complète** de cette page (barre d'adresse), qui commence par le schéma
+   de l'application (ex. `mymap://oauth2redirect/fr?code=...`).
+4. Collez cette URL dans le champ **Code d'autorisation** et cliquez sur **Valider le code**.
+
+L'état passe à « Connecté au compte ». Le plugin gère ensuite seul le rafraîchissement du jeton
+d'accès ; vous n'aurez à refaire cette procédure que si la connexion est révoquée (message
+« ré-authentification requise »), après un changement de marque ou d'identifiants, ou après un
+vidage complet du cache Jeedom.
+
 ## Étapes suivantes
 
-Une fois le plugin configuré, connectez votre compte (bouton d'authentification), puis lancez la
-découverte des véhicules — ces étapes sont décrites dans les sections correspondantes de cette
-documentation au fur et à mesure des versions du plugin.
+La découverte des véhicules et la remontée de la télémétrie sont décrites dans les sections
+correspondantes de cette documentation au fur et à mesure des versions du plugin.

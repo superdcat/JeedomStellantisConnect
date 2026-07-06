@@ -43,8 +43,25 @@ Marke eingebettet. Die bewährte Methode aus dem Open-Source-Projekt
 Diese Extraktion erfolgt **außerhalb von Jeedom** (auf Ihrem Computer); das Plugin lädt keine APK herunter
 und analysiert auch keine. Die Anmeldedaten laufen nicht ab, dieser Vorgang muss nur einmal durchgeführt werden.
 
+## Kontoverbindung
+
+Sobald die Konfiguration gespeichert ist, verbinden Sie das Plugin mit Ihrem Konto (Abschnitt
+„Kontoverbindung" der Konfigurationsseite):
+
+1. Klicken Sie auf **Autorisierungs-URL generieren** und öffnen Sie dann den angezeigten Link in Ihrem
+   Browser.
+2. Melden Sie sich mit den Anmeldedaten der mobilen App Ihrer Marke an (E-Mail + Passwort).
+3. Nach der Anmeldung versucht der Browser, die mobile App zu öffnen, und zeigt eine **Fehlerseite an:
+   das ist normal**. Kopieren Sie die **vollständige URL** dieser Seite (Adressleiste), die mit dem
+   Schema der Anwendung beginnt (z. B. `mymap://oauth2redirect/fr?code=...`).
+4. Fügen Sie diese URL in das Feld **Autorisierungscode** ein und klicken Sie auf **Code bestätigen**.
+
+Der Status wechselt zu „Mit Konto verbunden". Das Plugin verwaltet anschließend selbstständig die
+Erneuerung des Zugriffstokens; Sie müssen dieses Vorgehen nur wiederholen, wenn die Verbindung
+widerrufen wird (Meldung „Re-Authentifizierung erforderlich"), nach einem Wechsel von Marke oder
+Anmeldedaten oder nach einer vollständigen Leerung des Jeedom-Caches.
+
 ## Nächste Schritte
 
-Sobald das Plugin konfiguriert ist, verbinden Sie Ihr Konto (Authentifizierungsschaltfläche) und starten
-dann die Fahrzeugerkennung — diese Schritte werden in den entsprechenden Abschnitten dieser
-Dokumentation im Laufe der Plugin-Versionen beschrieben.
+Die Fahrzeugerkennung und der Abruf der Telemetriedaten werden in den entsprechenden Abschnitten
+dieser Dokumentation im Laufe der Plugin-Versionen beschrieben.

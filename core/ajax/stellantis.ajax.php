@@ -29,7 +29,24 @@ try {
   */
     ajax::init();
 
+    // Garde-fou autoload : appeler stellantis:: AVANT tout stellantisApi::/stellantisException
+    // (l'autoloader Jeedom ne connaît que stellantis.class.php — cf. CLAUDE.md)
+    if (!stellantis::isConfigured()) {
+        throw new Exception(__('Plugin non configuré : renseignez le Client ID et le Client Secret puis sauvegardez', __FILE__));
+    }
 
+    if (init('action') == 'getAuthUrl') {
+        $config = stellantis::getApiConfig();
+        ajax::success(array(
+            'url' => stellantisApi::buildAuthUrl(),
+            'redirectUri' => $config['redirectUri'],
+        ));
+    }
+
+    if (init('action') == 'submitAuthCode') {
+        stellantisApi::exchangeCode((string) init('code'));
+        ajax::success(__('Authentification réussie : le plugin est connecté à votre compte', __FILE__));
+    }
 
     throw new Exception(__('Aucune méthode correspondante à', __FILE__) . ' : ' . init('action'));
     /*     * *********Catch exeption*************** */

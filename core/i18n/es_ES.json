@@ -13,6 +13,26 @@
         "Code pays à 2 lettres (ex. fr) utilisé pour construire l'URL de redirection par défaut": "Código de país de 2 letras (p. ej. fr) utilizado para construir la URL de redirección por defecto",
         "URL de redirection": "URL de redirección",
         "redirect_uri OAuth2 (schéma de l'app mobile de la marque, ex. mymap://oauth2redirect/fr)": "redirect_uri OAuth2 (esquema de la app móvil de la marca, p. ej. mymap://oauth2redirect/fr)",
-        "Laisser vide pour utiliser le défaut de la marque": "Dejar vacío para usar el valor por defecto de la marca"
+        "Laisser vide pour utiliser le défaut de la marque": "Dejar vacío para usar el valor por defecto de la marca",
+        "Connexion au compte": "Conexión de la cuenta",
+        "État de la connexion": "Estado de la conexión",
+        "Connecté au compte": "Conectado a la cuenta",
+        "Non connecté : suivez les deux étapes ci-dessous après avoir sauvegardé la configuration": "No conectado: siga los dos pasos siguientes después de guardar la configuración",
+        "1. URL d'autorisation": "1. URL de autorización",
+        "Ouvrez cette URL dans votre navigateur et connectez-vous avec le compte de l'application mobile de votre marque": "Abra esta URL en su navegador e inicie sesión con la cuenta de la aplicación móvil de su marca",
+        "Générer l'URL d'autorisation": "Generar URL de autorización",
+        "Ouvrir la page de connexion de votre marque": "Abrir la página de inicio de sesión de su marca",
+        "URL de redirection attendue": "URL de redirección esperada",
+        "2. Code d'autorisation": "2. Código de autorización",
+        "Après connexion, le navigateur affiche une erreur de redirection : copiez l'URL complète de cette page et collez-la ici (à défaut, le paramètre code seul)": "Tras iniciar sesión, el navegador muestra un error de redirección: copie la URL completa de esta página y péguela aquí (en su defecto, solo el parámetro code)",
+        "Collez l'URL de redirection complète (recommandé) ou le code seul": "Pegue la URL de redirección completa (recomendado) o solo el código",
+        "Valider le code": "Validar el código",
+        "Collez d'abord l'URL de redirection (ou le code) dans le champ": "Pegue primero la URL de redirección (o el código) en el campo"
+    },
+    "plugins/stellantis/core/ajax/stellantis.ajax.php": {
+        "401 - Accès non autorisé": "401 - Acceso no autorizado",
+        "Plugin non configuré : renseignez le Client ID et le Client Secret puis sauvegardez": "Plugin no configurado: introduzca el Client ID y el Client Secret y luego guarde",
+        "Authentification réussie : le plugin est connecté à votre compte": "Autenticación correcta: el plugin está conectado a su cuenta",
+        "Aucune méthode correspondante à": "Ningún método correspondiente a"
     }
 }

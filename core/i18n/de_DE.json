@@ -13,6 +13,26 @@
         "Code pays à 2 lettres (ex. fr) utilisé pour construire l'URL de redirection par défaut": "Zweistelliger Ländercode (z. B. fr), der zur Erstellung der Standard-Weiterleitungs-URL verwendet wird",
         "URL de redirection": "Weiterleitungs-URL",
         "redirect_uri OAuth2 (schéma de l'app mobile de la marque, ex. mymap://oauth2redirect/fr)": "OAuth2 redirect_uri (App-Schema der mobilen App der Marke, z. B. mymap://oauth2redirect/fr)",
-        "Laisser vide pour utiliser le défaut de la marque": "Leer lassen, um den Standardwert der Marke zu verwenden"
+        "Laisser vide pour utiliser le défaut de la marque": "Leer lassen, um den Standardwert der Marke zu verwenden",
+        "Connexion au compte": "Kontoverbindung",
+        "État de la connexion": "Verbindungsstatus",
+        "Connecté au compte": "Mit Konto verbunden",
+        "Non connecté : suivez les deux étapes ci-dessous après avoir sauvegardé la configuration": "Nicht verbunden: Führen Sie nach dem Speichern der Konfiguration die beiden folgenden Schritte aus",
+        "1. URL d'autorisation": "1. Autorisierungs-URL",
+        "Ouvrez cette URL dans votre navigateur et connectez-vous avec le compte de l'application mobile de votre marque": "Öffnen Sie diese URL in Ihrem Browser und melden Sie sich mit dem Konto der mobilen App Ihrer Marke an",
+        "Générer l'URL d'autorisation": "Autorisierungs-URL generieren",
+        "Ouvrir la page de connexion de votre marque": "Anmeldeseite Ihrer Marke öffnen",
+        "URL de redirection attendue": "Erwartete Weiterleitungs-URL",
+        "2. Code d'autorisation": "2. Autorisierungscode",
+        "Après connexion, le navigateur affiche une erreur de redirection : copiez l'URL complète de cette page et collez-la ici (à défaut, le paramètre code seul)": "Nach der Anmeldung zeigt der Browser einen Weiterleitungsfehler an: Kopieren Sie die vollständige URL dieser Seite und fügen Sie sie hier ein (andernfalls nur den Parameter code)",
+        "Collez l'URL de redirection complète (recommandé) ou le code seul": "Fügen Sie die vollständige Weiterleitungs-URL ein (empfohlen) oder nur den Code",
+        "Valider le code": "Code bestätigen",
+        "Collez d'abord l'URL de redirection (ou le code) dans le champ": "Fügen Sie zuerst die Weiterleitungs-URL (oder den Code) in das Feld ein"
+    },
+    "plugins/stellantis/core/ajax/stellantis.ajax.php": {
+        "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert",
+        "Plugin non configuré : renseignez le Client ID et le Client Secret puis sauvegardez": "Plugin nicht konfiguriert: Geben Sie Client-ID und Client-Secret ein und speichern Sie anschließend",
+        "Authentification réussie : le plugin est connecté à votre compte": "Authentifizierung erfolgreich: Das Plugin ist mit Ihrem Konto verbunden",
+        "Aucune méthode correspondante à": "Keine passende Methode für"
     }
 }

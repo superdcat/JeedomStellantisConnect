@@ -13,6 +13,26 @@
         "Code pays à 2 lettres (ex. fr) utilisé pour construire l'URL de redirection par défaut": "2-letter country code (e.g. fr) used to build the default redirect URL",
         "URL de redirection": "Redirect URL",
         "redirect_uri OAuth2 (schéma de l'app mobile de la marque, ex. mymap://oauth2redirect/fr)": "OAuth2 redirect_uri (brand's mobile app scheme, e.g. mymap://oauth2redirect/fr)",
-        "Laisser vide pour utiliser le défaut de la marque": "Leave empty to use the brand's default"
+        "Laisser vide pour utiliser le défaut de la marque": "Leave empty to use the brand's default",
+        "Connexion au compte": "Account connection",
+        "État de la connexion": "Connection status",
+        "Connecté au compte": "Connected to account",
+        "Non connecté : suivez les deux étapes ci-dessous après avoir sauvegardé la configuration": "Not connected: follow the two steps below after saving the configuration",
+        "1. URL d'autorisation": "1. Authorization URL",
+        "Ouvrez cette URL dans votre navigateur et connectez-vous avec le compte de l'application mobile de votre marque": "Open this URL in your browser and log in with the account of your brand's mobile application",
+        "Générer l'URL d'autorisation": "Generate authorization URL",
+        "Ouvrir la page de connexion de votre marque": "Open your brand's login page",
+        "URL de redirection attendue": "Expected redirect URL",
+        "2. Code d'autorisation": "2. Authorization code",
+        "Après connexion, le navigateur affiche une erreur de redirection : copiez l'URL complète de cette page et collez-la ici (à défaut, le paramètre code seul)": "After logging in, the browser displays a redirect error: copy the full URL of this page and paste it here (failing that, the code parameter alone)",
+        "Collez l'URL de redirection complète (recommandé) ou le code seul": "Paste the full redirect URL (recommended) or the code alone",
+        "Valider le code": "Validate code",
+        "Collez d'abord l'URL de redirection (ou le code) dans le champ": "First paste the redirect URL (or the code) into the field"
+    },
+    "plugins/stellantis/core/ajax/stellantis.ajax.php": {
+        "401 - Accès non autorisé": "401 - Unauthorized access",
+        "Plugin non configuré : renseignez le Client ID et le Client Secret puis sauvegardez": "Plugin not configured: enter the Client ID and Client Secret then save",
+        "Authentification réussie : le plugin est connecté à votre compte": "Authentication successful: the plugin is connected to your account",
+        "Aucune méthode correspondante à": "No method matching"
     }
 }

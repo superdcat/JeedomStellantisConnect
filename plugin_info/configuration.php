@@ -22,10 +22,15 @@ if (!isConnect('admin')) {
   die();
 }
 ?>
+<?php
+// stellantis:: appelé en premier → charge stellantis.class.php avant tout stellantisApi:: (autoload)
+$stellantisConfigure = stellantis::isConfigured();
+$infoToken = $stellantisConfigure ? stellantisApi::getTokenInfo() : array('authenticated' => false, 'expiresIn' => null);
+?>
 <form class="form-horizontal">
   <fieldset>
     <legend><i class="fas fa-key"></i> {{Connexion API Stellantis / PSA}}</legend>
-    <?php if (!stellantis::isConfigured()) { ?>
+    <?php if (!$stellantisConfigure) { ?>
     <div class="alert alert-warning">{{Plugin non configuré : renseignez au minimum le Client ID et le Client Secret.}}</div>
     <?php } ?>
     <div class="alert alert-info">{{Les identifiants Client ID et Client Secret ne sont pas fournis par Stellantis aux particuliers : ils doivent être extraits de l'application mobile de votre marque (APK) à l'aide d'un outil externe. Consultez la documentation du plugin pour la procédure.}}</div>
@@ -76,4 +81,84 @@ if (!isConnect('admin')) {
       </div>
     </div>
   </fieldset>
+  <fieldset>
+    <legend><i class="fas fa-link"></i> {{Connexion au compte}}</legend>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{État de la connexion}}</label>
+      <div class="col-md-6">
+        <?php if ($infoToken['authenticated']) { ?>
+        <span class="label label-success">{{Connecté au compte}}</span>
+        <?php } else { ?>
+        <span class="label label-warning">{{Non connecté : suivez les deux étapes ci-dessous après avoir sauvegardé la configuration}}</span>
+        <?php } ?>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{1. URL d'autorisation}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{Ouvrez cette URL dans votre navigateur et connectez-vous avec le compte de l'application mobile de votre marque}}"></i></sup>
+      </label>
+      <div class="col-md-6">
+        <a class="btn btn-default" id="stellantis_btGenererAuthUrl"><i class="fas fa-key"></i> {{Générer l'URL d'autorisation}}</a>
+        <div id="stellantis_zoneAuthUrl" style="display:none;margin-top:5px;">
+          <a id="stellantis_lienAuthUrl" href="#" target="_blank" rel="noopener"><i class="fas fa-external-link-alt"></i> {{Ouvrir la page de connexion de votre marque}}</a>
+          <div class="help-block">{{URL de redirection attendue}} : <code id="stellantis_redirectUriInfo"></code></div>
+        </div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{2. Code d'autorisation}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{Après connexion, le navigateur affiche une erreur de redirection : copiez l'URL complète de cette page et collez-la ici (à défaut, le paramètre code seul)}}"></i></sup>
+      </label>
+      <div class="col-md-6">
+        <input class="form-control" id="stellantis_codeAuth" placeholder="{{Collez l'URL de redirection complète (recommandé) ou le code seul}}"/>
+        <a class="btn btn-success" id="stellantis_btValiderCode" style="margin-top:5px;"><i class="fas fa-check"></i> {{Valider le code}}</a>
+      </div>
+    </div>
+  </fieldset>
 </form>
+<script>
+  $('body').off('click', '#stellantis_btGenererAuthUrl').on('click', '#stellantis_btGenererAuthUrl', function () {
+    $.ajax({
+      type: 'POST',
+      url: 'plugins/stellantis/core/ajax/stellantis.ajax.php',
+      data: { action: 'getAuthUrl' },
+      dataType: 'json',
+      error: function (request, status, error) {
+        handleAjaxError(request, status, error);
+      },
+      success: function (data) {
+        if (data.state != 'ok') {
+          $('#div_alert').showAlert({ message: data.result, level: 'danger' });
+          return;
+        }
+        $('#stellantis_lienAuthUrl').attr('href', data.result.url);
+        $('#stellantis_redirectUriInfo').text(data.result.redirectUri);
+        $('#stellantis_zoneAuthUrl').show();
+      }
+    });
+  });
+  $('body').off('click', '#stellantis_btValiderCode').on('click', '#stellantis_btValiderCode', function () {
+    var code = $('#stellantis_codeAuth').val().trim();
+    if (code == '') {
+      $('#div_alert').showAlert({ message: "{{Collez d'abord l'URL de redirection (ou le code) dans le champ}}", level: 'warning' });
+      return;
+    }
+    $.ajax({
+      type: 'POST',
+      url: 'plugins/stellantis/core/ajax/stellantis.ajax.php',
+      data: { action: 'submitAuthCode', code: code },
+      dataType: 'json',
+      error: function (request, status, error) {
+        handleAjaxError(request, status, error);
+      },
+      success: function (data) {
+        if (data.state != 'ok') {
+          $('#div_alert').showAlert({ message: data.result, level: 'danger' });
+          return;
+        }
+        $('#stellantis_codeAuth').val('');
+        $('#div_alert').showAlert({ message: data.result, level: 'success' });
+      }
+    });
+  });
+</script>
