@@ -56,10 +56,13 @@ Sobald die Konfiguration gespeichert ist, verbinden Sie das Plugin mit Ihrem Kon
    Schema der Anwendung beginnt (z. B. `mymap://oauth2redirect/fr?code=...`).
 4. Fügen Sie diese URL in das Feld **Autorisierungscode** ein und klicken Sie auf **Code bestätigen**.
 
-Der Status wechselt zu „Mit Konto verbunden". Das Plugin verwaltet anschließend selbstständig die
-Erneuerung des Zugriffstokens; Sie müssen dieses Vorgehen nur wiederholen, wenn die Verbindung
-widerrufen wird (Meldung „Re-Authentifizierung erforderlich"), nach einem Wechsel von Marke oder
-Anmeldedaten oder nach einer vollständigen Leerung des Jeedom-Caches.
+Der Status wechselt zu „Mit Konto verbunden". Sie können die korrekte Funktion jederzeit über die
+Schaltfläche **Verbindung testen** auf der Plugin-Seite (`Plugins → Vernetzte Objekte → Stellantis
+Connect`) überprüfen, die die Anzahl der im Konto gefundenen Fahrzeuge anzeigt. Das Plugin verwaltet
+anschließend selbstständig die Erneuerung des Zugriffstokens; Sie müssen dieses Vorgehen nur
+wiederholen, wenn die Verbindung widerrufen wird (Meldung „Re-Authentifizierung erforderlich"),
+nach einem Wechsel von Marke oder Anmeldedaten oder nach einer vollständigen Leerung des
+Jeedom-Caches.
 
 ## Nächste Schritte
 

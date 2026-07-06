@@ -55,10 +55,12 @@ section of the configuration page):
    application's scheme (e.g. `mymap://oauth2redirect/fr?code=...`).
 4. Paste this URL into the **Authorization code** field and click **Validate code**.
 
-The status changes to "Connected to account". The plugin then manages the access token refresh on
-its own; you will only need to repeat this procedure if the connection is revoked (message
-"re-authentication required"), after a change of brand or credentials, or after a full Jeedom
-cache clear.
+The status changes to "Connected to account". You can check that it works at any time using the
+**Test connection** button on the plugin page (`Plugins → Connected devices → Stellantis
+Connect`), which displays the number of vehicles found on the account. The plugin then manages the
+access token refresh on its own; you will only need to repeat this procedure if the connection is
+revoked (message "re-authentication required"), after a change of brand or credentials, or after a
+full Jeedom cache clear.
 
 ## Next steps
 

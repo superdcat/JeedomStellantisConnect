@@ -24,6 +24,11 @@ $eqLogics = eqLogic::byType($plugin->getId());
 				<br>
 				<span>{{Configuration}}</span>
 			</div>
+			<div class="cursor logoSecondary" id="stellantis_btTestConnexion">
+				<i class="fas fa-plug"></i>
+				<br>
+				<span>{{Tester la connexion}}</span>
+			</div>
 		</div>
 		<legend><i class="fas fa-table"></i> {{Mes véhicules}}</legend>
 		<?php

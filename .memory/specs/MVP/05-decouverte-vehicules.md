@@ -27,6 +27,10 @@ motorisation) pour pouvoir créer les équipements.
 - [ ] Gère proprement un compte sans véhicule (tableau vide, pas d'erreur).
 
 ## Notes / risques
+- ✅ Forme de la réponse confirmée (2026-07-06, UC04, contre `psa_client.py`) : enveloppe HAL — les
+  véhicules sont sous **`_embedded.vehicles`** (tableau), chaque entrée portant au moins
+  `{id, vin, brand, label}` (cf. `04-test-connexion-tech.md`). `call()` retourne l'enveloppe **non
+  déballée**.
 - Champs exacts (`label` vs `model`, présence de la motorisation dans `/vehicles`) à **confirmer** contre
   une réponse réelle / `psa_car_controller` (`models/*`) — cf. `.memory/analyse/stellantis-data-model.md`.
 - Le mode privacy véhicule peut masquer certains véhicules/données (cf. UC75).

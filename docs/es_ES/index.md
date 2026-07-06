@@ -56,10 +56,12 @@ de la página de configuración):
    comienza con el esquema de la aplicación (p. ej. `mymap://oauth2redirect/fr?code=...`).
 4. Pegue esta URL en el campo **Código de autorización** y haga clic en **Validar el código**.
 
-El estado pasa a «Conectado a la cuenta». A partir de entonces, el plugin gestiona por sí solo la
-renovación del token de acceso; solo deberá repetir este procedimiento si la conexión es revocada
-(mensaje «se requiere reautenticación»), tras un cambio de marca o de credenciales, o tras un
-vaciado completo de la caché de Jeedom.
+El estado pasa a «Conectado a la cuenta». Puede comprobar en cualquier momento su correcto
+funcionamiento mediante el botón **Probar la conexión** de la página del plugin (`Plugins → Objetos
+conectados → Stellantis Connect`), que muestra el número de vehículos encontrados en la cuenta. A
+partir de entonces, el plugin gestiona por sí solo la renovación del token de acceso; solo deberá
+repetir este procedimiento si la conexión es revocada (mensaje «se requiere reautenticación»), tras
+un cambio de marca o de credenciales, o tras un vaciado completo de la caché de Jeedom.
 
 ## Próximos pasos
 

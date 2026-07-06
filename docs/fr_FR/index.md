@@ -55,8 +55,10 @@ compte » de la page de configuration) :
    de l'application (ex. `mymap://oauth2redirect/fr?code=...`).
 4. Collez cette URL dans le champ **Code d'autorisation** et cliquez sur **Valider le code**.
 
-L'état passe à « Connecté au compte ». Le plugin gère ensuite seul le rafraîchissement du jeton
-d'accès ; vous n'aurez à refaire cette procédure que si la connexion est révoquée (message
+L'état passe à « Connecté au compte ». Vous pouvez vérifier le bon fonctionnement à tout moment via
+le bouton **Tester la connexion** de la page du plugin (`Plugins → Objets connectés → Stellantis
+Connect`), qui affiche le nombre de véhicules trouvés sur le compte. Le plugin gère ensuite seul le
+rafraîchissement du jeton d'accès ; vous n'aurez à refaire cette procédure que si la connexion est révoquée (message
 « ré-authentification requise »), après un changement de marque ou d'identifiants, ou après un
 vidage complet du cache Jeedom.
 

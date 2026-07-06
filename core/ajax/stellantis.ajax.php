@@ -29,10 +29,16 @@ try {
   */
     ajax::init();
 
+    // Avant le garde global : testConnection répond TOUJOURS en ajax::success({ok, count, message}),
+    // y compris quand le plugin n'est pas configuré (structure uniforme pour le front)
+    if (init('action') == 'testConnection') {
+        ajax::success(stellantis::testConnection());
+    }
+
     // Garde-fou autoload : appeler stellantis:: AVANT tout stellantisApi::/stellantisException
     // (l'autoloader Jeedom ne connaît que stellantis.class.php — cf. CLAUDE.md)
     if (!stellantis::isConfigured()) {
-        throw new Exception(__('Plugin non configuré : renseignez le Client ID et le Client Secret puis sauvegardez', __FILE__));
+        throw new Exception(__('Plugin non configuré : renseignez la marque, le Client ID et le Client Secret puis sauvegardez', __FILE__));
     }
 
     if (init('action') == 'getAuthUrl') {

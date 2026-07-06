@@ -108,6 +108,60 @@ class stellantis extends eqLogic {
     return $_value;
   }
 
+  /**
+   * Test de connexion bout-en-bout (credentials + token + API) via un appel léger.
+   * Retourne TOUJOURS ['ok' => bool, 'count' => int, 'message' => string] — consommable
+   * aussi bien par l'AJAX que par un appelant interne (cron).
+   */
+  public static function testConnection(): array {
+    if (!self::isConfigured()) {
+      return array(
+        'ok' => false,
+        'count' => 0,
+        'message' => __('Plugin non configuré : renseignez la marque, le Client ID et le Client Secret puis sauvegardez', __FILE__),
+      );
+    }
+    // Cooldown serveur : chaque test = 1 vrai appel API (l'anti double-clic JS est contournable)
+    if (cache::byKey('stellantis::test_cooldown')->getValue('') != '') {
+      return array(
+        'ok' => false,
+        'count' => 0,
+        'message' => __('Un test vient d\'être effectué : patientez quelques secondes avant de réessayer', __FILE__),
+      );
+    }
+    cache::set('stellantis::test_cooldown', '1', 15);
+    try {
+      $reponse = stellantisApi::callWithToken('GET', '/user/vehicles');
+    } catch (stellantisException $e) {
+      return array('ok' => false, 'count' => 0, 'message' => self::messageDepuisException($e));
+    }
+    $vehicules = (isset($reponse['_embedded']['vehicles']) && is_array($reponse['_embedded']['vehicles'])) ? $reponse['_embedded']['vehicles'] : array();
+    $count = count($vehicules);
+    return array(
+      'ok' => true,
+      'count' => $count,
+      'message' => sprintf(__('Connexion OK : %d véhicule(s) trouvé(s) sur le compte', __FILE__), $count),
+    );
+  }
+
+  // Traduit une erreur API typée en message utilisateur actionnable (chaîne UI → enveloppée __()).
+  // Pas de cas « privacy » : jamais produit avant UC07. Le corps brut des réponses d'erreur reste
+  // dans les logs debug, il n'est pas réinjecté dans l'UI.
+  private static function messageDepuisException(stellantisException $_e): string {
+    switch ($_e->getApiType()) {
+      case 'auth_required':
+        return __('Aucune connexion au compte ou session expirée : (ré)authentifiez-vous depuis la configuration du plugin', __FILE__);
+      case 'token_expired':
+        return __('Token invalide malgré un rafraîchissement : réessayez, puis ré-authentifiez-vous si le problème persiste', __FILE__);
+      case 'rate_limited':
+        return __('Trop de requêtes vers l\'API : réessayez plus tard', __FILE__);
+      case 'transport':
+        return __('API injoignable : vérifiez la connexion Internet de votre Jeedom', __FILE__);
+      default:
+        return sprintf(__('Erreur API (HTTP %d) : consultez les logs du plugin pour le détail', __FILE__), $_e->getHttpCode());
+    }
+  }
+
   /*
   * Fonction exécutée automatiquement toutes les minutes par Jeedom
   public static function cron() {}
