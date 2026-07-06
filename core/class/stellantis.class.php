@@ -231,3 +231,146 @@ class stellantisCmd extends cmd {
 
   /*     * **********************Getteur Setteur*************************** */
 }
+
+/**
+ * Exception typée du plugin pour toute erreur d'appel à l'API Stellantis/PSA.
+ * Types possibles : token_expired | auth_required | rate_limited | privacy | api_error | transport.
+ * ⚠️ « privacy » n'est jamais produit par typeFromResponse() : réservé au code métier (UC07), qui le
+ * construira lui-même face à une réponse 2xx vide de statut (mode privé activé sur le véhicule).
+ */
+class stellantisException extends Exception {
+  private $httpCode;
+  private $apiType;
+
+  public function __construct(string $_message, int $_httpCode = 0, string $_apiType = 'api_error') {
+    // Message tronqué : le corps brut complet est loggué en debug par le transport avant la levée
+    parent::__construct(mb_substr($_message, 0, 500, 'UTF-8'), $_httpCode);
+    $this->httpCode = $_httpCode;
+    $this->apiType = $_apiType;
+  }
+
+  // Déduit le type d'erreur d'une réponse HTTP non-2xx
+  public static function typeFromResponse(int $_httpCode, ?array $_body): string {
+    $corps = ($_body === null) ? '' : json_encode($_body);
+    if (strpos($corps, 'invalid_grant') !== false) {
+      return 'auth_required';
+    }
+    if ($_httpCode == 401) {
+      return 'token_expired';
+    }
+    if ($_httpCode == 429) {
+      return 'rate_limited';
+    }
+    return 'api_error';
+  }
+
+  public function getHttpCode(): int {
+    return $this->httpCode;
+  }
+
+  public function getApiType(): string {
+    return $this->apiType;
+  }
+
+  public function isTokenError(): bool {
+    return in_array($this->apiType, array('token_expired', 'auth_required'));
+  }
+
+  public function isRateLimited(): bool {
+    return $this->apiType == 'rate_limited';
+  }
+}
+
+/**
+ * Brique unique par laquelle passent tous les appels HTTP REST du plugin (cf. CLAUDE.md).
+ * UC02 : transport générique (httpRequest) + façade connectedcar v4 (call).
+ * La couche OAuth2 (UC03) réutilisera httpRequest() (form-urlencoded + Basic) — aucun autre cURL.
+ */
+class stellantisApi {
+  // Méthodes HTTP acceptées par la façade call()
+  const METHODES_AUTORISEES = array('GET', 'POST', 'PUT', 'DELETE');
+
+  /**
+   * Appel authentifié à l'API connectedcar v4 : client_id en query (toutes méthodes),
+   * Bearer + x-introspect-realm en headers, Accept hal+json.
+   * Retourne le JSON décodé tel quel (enveloppe HAL non déballée — à la charge du métier).
+   * @throws stellantisException
+   */
+  public static function call(string $_method, string $_path, array $_params = array(), ?string $_accessToken = null): array {
+    $method = strtoupper($_method);
+    if (!in_array($method, self::METHODES_AUTORISEES)) {
+      throw new stellantisException('Méthode HTTP non autorisée : ' . $method);
+    }
+    if (!preg_match('#^/[A-Za-z0-9/_-]+$#D', $_path)) {
+      throw new stellantisException('Chemin API invalide : ' . $_path);
+    }
+    $config = stellantis::getApiConfig();
+    $query = array('client_id' => $config['clientId']);
+    $headers = array(
+      'Accept: application/hal+json',
+      'x-introspect-realm: ' . $config['realm'],
+    );
+    $rawBody = null;
+    if ($method == 'GET' || $method == 'DELETE') {
+      // $query en second : le client_id de la config ne peut pas être écrasé par $_params
+      $query = array_merge($_params, $query);
+    } else {
+      $rawBody = json_encode($_params);
+      $headers[] = 'Content-Type: application/json';
+    }
+    if ($_accessToken !== null && $_accessToken !== '') {
+      $headers[] = 'Authorization: Bearer ' . $_accessToken;
+    }
+    $url = $config['apiBaseUrl'] . $_path . '?' . http_build_query($query);
+    return self::httpRequest($method, $url, $headers, $rawBody);
+  }
+
+  /**
+   * Transport HTTP bas niveau : cURL, timeouts, décodage JSON, mapping d'erreurs, logs redactés
+   * (jamais de token/secret, jamais la query string — le client_id y figure).
+   * @throws stellantisException
+   */
+  private static function httpRequest(string $_method, string $_url, array $_headers = array(), ?string $_rawBody = null): array {
+    $urlSansQuery = strtok($_url, '?');
+    $ch = curl_init();
+    curl_setopt_array($ch, array(
+      CURLOPT_URL => $_url,
+      CURLOPT_CUSTOMREQUEST => $_method,
+      CURLOPT_RETURNTRANSFER => true,
+      CURLOPT_FOLLOWLOCATION => false,
+      CURLOPT_TIMEOUT => 15,
+      CURLOPT_CONNECTTIMEOUT => 10,
+      CURLOPT_HTTPHEADER => $_headers,
+    ));
+    if ($_rawBody !== null) {
+      curl_setopt($ch, CURLOPT_POSTFIELDS, $_rawBody);
+    }
+    $body = curl_exec($ch);
+    $curlErrno = curl_errno($ch);
+    $curlError = curl_error($ch);
+    $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($body === false || $curlErrno !== 0) {
+      log::add('stellantis', 'warning', $_method . ' ' . $urlSansQuery . ' → erreur de transport cURL #' . $curlErrno . ' : ' . $curlError);
+      throw new stellantisException('Erreur de transport vers l\'API (cURL #' . $curlErrno . ' : ' . $curlError . ')', 0, 'transport');
+    }
+    log::add('stellantis', 'debug', $_method . ' ' . $urlSansQuery . ' → HTTP ' . $httpCode);
+    $decoded = null;
+    if (trim($body) !== '') {
+      $decoded = json_decode($body, true);
+      if (json_last_error() !== JSON_ERROR_NONE) {
+        $decoded = null;
+        if ($httpCode >= 200 && $httpCode < 300) {
+          log::add('stellantis', 'debug', 'Corps non-JSON sur HTTP ' . $httpCode . ' : ' . $body);
+          throw new stellantisException('Réponse API illisible (JSON invalide, HTTP ' . $httpCode . ')', $httpCode);
+        }
+      }
+    }
+    if ($httpCode >= 200 && $httpCode < 300) {
+      return is_array($decoded) ? $decoded : array();
+    }
+    log::add('stellantis', 'debug', 'Corps d\'erreur HTTP ' . $httpCode . ' : ' . $body);
+    $type = stellantisException::typeFromResponse($httpCode, is_array($decoded) ? $decoded : null);
+    throw new stellantisException('Erreur API HTTP ' . $httpCode . ' : ' . $body, $httpCode, $type);
+  }
+}

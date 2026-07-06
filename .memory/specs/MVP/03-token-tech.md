@@ -39,6 +39,11 @@
 ## Server vs Client
 Serveur (PHP) pour toute la logique ; le front (page config) n'affiche que l'URL et le champ `code`
 (2 actions AJAX). Le navigateur de l'utilisateur fait le login marque hors Jeedom.
+⚠️ **Autoload (garde-fou, advisor 2026-07-06)** : dans `core/ajax/stellantis.ajax.php`, un appel
+`stellantis::` (ex. `isConfigured()`/`getApiConfig()`) doit **précéder** tout usage de
+`stellantisApi::`/`stellantisException`, sinon `Fatal error: Class not found` (l'autoloader cherche
+`stellantisApi.class.php` qui n'existe pas). Les POST token réutilisent le transport privé
+`stellantisApi::httpRequest()` (UC02) en **form-urlencoded** + `Authorization: Basic` — pas de cURL dédié.
 
 ## Concurrence (best effort)
 Pas de mutex PHP-FPM ; au pire deux refresh redondants sur une courte fenêtre (toléré). Documenté dans
