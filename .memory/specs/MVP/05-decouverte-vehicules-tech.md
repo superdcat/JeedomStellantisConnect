@@ -26,7 +26,13 @@
     implémenter réellement si ce warning est un jour observé.
   - Entrée sans `id` ou `vin` → ignorée + warning avec l'`id` API si présent (jamais le VIN).
   - Compte sans véhicule / réponse sans `_embedded.vehicles` → `[]` (pas d'erreur).
-  - `stellantisException` **remonte** (pas de catch : les appelants — UC06 sync, UC04 — mappent).
+    - ✅ **Confirmé en prod (2026-07-07)** : l'API ne renvoie **pas** un `200` avec `_embedded.vehicles`
+      vide, mais un **`404`** avec un corps `{"code":40400,"message":"No vehicle found",...}`. Détecté
+      par `stellantisException::typeFromResponse()` (`httpCode == 404 && body.code == 40400` →
+      `apiType = 'no_vehicle'`), **catché** ici (et dans `testConnection()`) pour retourner `[]`
+      (resp. `{ok:true, count:0}`) au lieu de laisser remonter l'erreur.
+  - `stellantisException` **remonte** pour tout type autre que `no_vehicle` (pas de catch générique :
+    les appelants — UC06 sync, UC04 — mappent).
 - `private static function energieDepuisEngine(array $engines): string` — **vocabulaire projet
   normalisé** : `Electric` | `Thermal` | `Hybrid` | `''` (inconnu).
   - Basé sur la **présence** des classes (pas sur `count()` — un bi-moteur 100 % électrique a 2

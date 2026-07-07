@@ -39,6 +39,7 @@
         "Plugin non configuré : renseignez la marque, le Client ID et le Client Secret puis sauvegardez": "Plugin no configurado: introduzca la marca, el Client ID y el Client Secret y luego guarde",
         "Un test vient d'être effectué : patientez quelques secondes avant de réessayer": "Se acaba de realizar una prueba: espere unos segundos antes de volver a intentarlo",
         "Connexion OK : %d véhicule(s) trouvé(s) sur le compte": "Conexión correcta: %d vehículo(s) encontrado(s) en la cuenta",
+        "Connexion OK : aucun véhicule sur le compte": "Conexión correcta: ningún vehículo en la cuenta",
         "Aucune connexion au compte ou session expirée : (ré)authentifiez-vous depuis la configuration du plugin": "Sin conexión a la cuenta o sesión caducada: (vuelva a) autenticarse desde la configuración del plugin",
         "Token invalide malgré un rafraîchissement : réessayez, puis ré-authentifiez-vous si le problème persiste": "Token inválido a pesar de una renovación: vuelva a intentarlo y, si el problema persiste, vuelva a autenticarse",
         "Trop de requêtes vers l'API : réessayez plus tard": "Demasiadas solicitudes a la API: vuelva a intentarlo más tarde",

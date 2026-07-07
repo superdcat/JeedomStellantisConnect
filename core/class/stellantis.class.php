@@ -133,6 +133,10 @@ class stellantis extends eqLogic {
     try {
       $reponse = stellantisApi::callWithToken('GET', '/user/vehicles');
     } catch (stellantisException $e) {
+      // 404 « No vehicle found » : compte valide sans véhicule, pas une erreur de connexion
+      if ($e->getApiType() == 'no_vehicle') {
+        return array('ok' => true, 'count' => 0, 'message' => __('Connexion OK : aucun véhicule sur le compte', __FILE__));
+      }
       return array('ok' => false, 'count' => 0, 'message' => self::messageDepuisException($e));
     }
     $count = count(self::vehiculesBrutsDepuisReponse($reponse));
@@ -151,7 +155,16 @@ class stellantis extends eqLogic {
    * @throws stellantisException
    */
   public static function discoverVehicles(): array {
-    $reponse = stellantisApi::callWithToken('GET', '/user/vehicles');
+    try {
+      $reponse = stellantisApi::callWithToken('GET', '/user/vehicles');
+    } catch (stellantisException $e) {
+      // 404 « No vehicle found » : compte valide sans véhicule, pas une erreur
+      if ($e->getApiType() == 'no_vehicle') {
+        log::add('stellantis', 'info', 'Découverte : 0 véhicule sur le compte');
+        return array();
+      }
+      throw $e;
+    }
     $bruts = self::vehiculesBrutsDepuisReponse($reponse);
     $vehicules = array();
     foreach ($bruts as $brut) {
@@ -380,7 +393,8 @@ class stellantisCmd extends cmd {
 
 /**
  * Exception typée du plugin pour toute erreur d'appel à l'API Stellantis/PSA.
- * Types possibles : token_expired | auth_required | rate_limited | privacy | api_error | transport.
+ * Types possibles : token_expired | auth_required | rate_limited | no_vehicle | privacy | api_error
+ * | transport.
  * ⚠️ « privacy » n'est jamais produit par typeFromResponse() : réservé au code métier (UC07), qui le
  * construira lui-même face à une réponse 2xx vide de statut (mode privé activé sur le véhicule).
  */
@@ -406,6 +420,10 @@ class stellantisException extends Exception {
     }
     if ($_httpCode == 429) {
       return 'rate_limited';
+    }
+    // L'API renvoie un 404 « métier » (pas une erreur d'endpoint) quand le compte n'a aucun véhicule
+    if ($_httpCode == 404 && $_body !== null && isset($_body['code']) && (int) $_body['code'] === 40400) {
+      return 'no_vehicle';
     }
     return 'api_error';
   }

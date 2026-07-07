@@ -26,7 +26,7 @@ motorisation) pour pouvoir créer les équipements.
 ## Critères d'acceptation
 - [ ] `stellantis::discoverVehicles()` renvoie tous les véhicules du compte (pagination incluse).
 - [ ] Chaque entrée contient au minimum `id`, `vin`, `brand` (+ `label` si fourni).
-- [ ] Gère proprement un compte sans véhicule (tableau vide, pas d'erreur).
+- [x] Gère proprement un compte sans véhicule (tableau vide, pas d'erreur).
 
 ## Notes / risques
 - ✅ Forme de la réponse confirmée (2026-07-06, UC04, contre `psa_client.py`) : enveloppe HAL — les
