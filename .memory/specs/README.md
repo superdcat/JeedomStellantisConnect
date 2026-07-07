@@ -26,6 +26,8 @@
     │                               (AdBlue/lave-glace/révision), 44 ouvrants détaillés
     ├── 50-gestion-vehicules/       51 identité véhicule (VIN/marque/modèle), 52 image du modèle,
     │                               53 multi-véhicules/comptes, 54 multi-marques
+    ├── 60-configuration-avancee/   61 extraction automatique des identifiants (Client ID/Secret) depuis
+    │                               l'APK en PHP pur, en complément de la saisie manuelle (MVP/01)
     ├── 70-supervision-robustesse/  71 santé & fraîcheur, 72 rate-limiting/anti-ban, 73 protection batterie 12V,
     │                               74 renouvellement & alertes de token, 75 mode privacy, 76 sync sélective,
     │                               77 statistiques d'appels API

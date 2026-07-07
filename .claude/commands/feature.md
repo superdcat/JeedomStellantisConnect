@@ -182,3 +182,22 @@ et mets à jour plutôt que dupliquer ; supprime une note devenue fausse. N'enre
 code/git/`CLAUDE.md`/specs disent déjà. Dates absolues ; **jamais** de secret/token.
 
 Si tu as mémorisé : présente-le en 1-3 lignes. Sinon, ne dis rien de spécial et clôture.
+
+## Étape 13 — Mise à jour de `CLAUDE.md` (fin de cycle)
+
+`CLAUDE.md` est **lu par toute future session** : une affirmation qui devient fausse après cette
+feature (état d'avancement, mention « à créer »/« reste à faire » visant un fichier/classe qui existe
+désormais, description d'architecture non actualisée) transmet une fausse information à chaque
+`/feature` suivant. Avant de clore, vérifie et corrige **uniquement ce que cette feature a rendu faux** :
+
+- **Note « État d'avancement »** (juste après « Présentation ») : si `$ARGUMENTS` fait avancer le MVP
+  (UC01-10) ou clôt un domaine post-MVP, mets à jour la liste des UC faites / restantes et la date.
+- **Section Architecture** : si un composant décrit comme futur (« à créer », « prévu », « post-MVP »)
+  vient d'être implémenté par cette feature, reformule au présent (comme pour `stellantisApi` déjà
+  corrigé le 2026-07-07) — ou l'inverse si une feature retire/déplace un composant documenté.
+- **Autres sections** (Configuration & secrets, Conventions…) : seulement si cette feature a introduit
+  une clé de config, un fichier, ou une convention qui n'y figure pas encore.
+
+**Ne réécris pas** ce qui reste vrai. Pas de refonte, pas de reformulation cosmétique — uniquement les
+phrases concrètement rendues obsolètes ou incomplètes par `$ARGUMENTS`. Si rien n'a changé dans
+`CLAUDE.md`, ne dis rien de spécial et clôture.

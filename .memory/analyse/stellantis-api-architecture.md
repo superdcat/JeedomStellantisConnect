@@ -197,6 +197,14 @@ avec le PHP via le **socket Jeedom** (`jeedom_socket`/`jeedom_com`, déjà prés
 1. **Origine des `client_id`/`client_secret`** : (a) l'utilisateur les saisit (récupérés via un outil
    externe type `app_decoder.py`/`psa-token-helper`) — **recommandé** (léger, pas d'APK dans le plugin) ;
    (b) le plugin embarque l'extraction APK (lourd, `androguard`, juridiquement plus exposé). → **(a)**.
+   ⚠️ **Écarté explicitement (2026-07-07)** : figer les 5 jeux de credentials en dur dans le code du
+   plugin — plus exposé que (b) (republication permanente de secrets propriétaires dans l'historique
+   git du projet, casse silencieuse et collective si Stellantis les fait tourner). **Nuance retenue** :
+   un post-MVP **UC61** (`post-mvp/60-configuration-avancee/61-extraction-auto-credentials.md`)
+   automatise (b) **sans** en garder les inconvénients « lourd/androguard » — l'extraction des
+   ressources *raw* de l'APK (`parameters.json`) est faisable en **PHP pur** (`ZipArchive`, pas besoin
+   d'un décodeur de ressources Android complet), et reste une extraction **à la demande, par
+   installation**, jamais des valeurs figées dans le dépôt.
 2. **Lecture seule vs démon dès le MVP** : on **diffère** le démon (MVP lecture pure). Alternative :
    tout-en-un avec démon dès le départ (plus puissant, mais bloque la livraison d'un MVP simple et fiable).
 3. **`php-mqtt/client` (B1) vs démon Python (B2)** pour les commandes : **B2** (robustesse éprouvée).

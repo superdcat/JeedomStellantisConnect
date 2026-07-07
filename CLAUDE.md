@@ -27,10 +27,12 @@ Un plugin Jeedom **n'est pas autonome** : il s'installe sous `<jeedom>/plugins/s
 PHP dépend du core Jeedom, atteint via `require_once __DIR__ . '/../../../../core/php/core.inc.php';`.
 Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 
-> **État du code (2026-06-25)** : le dépôt est encore le **squelette `plugin-template` de Jeedom**
-> (classes `template`/`templateCmd`, `info.json` id `template`). **Rien n'est implémenté.** Première
-> étape technique : renommer l'id `template` → `stellantis` (assistant `plugin_info/helperConfiguration.php`,
-> ou rename manuel cohérent sur tous les fichiers/classes/hooks). Toute la suite suit les specs.
+> **État d'avancement (2026-07-07)** : l'id a été renommé `template` → `stellantis` (classes
+> `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP en cours** : UC01 à UC05 sont
+> implémentées (configuration du plugin, client HTTP REST, authentification OAuth2 PKCE/token, test de
+> connexion, découverte des véhicules). Reste à faire pour clore le MVP : UC06 (création des
+> équipements) à UC10 (robustesse). Cette note est **mise à jour en fin de chaque `/feature`** (dernière
+> étape du workflow) — elle reflète l'avancement réel, pas un instantané figé.
 
 ## Feuille de route & specs
 
@@ -54,7 +56,7 @@ Disposition Jeedom fixe (type MVC). Pièces principales, toutes nommées d'aprè
     télémétrie ; `$_encryptConfigKey` chiffre les champs sensibles.
   - `stellantisCmd extends cmd` — commande (info ou action). `execute($_options)` exécute les actions
     (réveil, charge, préconditionnement, verrouillage…) — **post-MVP**, en passant par le démon MQTT.
-- **Client API `stellantisApi`** (à créer dans `core/class/stellantis.class.php`, cf. `MVP/02`,`03`) —
+- **Client API `stellantisApi`** (définie dans `core/class/stellantis.class.php`, cf. `MVP/02`,`03`) —
   **brique unique** par laquelle passent **tous** les appels HTTP REST : OAuth2 PKCE (URL d'autorisation,
   échange du `code`, refresh), enveloppe Bearer + header `x-introspect-realm`, base
   `api.groupe-psa.com/connectedcar/v4`, parsing, mapping d'erreurs (401/invalid_grant/rate-limit).

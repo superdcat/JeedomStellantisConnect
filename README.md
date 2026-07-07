@@ -1,25 +1,63 @@
-# Template de plugin pour Jeedom
+# Stellantis Connect — Plugin Jeedom
 
-Ce "template de plugin" sert de base à la réalisation de plugins pour **Jeedom**.
+Plugin **[Jeedom](https://www.jeedom.com/)** qui connecte les véhicules **Stellantis / ex-Groupe PSA**
+(**Peugeot, Citroën, DS, Opel, Vauxhall**) à votre installation domotique : remontée de la
+**télémétrie** (batterie/SOC, charge, autonomie, carburant, position GPS, kilométrage, état
+portes/verrouillage, pression pneus, préconditionnement) et, à terme, **pilotage à distance** (réveil,
+charge, préconditionnement, verrouillage, klaxon, feux).
 
-La documentation générale relative à la conception de plugin est consultable [ici](https://doc.jeedom.com/fr_FR/dev/). Dans le détail :   
-* [Utilisation du template de plugin](https://doc.jeedom.com/fr_FR/dev/plugin_template) : Le template de plugin est une base de plugin pour Jeedom qui doit être adaptée avec l'id de votre plugin et à laquelle il suffit d'ajouter vos propres fonctions. 
-* [Fichier info.json](https://doc.jeedom.com/fr_FR/dev/structure_info_json) : Intégré depuis la version 3.0 de Jeedom, le fichier **info.json** est obligatoire pour le bon fonctionnement des plugins et leur bon déploiement sur le Market Jeedom.
-* [Icône du plugin](https://doc.jeedom.com/fr_FR/dev/Icone_de_plugin) : Afin de pouvoir être publié sur le Market Jeedom, tout plugin doit disposer d’une icône. Attention à ne pas utiliser le même code couleur que les icônes des plugins Jeedom officiels.
-* [Widget du plugin](https://doc.jeedom.com/fr_FR/dev/widget_plugin) : Présentation des différentes manières d'inclure des widgets personnalisés au plugin.
-* [Documentation du plugin](https://doc.jeedom.com/fr_FR/dev/documentation_plugin) : Présentation de la mise en place d'une documentation car un bon plugin n'est rien sans documentation adéquate.
-* [Publication du plugin](https://doc.jeedom.com/fr_FR/dev/publication_plugin) : Description des pré-requis indispensables à la publication du plugin.
+> ⚠️ **API non officielle.** Stellantis ne propose pas d'accès développeur aux particuliers. Ce plugin
+> utilise l'**API consommateur** — celle des applications mobiles MyPeugeot/MyCitroën/MyDS/MyOpel/
+> MyVauxhall, rétro-documentée par la communauté (projet de référence
+> [`psa_car_controller`](https://github.com/flobz/psa_car_controller)) — et non l'API officielle
+> B2B/B2C, inaccessible en pratique à un particulier. Cet usage n'est pas couvert par les conditions
+> d'utilisation des applications mobiles ; c'est un risque assumé et documenté, à la charge de
+> l'utilisateur.
 
----
-Si vous créez une branch nommée prettier, le robot workflows fera une passe complete sur le code pour que le code soit le plus uniforme possible.
----
-test workflow en cours... for commit
+## État du projet
 
----
-Nouvel assistant pour un gain de temps à la création de votre plugin
----
-Sur votre terminal, vous pouvez vous rendre dans plugin_info, et executer : php helperConfiguration.php
-Un assistant en CLI vous posera quelques questions, (l'id du plugin, la catégorie, si démon, etcc), puis s'occupera de renommer tous les fichiers et le reste.
-Voila, votre plugin est basiquement prêt pour coder votre travail.
+En développement actif. Le socle **MVP** (lecture seule, 100 % PHP, sans démon) est en cours
+d'implémentation :
 
+- ✅ Configuration du plugin (marque, `client_id`/`client_secret`, pays)
+- ✅ Client HTTP REST bas niveau vers l'API consommateur
+- ✅ Authentification OAuth2 (Authorization Code + PKCE) et gestion du token
+- ✅ Test de connexion
+- ✅ Découverte des véhicules du compte
+- ⏳ Création des équipements, remontée de la télémétrie, rafraîchissement périodique (cron)
 
+Le pilotage à distance (réveil, charge, préconditionnement, verrouillage…) est prévu **après** le MVP,
+via un démon Python dédié (MQTT) — voir la feuille de route ci-dessous.
+
+## Installation & configuration
+
+Comme tout plugin Jeedom : dépôt sous `<jeedom>/plugins/stellantis/`, puis activation depuis
+`Plugins → Gestion des plugins`. Aucune dépendance externe pour le MVP (`hasDependency: false`,
+`hasOwnDeamon: false`).
+
+La configuration nécessite d'obtenir un `client_id`/`client_secret` propres à votre marque et à votre
+pays (non fournis par Stellantis) : la procédure complète — extraction depuis l'APK, connexion OAuth2,
+récupération du code d'autorisation — est détaillée dans la documentation utilisateur :
+
+- 🇫🇷 [`docs/fr_FR/index.md`](docs/fr_FR/index.md) (langue source)
+- 🇬🇧 [`docs/en_US/index.md`](docs/en_US/index.md)
+- 🇩🇪 [`docs/de_DE/index.md`](docs/de_DE/index.md)
+- 🇪🇸 [`docs/es_ES/index.md`](docs/es_ES/index.md)
+
+## Pour les contributeurs
+
+- [`CLAUDE.md`](CLAUDE.md) — architecture du plugin, conventions du dépôt, contraintes Jeedom
+  (autoload, chiffrement de config, i18n).
+- [`.memory/specs/`](.memory/specs/README.md) — feuille de route découpée en cas d'usage (UC), MVP puis
+  post-MVP par domaine (commandes à distance, énergie/charge, localisation, entretien, supervision…).
+- [`.memory/analyse/`](.memory/analyse/INDEX.md) — décisions d'architecture et enseignements
+  (choix de l'API consommateur, comparaison avec une dépendance à `psa_car_controller`, modèle de
+  données, pièges connus).
+- Pas de build local ni de lint/test en ligne de commande : la validation tourne en CI
+  (`.github/workflows/work.yml`, workflows réutilisables de [`jeedom/workflows`](https://github.com/jeedom/workflows))
+  sur push/PR vers `beta` et PR vers `master`. Pousser sur une branche `prettier` déclenche un
+  reformatage automatique du code.
+
+## Licence
+
+AGPL — voir [`plugin_info/info.json`](plugin_info/info.json).
