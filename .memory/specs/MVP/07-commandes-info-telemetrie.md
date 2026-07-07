@@ -33,10 +33,10 @@ kilométrage, position, état portes/verrouillage, fraîcheur.
   `fuel_level` sur VE → se baser sur `energies[].type` et la **présence effective** du champ.
 - `generic_type` posés pour des widgets propres ; `position` en `string "lat,lon"` (widget carte = UC32).
 
-## Critères d'acceptation
-- [ ] Après synchro, chaque véhicule possède les commandes info correspondant à sa motorisation.
-- [ ] Une re-synchro ne duplique pas les commandes.
-- [ ] Les valeurs reflètent le `/status` réel (SOC, autonomie, km, verrouillage, position).
+## Critères d'acceptation (implémentés 2026-07-07 — reviews qualité + sécurité OK ; valeurs réelles à valider en recette Jeedom + vrai véhicule)
+- [x] Après synchro, chaque véhicule possède les commandes info correspondant à sa motorisation.
+- [x] Une re-synchro ne duplique pas les commandes.
+- [x] Les valeurs reflètent le `/status` réel (SOC, autonomie, km, verrouillage, position).
 
 ## Notes / risques
 - Noms de champs : voir `[[stellantis-data-model]]` (chemins confirmés sur dumps réels). **Pièges

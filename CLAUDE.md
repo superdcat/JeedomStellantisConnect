@@ -28,12 +28,13 @@ PHP dépend du core Jeedom, atteint via `require_once __DIR__ . '/../../../../co
 Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 
 > **État d'avancement (2026-07-07)** : l'id a été renommé `template` → `stellantis` (classes
-> `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP en cours** : UC01 à UC06 sont
+> `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP en cours** : UC01 à UC07 sont
 > implémentées (configuration du plugin, client HTTP REST, authentification OAuth2 PKCE/token, test de
-> connexion, découverte des véhicules, création/synchronisation des équipements — bouton « Synchroniser »
-> + `stellantis::syncVehicles()`). Reste à faire pour clore le MVP : UC07 (commandes info télémétrie) à
-> UC10 (robustesse). Cette note est **mise à jour en fin de chaque `/feature`** (dernière étape du
-> workflow) — elle reflète l'avancement réel, pas un instantané figé.
+> connexion, découverte des véhicules, création/synchronisation des équipements, commandes info de
+> télémétrie — `createCommands()`/`parseStatus()`/`refreshTelemetry()`, peuplées au clic « Synchroniser »).
+> Reste à faire pour clore le MVP : UC08 (cron de rafraîchissement) à UC10 (robustesse). Cette note est
+> **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
+> réel, pas un instantané figé.
 
 ## Feuille de route & specs
 
@@ -145,6 +146,10 @@ Le plugin est **nativement multilingue**. Langues : **`fr_FR` (source/défaut)**
 
 - Toute chaîne UI est **enveloppée** : `{{Texte français}}` en HTML/JS, `__('Texte français', __FILE__)`
   en PHP. La clé est **toujours le texte source français**.
+  - ⚠️ **Toujours une chaîne LITTÉRALE** dans `__()` — jamais `__($variable)`. L'extraction i18n (dont
+    le sous-agent `translator`) est un **scan statique** : un nom stocké dans un tableau/variable puis
+    passé à `__()` échappe à la traduction (constaté UC07 : les libellés de commandes doivent porter
+    `__('Batterie', __FILE__)` **dans** la table de définitions, pas `__($nom)` au moment de l'usage).
 - Les traductions vivent dans `core/i18n/<langue>.json`, **un fichier par langue cible**
   (`en_US.json`, `de_DE.json`, `es_ES.json` — **pas** de `fr_FR.json`). Format :
   ```json

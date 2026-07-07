@@ -47,7 +47,16 @@
         "Token invalide malgré un rafraîchissement : réessayez, puis ré-authentifiez-vous si le problème persiste": "Token trotz Aktualisierung ungültig: Versuchen Sie es erneut und authentifizieren Sie sich erneut, falls das Problem weiterhin besteht",
         "Trop de requêtes vers l'API : réessayez plus tard": "Zu viele Anfragen an die API: Versuchen Sie es später erneut",
         "API injoignable : vérifiez la connexion Internet de votre Jeedom": "API nicht erreichbar: Überprüfen Sie die Internetverbindung Ihres Jeedom",
-        "Erreur API (HTTP %d) : consultez les logs du plugin pour le détail": "API-Fehler (HTTP %d): Weitere Details finden Sie in den Plugin-Protokollen"
+        "Erreur API (HTTP %d) : consultez les logs du plugin pour le détail": "API-Fehler (HTTP %d): Weitere Details finden Sie in den Plugin-Protokollen",
+        "Batterie": "Batterie",
+        "Autonomie": "Reichweite",
+        "État de charge": "Ladezustand",
+        "Câble branché": "Kabel angeschlossen",
+        "Carburant": "Kraftstoff",
+        "Kilométrage": "Kilometerstand",
+        "Verrouillage": "Verriegelung",
+        "Position": "Position",
+        "Dernière MAJ": "Letzte Aktualisierung"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert",

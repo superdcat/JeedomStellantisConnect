@@ -291,9 +291,15 @@ class stellantis extends eqLogic {
         } else {
           $majs++;
         }
+        // UC07 : créer les commandes info (selon motorisation) puis les peupler via le /status
+        // (best-effort). Après save() (id disponible) et hors postSave → pas de récursion. La boucle
+        // périodique de rafraîchissement est en UC08 ; ici c'est une passe unique au clic Synchroniser.
+        $eqLogic->createCommands();
+        $eqLogic->refreshTelemetry();
       } catch (Exception $e) {
-        // Jamais de VIN en clair dans les logs (convention CLAUDE.md)
-        log::add('stellantis', 'warning', 'Synchronisation : véhicule ignoré (erreur de sauvegarde) : ' . $e->getMessage());
+        // Jamais de VIN en clair dans les logs (convention CLAUDE.md). Englobe erreur de save ET erreur
+        // API du refreshTelemetry : message générique (l'équipement peut avoir été créé malgré tout).
+        log::add('stellantis', 'warning', 'Synchronisation : erreur sur un véhicule : ' . $e->getMessage());
       }
     }
     // Véhicules disparus du compte → désactiver plutôt que supprimer (cf. UC76)
@@ -311,6 +317,299 @@ class stellantis extends eqLogic {
       $message .= ' — ' . sprintf(__('%d véhicule(s) réapparu(s) laissé(s) désactivé(s) : réactivez-les manuellement si besoin', __FILE__), $reactivables);
     }
     return array('ok' => true, 'created' => $crees, 'updated' => $majs, 'disabled' => $desactives, 'reactivables' => $reactivables, 'message' => $message);
+  }
+
+  /* * ******************* UC07 — Commandes info de télémétrie ******************* */
+
+  /**
+   * Table unique des commandes info (source de vérité, isolée) : logicalId => [nom FR, subType,
+   * generic_type, unité, historiser]. Tout ajout/retrait de commande socle se fait ICI.
+   * ⚠️ Les noms sont enveloppés en __() avec une chaîne LITTÉRALE (jamais une variable) pour que
+   * l'extracteur i18n (sous-agent translator) les capture.
+   */
+  private static function definitionsCommandes(): array {
+    return array(
+      'battery_soc'      => array(__('Batterie', __FILE__), 'numeric', 'BATTERY', '%', true),
+      'autonomy'         => array(__('Autonomie', __FILE__), 'numeric', '', 'km', true),
+      'charging_status'  => array(__('État de charge', __FILE__), 'string', '', '', false),
+      'charging_plugged' => array(__('Câble branché', __FILE__), 'binary', 'PRESENCE', '', false),
+      'fuel_level'       => array(__('Carburant', __FILE__), 'numeric', '', '%', true),
+      'mileage'          => array(__('Kilométrage', __FILE__), 'numeric', '', 'km', true),
+      'doors_locked'     => array(__('Verrouillage', __FILE__), 'binary', '', '', false),
+      'position'         => array(__('Position', __FILE__), 'string', 'GEOLOC', '', false),
+      'last_update'      => array(__('Dernière MAJ', __FILE__), 'string', '', '', false),
+    );
+  }
+
+  /**
+   * Crée (idempotent) les commandes info de CE véhicule selon sa motorisation (config `energy`).
+   * Socle universel toujours créé ; commandes élec/carburant conditionnelles. Les champs présents mais
+   * non prévus par la motorisation seront créés paresseusement par ensureCommand() au 1er /status.
+   */
+  public function createCommands(): void {
+    $motorisation = trim((string) $this->getConfiguration('energy', ''));
+    $aCreer = array('mileage', 'doors_locked', 'position', 'last_update');
+    if ($motorisation == 'Electric' || $motorisation == 'Hybrid') {
+      $aCreer = array_merge($aCreer, array('battery_soc', 'autonomy', 'charging_status', 'charging_plugged'));
+    }
+    if ($motorisation == 'Thermal' || $motorisation == 'Hybrid') {
+      $aCreer[] = 'fuel_level';
+      if (!in_array('autonomy', $aCreer)) {
+        $aCreer[] = 'autonomy';
+      }
+    }
+    foreach ($aCreer as $logicalId) {
+      $this->ensureCommand($logicalId);
+    }
+  }
+
+  /**
+   * Retourne la commande info $logicalId de ce véhicule, la créant si absente (idempotent).
+   * @throws stellantisException si $logicalId n'est pas une commande connue (ne devrait pas arriver)
+   */
+  private function ensureCommand(string $logicalId): stellantisCmd {
+    $cmd = $this->getCmd('info', $logicalId);
+    if (is_object($cmd)) {
+      return $cmd;
+    }
+    $definitions = self::definitionsCommandes();
+    if (!isset($definitions[$logicalId])) {
+      throw new stellantisException('Commande info inconnue : ' . $logicalId);
+    }
+    // $nom est déjà traduit par __() dans definitionsCommandes() (chaîne littérale extractible)
+    list($nom, $subType, $genericType, $unite, $historiser) = $definitions[$logicalId];
+    $cmd = new stellantisCmd();
+    $cmd->setEqLogic_id($this->getId());
+    $cmd->setLogicalId($logicalId);
+    $cmd->setName($nom);
+    $cmd->setType('info');
+    $cmd->setSubType($subType);
+    if ($genericType != '') {
+      $cmd->setGeneric_type($genericType);
+    }
+    if ($unite != '') {
+      $cmd->setUnite($unite);
+    }
+    $cmd->setIsVisible(1);
+    $cmd->setIsHistorized($historiser ? 1 : 0);
+    $cmd->save();
+    return $cmd;
+  }
+
+  /**
+   * Rafraîchit la télémétrie de CE véhicule : GET /status (+ /lastPosition si privacy le permet),
+   * self-heal de la motorisation, parseStatus, puis mise à jour des commandes info (création paresseuse
+   * des champs présents). Un seul véhicule — la boucle périodique est en UC08.
+   * @throws stellantisException
+   */
+  public function refreshTelemetry(): void {
+    $apiId = trim((string) $this->getConfiguration('apiId', ''));
+    if ($apiId == '') {
+      log::add('stellantis', 'warning', 'Rafraîchissement ignoré : apiId absent (relancer une synchronisation)');
+      return;
+    }
+    $status = stellantisApi::callWithToken('GET', '/user/vehicles/' . $apiId . '/status');
+    // Position indisponible si mode privacy actif (cf. data-model § 2.6 / UC75)
+    $position = null;
+    $privacy = isset($status['privacy']['state']) ? (string) $status['privacy']['state'] : 'None';
+    if (strcasecmp($privacy, 'None') == 0) {
+      try {
+        $position = stellantisApi::callWithToken('GET', '/user/vehicles/' . $apiId . '/lastPosition');
+      } catch (stellantisException $e) {
+        log::add('stellantis', 'info', 'Position non récupérée (' . $e->getApiType() . ') — poursuite sans position');
+        $position = null;
+      }
+    }
+    // Self-heal motorisation : le /status fait foi (data-model § 1), mais on n'écrase QUE si la valeur
+    // est strictement plus précise (rang '' < Electric/Thermal < Hybrid). Évite qu'un /status PHEV
+    // ponctuellement partiel (1 seule entrée energies[]) ne fasse régresser 'Hybrid' → 'Electric'.
+    $motorStatus = self::energieDepuisStatus(self::energiesDepuisStatus($status));
+    $motorActuel = trim((string) $this->getConfiguration('energy', ''));
+    if (self::rangMotorisation($motorStatus) > self::rangMotorisation($motorActuel)) {
+      $this->setConfiguration('energy', $motorStatus);
+      $this->save();
+      $this->createCommands();
+    }
+    $valeurs = self::parseStatus($status, $position);
+    foreach ($valeurs as $logicalId => $valeur) {
+      $cmd = $this->ensureCommand($logicalId);
+      $this->checkAndUpdateCmd($cmd, $valeur);
+    }
+  }
+
+  // Extrait le tableau d'énergies du /status : energies[] (v4.15+) prioritaire, fallback energy[].
+  private static function energiesDepuisStatus(array $_status): array {
+    if (isset($_status['energies']) && is_array($_status['energies'])) {
+      return $_status['energies'];
+    }
+    if (isset($_status['energy']) && is_array($_status['energy'])) {
+      return $_status['energy'];
+    }
+    return array();
+  }
+
+  // Motorisation normalisée (Electric|Thermal|Hybrid|'') d'après les types du /status (Electric/Fuel).
+  // Même vocabulaire que energieDepuisEngine() (UC05) : une seule table de correspondance.
+  private static function energieDepuisStatus(array $_energies): string {
+    $aElectrique = false;
+    $aThermique = false;
+    foreach ($_energies as $energie) {
+      $type = (is_array($energie) && isset($energie['type'])) ? strtolower((string) $energie['type']) : '';
+      if ($type == 'electric') {
+        $aElectrique = true;
+      } elseif ($type == 'fuel') {
+        $aThermique = true;
+      }
+    }
+    if ($aElectrique && $aThermique) {
+      return 'Hybrid';
+    }
+    if ($aElectrique) {
+      return 'Electric';
+    }
+    if ($aThermique) {
+      return 'Thermal';
+    }
+    return '';
+  }
+
+  // Rang de précision d'une motorisation pour le self-heal : '' (inconnu) < Electric = Thermal < Hybrid.
+  // On ne remplace la config que par une valeur de rang strictement supérieur (jamais de régression ni
+  // de bascule latérale Electric↔Thermal, qui pourrait venir d'un /status momentanément partiel).
+  private static function rangMotorisation(string $_motorisation): int {
+    if ($_motorisation == 'Hybrid') {
+      return 2;
+    }
+    if ($_motorisation == 'Electric' || $_motorisation == 'Thermal') {
+      return 1;
+    }
+    return 0;
+  }
+
+  /**
+   * Mapping PUR et défensif du /status (+ position GeoJSON) vers logicalId => valeur. Champ absent =>
+   * clé absente (jamais d'exception). SEUL endroit où vivent les chemins de champs API (data-model) :
+   * à faire évoluer ici si le schéma PSA change. Statique et sans effet de bord => testable.
+   */
+  public static function parseStatus(array $_status, ?array $_position = null): array {
+    $valeurs = array();
+    // Énergie : router par type. PHEV = 2 entrées ([0] Electric, [1] Fuel).
+    foreach (self::energiesDepuisStatus($_status) as $energie) {
+      if (!is_array($energie)) {
+        continue;
+      }
+      $type = isset($energie['type']) ? strtolower((string) $energie['type']) : '';
+      if ($type == 'electric') {
+        if (isset($energie['level']) && is_numeric($energie['level'])) {
+          $valeurs['battery_soc'] = (float) $energie['level'];
+        }
+        if (isset($energie['autonomy']) && is_numeric($energie['autonomy'])) {
+          $valeurs['autonomy'] = (float) $energie['autonomy'];
+        }
+        if (isset($energie['charging']['status']) && is_scalar($energie['charging']['status'])) {
+          // Défense en profondeur : seule valeur texte non contrainte du mapping. Les enums de charge
+          // sont des mots (Disconnected/InProgress/Finished/Failure/Stopped…) → on ne garde que les
+          // lettres (neutralise toute injection sans perte pour les valeurs connues).
+          $valeurs['charging_status'] = preg_replace('/[^A-Za-z]/', '', (string) $energie['charging']['status']);
+        }
+        if (isset($energie['charging']['plugged'])) {
+          $valeurs['charging_plugged'] = $energie['charging']['plugged'] ? 1 : 0;
+        }
+      } elseif ($type == 'fuel') {
+        if (isset($energie['level']) && is_numeric($energie['level'])) {
+          $valeurs['fuel_level'] = (float) $energie['level'];
+        }
+        // Autonomie carburant : ne pas écraser l'autonomie électrique déjà posée (PHEV : élec prioritaire ;
+        // scission autonomy_fuel = post-MVP/23)
+        if (!isset($valeurs['autonomy']) && isset($energie['autonomy']) && is_numeric($energie['autonomy'])) {
+          $valeurs['autonomy'] = (float) $energie['autonomy'];
+        }
+      }
+    }
+    // Odomètre (racine depuis v4.15)
+    if (isset($_status['odometer']['mileage']) && is_numeric($_status['odometer']['mileage'])) {
+      $valeurs['mileage'] = (float) $_status['odometer']['mileage'];
+    }
+    // Verrouillage
+    $verrouillage = self::extraireVerrouillage($_status);
+    if ($verrouillage !== null) {
+      $valeurs['doors_locked'] = $verrouillage;
+    }
+    // Position : GeoJSON coordinates = [lon, lat, alt] → "lat,lon" (PAS [lat,lon] !)
+    if ($_position !== null) {
+      $coords = (isset($_position['geometry']['coordinates']) && is_array($_position['geometry']['coordinates']))
+        ? $_position['geometry']['coordinates'] : null;
+      if (is_array($coords) && count($coords) >= 2 && is_numeric($coords[0]) && is_numeric($coords[1])) {
+        $valeurs['position'] = ((float) $coords[1]) . ',' . ((float) $coords[0]);
+      }
+    }
+    // Fraîcheur : horodatage API (conforme UC09 — la donnée peut être ancienne sans wakeup)
+    $valeurs['last_update'] = self::extraireFraicheur($_status, $_position);
+    return $valeurs;
+  }
+
+  /**
+   * Verrouillage global d'après doors_state.locked_state (liste d'enums). Règle : un élément contenant
+   * « Unlocked » => 0 (déverrouillé) ; sinon un élément contenant « Locked » => 1 (verrouillé) ;
+   * liste vide/absente => null (commande non renseignée). Insensible à la casse.
+   */
+  private static function extraireVerrouillage(array $_status): ?int {
+    if (!isset($_status['doors_state']['locked_state'])) {
+      return null;
+    }
+    $etatBrut = $_status['doors_state']['locked_state'];
+    $etats = is_array($etatBrut) ? $etatBrut : array($etatBrut);
+    $deverrouille = false;
+    $verrouille = false;
+    foreach ($etats as $etat) {
+      $s = strtolower((string) $etat);
+      if (strpos($s, 'unlocked') !== false) {
+        $deverrouille = true;
+      } elseif (strpos($s, 'locked') !== false) {
+        $verrouille = true;
+      }
+    }
+    if ($deverrouille) {
+      return 0;
+    }
+    if ($verrouille) {
+      return 1;
+    }
+    return null;
+  }
+
+  /**
+   * Horodatage de fraîcheur de la donnée (UC09) : champ racine updatedAt/lastUpdate, sinon le plus
+   * récent des energies[]/energy[].updated_at et de la position (properties.createdAt). Repli sur
+   * l'heure du fetch UNIQUEMENT si aucune date API (cas défensif loggué en debug).
+   */
+  private static function extraireFraicheur(array $_status, ?array $_position): string {
+    $candidats = array();
+    foreach (array('updatedAt', 'lastUpdate') as $cle) {
+      if (isset($_status[$cle]) && is_string($_status[$cle]) && $_status[$cle] != '') {
+        $candidats[] = $_status[$cle];
+      }
+    }
+    foreach (self::energiesDepuisStatus($_status) as $energie) {
+      if (is_array($energie) && isset($energie['updated_at']) && is_string($energie['updated_at']) && $energie['updated_at'] != '') {
+        $candidats[] = $energie['updated_at'];
+      }
+    }
+    if ($_position !== null && isset($_position['properties']['createdAt']) && is_string($_position['properties']['createdAt']) && $_position['properties']['createdAt'] != '') {
+      $candidats[] = $_position['properties']['createdAt'];
+    }
+    $plusRecent = null;
+    foreach ($candidats as $candidat) {
+      $ts = strtotime($candidat);
+      if ($ts !== false && ($plusRecent === null || $ts > $plusRecent)) {
+        $plusRecent = $ts;
+      }
+    }
+    if ($plusRecent === null) {
+      log::add('stellantis', 'debug', 'Fraîcheur : aucun horodatage API dans le /status, repli sur l\'heure du fetch');
+      return date('Y-m-d H:i:s');
+    }
+    return date('Y-m-d H:i:s', $plusRecent);
   }
 
   // Traduit une erreur API typée en message utilisateur actionnable (chaîne UI → enveloppée __()).
