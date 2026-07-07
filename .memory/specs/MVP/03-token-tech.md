@@ -37,6 +37,14 @@
   n'est échangeable qu'avec le `code_verifier` stocké côté serveur). Relit `OAUTH_PENDING_KEY`
   (absent/expiré → exception « relancez la génération d'URL ») ; POST token ; `storeTokenResponse()` ;
   purge pending.
+  - **Échange refusé par l'IdP (ajout 2026-07-06)** : le POST token est enveloppé d'un `try/catch` ;
+    sur `stellantisException` de type `auth_required` **ou** `httpCode == 400` (code éphémère PSA
+    expiré / à usage unique / mal copié → `invalid_grant`), on **re-lève** un message **actionnable**
+    non technique (« Code d'autorisation refusé (invalide, expiré ou déjà utilisé)… régénérez l'URL et
+    recommencez sans attendre ») au lieu de propager « Erreur OAuth HTTP 400 ». **Le `pending` n'est
+    PAS purgé** dans ce cas (verifier/state encore valides ~10 min) → l'utilisateur peut recoller une
+    nouvelle URL sans régénérer. Toute autre erreur (`transport`, `rate_limited`, 5xx) est propagée
+    telle quelle. Aucun secret dans le message (conforme `$_reponseSensible`).
 
 ### Token lifecycle
 - `requestToken(array $body): array` privé — POST `authBaseUrl.'/access_token'` via `httpRequest()`,

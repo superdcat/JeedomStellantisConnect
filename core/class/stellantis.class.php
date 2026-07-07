@@ -560,12 +560,26 @@ class stellantisApi {
       log::add('stellantis', 'warning', 'Échange OAuth : state non vérifié (entrée = code seul ; collez plutôt l\'URL de redirection complète)');
     }
     $config = stellantis::getApiConfig();
-    $reponse = self::requestToken(array(
-      'grant_type' => 'authorization_code',
-      'code' => $code,
-      'redirect_uri' => $config['redirectUri'],
-      'code_verifier' => $pending['verifier'],
-    ));
+    try {
+      $reponse = self::requestToken(array(
+        'grant_type' => 'authorization_code',
+        'code' => $code,
+        'redirect_uri' => $config['redirectUri'],
+        'code_verifier' => $pending['verifier'],
+      ));
+    } catch (stellantisException $e) {
+      // Un 400/invalid_grant à l'échange = code d'autorisation refusé par l'IdP, quasi toujours
+      // parce qu'il est éphémère (expiré/déjà utilisé) ou copié partiellement. Le flow OAuth de PSA
+      // s'est durci (le navigateur ne peut pas ouvrir le scheme mymap://…, l'utilisateur copie l'URL
+      // à la main) → message actionnable plutôt que « HTTP 400 : invalid_grant ». On conserve le
+      // pending (verifier/state encore valides ~10 min) pour un nouvel essai sans tout régénérer.
+      if ($e->getApiType() == 'auth_required' || $e->getHttpCode() == 400) {
+        throw new stellantisException('Code d\'autorisation refusé (invalide, expiré ou déjà utilisé). '
+          . 'Le code n\'est valable que quelques instants : régénérez l\'URL, reconnectez-vous et collez '
+          . 'la nouvelle URL de redirection sans attendre.', $e->getHttpCode(), 'auth_required');
+      }
+      throw $e;
+    }
     self::storeTokenResponse($reponse, null);
     cache::delete(self::OAUTH_PENDING_KEY);
     log::add('stellantis', 'info', 'Authentification OAuth2 réussie, tokens enregistrés');

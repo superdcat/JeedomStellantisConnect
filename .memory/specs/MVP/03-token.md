@@ -19,7 +19,11 @@ l'utilisateur, **stockage chiffré** des tokens, **refresh** proactif/réactif.
      response_type=code&scope=openid%20profile&redirect_uri=…&state=…&code_challenge=…&code_challenge_method=S256`
      (+ `local`/locale selon marque). Affichée à l'utilisateur (action AJAX `getAuthUrl`).
   2. L'utilisateur se connecte sur le site de sa marque, est redirigé vers `redirect_uri?code={UUID}&…`,
-     et **colle le `code`** dans un champ (action AJAX `submitAuthCode`).
+     et **colle le `code`** dans un champ (action AJAX `submitAuthCode`). ⚠️ Le `redirect_uri` est un
+     **scheme d'app mobile** (`mymap://…`) que le navigateur **ne sait pas ouvrir** → il affiche une
+     **page d'erreur (normal)** ; l'utilisateur copie l'**URL complète** de la barre d'adresse (repli si
+     la redirection est absente : onglet **Réseau (F12)**, cf. doc utilisateur). Le `code` est
+     **éphémère** (usage unique, expire en quelques instants) → à échanger sans attendre.
   3. Échange : `POST https://idpcvs.{marque.tld}/am/oauth2/access_token`,
      `Authorization: Basic base64(client_id:client_secret)`, body `grant_type=authorization_code&code=…&
      redirect_uri=…&code_verifier=…`. Réponse `{access_token, refresh_token, expires_in, id_token}`.
@@ -49,4 +53,14 @@ l'utilisateur, **stockage chiffré** des tokens, **refresh** proactif/réactif.
 ## Notes / risques
 - Contrat exact (PKCE, noms de params, `redirect_uri` par marque, header Basic) à **confirmer** contre
   `psa_car_controller` (`psa_client.py`, PR #754) — cf. `stellantis-api-architecture.md` § 1.1.
+- **Durcissement OAuth PSA — le collage manuel est le chemin canonique** (corroboré 2026-07-06, cf.
+  `stellantis-psacc-vs-natif.md` § 6 + discussion `flobz/psa_car_controller` #779) : PSA a durci le
+  flux d'autorisation ; `psa_car_controller` a dû ajouter un login navigateur automatisé (Playwright).
+  Sans navigateur embarqué, la récupération manuelle du `code` (URL affichée → l'utilisateur colle
+  l'URL de redirection) est **la procédure de secours documentée** — c'est exactement notre design, à
+  **conserver** et à **documenter finement** côté utilisateur (page d'erreur attendue, repli F12/Réseau).
+- **`code` éphémère → `invalid_grant`** : un code expiré / déjà utilisé / partiellement copié fait
+  échouer l'échange en `400 invalid_grant`. `exchangeCode()` **traduit** ce cas en message actionnable
+  (« régénérez l'URL et recommencez rapidement ») au lieu de « HTTP 400 » (code 2026-07-06) ; le
+  `pending` (verifier/state, TTL 10 min) est conservé pour un nouvel essai.
 - Voir le compagnon `03-token-tech.md`.

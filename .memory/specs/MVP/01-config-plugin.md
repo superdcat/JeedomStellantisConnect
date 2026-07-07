@@ -22,8 +22,13 @@ Stockés au niveau **plugin** (pas véhicule).
   - `redirect_uri` (texte) : schéma custom de la marque (ex. `mymap://oauth2redirect/fr`). Défaut par marque.
   - (optionnel) `country`/`locale` si nécessaire au flow.
 - **Origine des credentials** : `client_id`/`client_secret` sont **extraits de l'APK** de l'app mobile
-  par l'utilisateur (outil externe type `app_decoder.py` / `psa-token-helper`) — **documenter la
-  procédure** (doc utilisateur), le plugin ne fait pas l'extraction (cf. analyse § 4, décision (a)).
+  par l'utilisateur — **documenter la procédure** (doc utilisateur, réécrite le 2026-07-06 : assistant
+  `psa_car_controller --web-conf` qui télécharge l'APK et extrait tout seul, ou `app_decoder.py`
+  manuel), le plugin ne fait pas l'extraction (cf. analyse § 4, décision (a) + `stellantis-psacc-vs-natif.md` § 6).
+  ⚠️ **Credentials propres au pays/locale** : dans l'APK ils vivent sous `res/raw-{lang}-r{country}/parameters.json`
+  → un compte FR et un compte GB peuvent avoir des `client_id`/`client_secret` **différents** ;
+  l'utilisateur doit extraire ceux de **son** pays. Le champ `country` sert ici à construire le
+  `redirect_uri` par défaut ; il doit rester **cohérent** avec le pays des credentials.
 - Chiffrement : `$_encryptConfigKey` (ou hooks `preConfig_client_secret`) → `utils::encrypt`. **Jamais**
   logguer `client_secret`.
 - Helper `stellantis::getApiConfig(?string $brand = null): array` → `['brand','clientId','clientSecret','country','realm','authBaseUrl','apiBaseUrl','redirectUri']` prêt à l'emploi (table marque→TLD/realm intégrée ; paramètre `$brand` prévu pour le multi-marques post-MVP, `null` = marque configurée).

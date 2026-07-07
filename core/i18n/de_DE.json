@@ -24,7 +24,7 @@
         "Ouvrir la page de connexion de votre marque": "Anmeldeseite Ihrer Marke öffnen",
         "URL de redirection attendue": "Erwartete Weiterleitungs-URL",
         "2. Code d'autorisation": "2. Autorisierungscode",
-        "Après connexion, le navigateur affiche une erreur de redirection : copiez l'URL complète de cette page et collez-la ici (à défaut, le paramètre code seul)": "Nach der Anmeldung zeigt der Browser einen Weiterleitungsfehler an: Kopieren Sie die vollständige URL dieser Seite und fügen Sie sie hier ein (andernfalls nur den Parameter code)",
+        "Après connexion, le navigateur affiche une page d'erreur (c'est normal) : copiez l'URL complète (commençant par mymap://... et contenant code=). Si rien n'apparaît, récupérez le paramètre code (36 caractères) dans l'onglet Réseau (F12). Collez-le sans attendre : le code expire vite.": "Nach der Anmeldung zeigt der Browser eine Fehlerseite an (das ist normal): Kopieren Sie die vollständige URL (beginnt mit mymap://... und enthält code=). Erscheint nichts, holen Sie den Parameter code (36 Zeichen) aus dem Tab Netzwerk (F12). Fügen Sie ihn ohne Verzögerung ein: Der Code läuft schnell ab.",
         "Collez l'URL de redirection complète (recommandé) ou le code seul": "Fügen Sie die vollständige Weiterleitungs-URL ein (empfohlen) oder nur den Code",
         "Valider le code": "Code bestätigen",
         "Collez d'abord l'URL de redirection (ou le code) dans le champ": "Fügen Sie zuerst die Weiterleitungs-URL (oder den Code) in das Feld ein"

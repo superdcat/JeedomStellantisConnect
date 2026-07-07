@@ -27,34 +27,99 @@ Solange Client-ID und Client-Secret nicht ausgefüllt sind, zeigt die Seite ein 
 
 ## Anmeldedaten beschaffen (Client ID / Client Secret)
 
-Die Anmeldedaten werden **nicht** von Stellantis herausgegeben: Sie sind in der mobilen App jeder
-Marke eingebettet. Die bewährte Methode aus dem Open-Source-Projekt
-[psa_car_controller](https://github.com/flobz/psa_car_controller) besteht darin, sie aus der APK zu extrahieren:
+Die Anmeldedaten werden **nicht** von Stellantis herausgegeben: Sie sind in der APK der mobilen App
+jeder Marke eingebettet (in einer internen Datei `parameters.json`, unter den Schlüsseln `cvsClientId`
+und `cvsSecret`). Sie müssen sie daher **einmalig** auf einem Computer extrahieren — das Plugin selbst
+lädt keine APK herunter und analysiert auch keine.
 
-1. Laden Sie die APK der mobilen App **Ihrer Marke** herunter (zum Beispiel aus dem Repository
-   [flobz/psa_apk](https://github.com/flobz/psa_apk), das kompatible Versionen archiviert).
-2. Führen Sie das von psa_car_controller bereitgestellte Skript `app_decoder.py` auf dieser APK aus:
-   ```
-   python3 app_decoder.py <datei.apk>
-   ```
-3. Das Skript zeigt unter anderem die `client_id` und das `client_secret` der Anwendung an. Übernehmen Sie
-   diese unverändert in die Plugin-Konfiguration und wählen Sie die Marke, die zur verwendeten APK passt.
+> Die Anmeldedaten hängen von der **Marke** und dem **Land** Ihres Kontos ab: Extrahieren Sie jene,
+> die zur verwendeten App und zu Ihrem Land passen. Sie laufen nicht ab.
 
-Diese Extraktion erfolgt **außerhalb von Jeedom** (auf Ihrem Computer); das Plugin lädt keine APK herunter
-und analysiert auch keine. Die Anmeldedaten laufen nicht ab, dieser Vorgang muss nur einmal durchgeführt werden.
+### Empfohlene Methode: direkte Extraktion (ohne Kontoanmeldung)
+
+Diese Methode ruft **nur** die Client ID und das Client Secret ab; die Verbindung mit Ihrem Konto
+erfolgt anschließend in Jeedom (nächster Abschnitt), eine Anmeldung ist hier also nicht nötig. Auf
+einem Rechner mit **Python 3.11 oder neuer** (Ihr PC oder Ihr Jeedom, sofern dessen Python-Version
+passt):
+
+```bash
+# 1. Extraktionswerkzeug installieren (bringt auch seine Abhängigkeit „androguard" mit)
+pip3 install psa-car-controller
+
+# 2. APK IHRER Marke herunterladen und entpacken
+#    (Beispiel Peugeot; ersetzen durch mycitroen / myds / myopel / myvauxhall)
+curl -L -o app.apk.bz2 https://github.com/flobz/psa_apk/raw/main/mypeugeot.apk.bz2
+bunzip2 app.apk.bz2      # erzeugt die Datei app.apk
+
+# 3. Anmeldedaten extrahieren (FR durch den Ländercode IHRES Kontos ersetzen)
+python3 - <<'PY'
+from psa_car_controller.psa.setup.apk_parser import ApkParser
+p = ApkParser("app.apk", "FR")
+p.retrieve_content_from_apk()
+print("Client ID     =", p.client_id)
+print("Client Secret =", p.client_secret)
+PY
+```
+
+Übertragen Sie die beiden angezeigten Werte in die Plugin-Konfiguration und wählen Sie die Marke, die
+zur verwendeten APK passt.
+
+APK je Marke (Repository [flobz/psa_apk](https://github.com/flobz/psa_apk), das bekanntermaßen
+funktionierende Versionen archiviert):
+
+| Marke | Herunterzuladende Datei |
+|---|---|
+| Peugeot | `mypeugeot.apk.bz2` |
+| Citroën | `mycitroen.apk.bz2` |
+| DS | `myds.apk.bz2` |
+| Opel | `myopel.apk.bz2` |
+| Vauxhall | `myvauxhall.apk.bz2` |
+
+### Alternative Methode: grafischer Assistent von psa_car_controller
+
+Wenn Sie eine Weboberfläche der Befehlszeile vorziehen, lädt der Assistent von psa_car_controller die
+APK herunter und extrahiert die Anmeldedaten automatisch — er zwingt Sie jedoch, **eine vollständige
+OAuth-Anmeldung** zu durchlaufen (dieselbe wie im Abschnitt „Kontoverbindung" unten), bevor er die
+Werte auf die Festplatte schreibt:
+
+1. `pip3 install psa-car-controller`, dann `psa-car-controller -l 0.0.0.0 --web-conf` ausführen.
+2. Öffnen Sie `http://<Adresse-des-Rechners>:5000` und geben Sie Marke, E-Mail, Kontopasswort und
+   Ländercode ein.
+3. Schließen Sie die Verbindungsprozedur ab (sie nutzt dieselbe Code-Abholung per F12 wie unten beschrieben).
+4. Öffnen Sie die im Arbeitsverzeichnis erzeugte Datei `config.json`: Übertragen Sie deren Werte
+   `client_id` und `client_secret` in das Plugin.
+
+> Dieser Assistent installiert und betreibt ein zweites Werkzeug (und lässt Sie sich zweimal anmelden,
+> einmal hier und einmal in Jeedom). Das Plugin **hängt anschließend nicht davon ab**, weshalb die
+> direkte Methode oben vorzuziehen ist.
 
 ## Kontoverbindung
 
 Sobald die Konfiguration gespeichert ist, verbinden Sie das Plugin mit Ihrem Konto (Abschnitt
-„Kontoverbindung" der Konfigurationsseite):
+„Kontoverbindung" der Konfigurationsseite). Diese Verbindung erfolgt am besten von einem **Computer
+mit einem Browser, der über Entwicklertools verfügt**:
 
 1. Klicken Sie auf **Autorisierungs-URL generieren** und öffnen Sie dann den angezeigten Link in Ihrem
    Browser.
 2. Melden Sie sich mit den Anmeldedaten der mobilen App Ihrer Marke an (E-Mail + Passwort).
-3. Nach der Anmeldung versucht der Browser, die mobile App zu öffnen, und zeigt eine **Fehlerseite an:
-   das ist normal**. Kopieren Sie die **vollständige URL** dieser Seite (Adressleiste), die mit dem
-   Schema der Anwendung beginnt (z. B. `mymap://oauth2redirect/fr?code=...`).
-4. Fügen Sie diese URL in das Feld **Autorisierungscode** ein und klicken Sie auf **Code bestätigen**.
+   > ⚠️ PSA-Konten begrenzen das **Passwort auf 16 Zeichen**: Ist Ihres länger, kann die Anmeldung auf
+   > der Website der Marke fehlschlagen.
+3. Nach der Anmeldung versucht der Browser, die mobile App zu öffnen (Adresse beginnend mit
+   `mymap://…`, `mymacsdk://…` je nach Marke), und zeigt eine **Fehlerseite an: das ist normal**, der
+   Browser kann diese Art von Adresse nicht öffnen.
+   - **Einfacher Fall**: Die Adressleiste enthält die vollständige URL `…://oauth2redirect/…?code=…`.
+     Kopieren Sie sie **vollständig**.
+   - **Wenn die Adressleiste nichts Verwertbares zeigt**: Öffnen Sie die Entwicklertools (**F12**) →
+     Tab **Netzwerk (Network)**, und lösen Sie dann die Weiterleitung aus. Suchen Sie die Zeile, deren
+     Adresse mit dem Schema Ihrer Marke beginnt (`mymap://…`), und kopieren Sie den Wert des Parameters
+     **`code`** (eine Zeichenfolge mit **36 Zeichen**).
+4. Fügen Sie die vollständige URL (oder ersatzweise nur den `code`) in das Feld **Autorisierungscode**
+   ein und klicken Sie **ohne Verzögerung** auf **Code bestätigen**: Der Code ist nur wenige Augenblicke
+   gültig und nur einmal verwendbar.
+   > Erscheint eine Meldung „Code ungültig, abgelaufen oder bereits verwendet" bzw.
+   > „Re-Authentifizierung erforderlich", generieren Sie die URL neu (Schritt 1) und fügen Sie die neue
+   > URL schnell ein. Eine Meldung mit dem Begriff *Realm* bedeutet, dass die **gewählte Marke nicht zum
+   > Konto passt**.
 
 Der Status wechselt zu „Mit Konto verbunden". Sie können die korrekte Funktion jederzeit über die
 Schaltfläche **Verbindung testen** auf der Plugin-Seite (`Plugins → Vernetzte Objekte → Stellantis

@@ -107,7 +107,7 @@ $infoToken = $stellantisConfigure ? stellantisApi::getTokenInfo() : array('authe
     </div>
     <div class="form-group">
       <label class="col-md-4 control-label">{{2. Code d'autorisation}}
-        <sup><i class="fas fa-question-circle tooltips" title="{{Après connexion, le navigateur affiche une erreur de redirection : copiez l'URL complète de cette page et collez-la ici (à défaut, le paramètre code seul)}}"></i></sup>
+        <sup><i class="fas fa-question-circle tooltips" title="{{Après connexion, le navigateur affiche une page d'erreur (c'est normal) : copiez l'URL complète (commençant par mymap://... et contenant code=). Si rien n'apparaît, récupérez le paramètre code (36 caractères) dans l'onglet Réseau (F12). Collez-le sans attendre : le code expire vite.}}"></i></sup>
       </label>
       <div class="col-md-6">
         <input class="form-control" id="stellantis_codeAuth" placeholder="{{Collez l'URL de redirection complète (recommandé) ou le code seul}}"/>

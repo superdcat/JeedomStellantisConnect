@@ -24,7 +24,7 @@
         "Ouvrir la page de connexion de votre marque": "Abrir la página de inicio de sesión de su marca",
         "URL de redirection attendue": "URL de redirección esperada",
         "2. Code d'autorisation": "2. Código de autorización",
-        "Après connexion, le navigateur affiche une erreur de redirection : copiez l'URL complète de cette page et collez-la ici (à défaut, le paramètre code seul)": "Tras iniciar sesión, el navegador muestra un error de redirección: copie la URL completa de esta página y péguela aquí (en su defecto, solo el parámetro code)",
+        "Après connexion, le navigateur affiche une page d'erreur (c'est normal) : copiez l'URL complète (commençant par mymap://... et contenant code=). Si rien n'apparaît, récupérez le paramètre code (36 caractères) dans l'onglet Réseau (F12). Collez-le sans attendre : le code expire vite.": "Tras iniciar sesión, el navegador muestra una página de error (es normal): copie la URL completa (que empieza por mymap://... y contiene code=). Si no aparece nada, obtenga el parámetro code (36 caracteres) en la pestaña Red (F12). Péguelo sin esperar: el código caduca rápido.",
         "Collez l'URL de redirection complète (recommandé) ou le code seul": "Pegue la URL de redirección completa (recomendado) o solo el código",
         "Valider le code": "Validar el código",
         "Collez d'abord l'URL de redirection (ou le code) dans le champ": "Pegue primero la URL de redirección (o el código) en el campo"

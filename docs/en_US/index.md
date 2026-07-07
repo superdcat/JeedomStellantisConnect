@@ -27,33 +27,92 @@ As long as the Client ID and Client Secret are not filled in, the page displays 
 
 ## Getting the credentials (Client ID / Client Secret)
 
-The credentials are **not** distributed by Stellantis: they are embedded in each brand's
-mobile application. The proven method, from the open source project
-[psa_car_controller](https://github.com/flobz/psa_car_controller), consists in extracting them from the APK:
+The credentials are **not** distributed by Stellantis: they are embedded in each brand's mobile
+application APK (inside an internal `parameters.json` file, under the keys `cvsClientId` and
+`cvsSecret`). You therefore need to extract them **once**, on a computer — the plugin itself never
+downloads or analyzes any APK.
 
-1. Download the mobile application APK for **your brand** (for example from the repository
-   [flobz/psa_apk](https://github.com/flobz/psa_apk), which archives compatible versions).
-2. Run the `app_decoder.py` script provided by psa_car_controller on this APK:
-   ```
-   python3 app_decoder.py <file.apk>
-   ```
-3. The script displays, among other things, the application's `client_id` and `client_secret`. Enter them
-   as-is in the plugin configuration, and select the brand matching the APK used.
+> The credentials depend on the **brand** and the **country** of your account: extract the ones
+> matching the application you use and your country. They do not expire.
 
-This extraction happens **outside of Jeedom** (on your computer); the plugin does not download or
-analyze any APK. The credentials do not expire, this operation only needs to be done once.
+### Recommended method: direct extraction (no account login)
+
+This method retrieves **only** the Client ID and Client Secret; the connection to your account then
+happens inside Jeedom (next section), so there is no need to log in here. On a machine with
+**Python 3.11 or newer** (your PC, or your Jeedom if its Python version is suitable):
+
+```bash
+# 1. Install the extraction tool (it also brings its "androguard" dependency)
+pip3 install psa-car-controller
+
+# 2. Download and decompress the APK for YOUR brand
+#    (Peugeot example; replace with mycitroen / myds / myopel / myvauxhall)
+curl -L -o app.apk.bz2 https://github.com/flobz/psa_apk/raw/main/mypeugeot.apk.bz2
+bunzip2 app.apk.bz2      # produces the file app.apk
+
+# 3. Extract the credentials (replace FR with YOUR account's country code)
+python3 - <<'PY'
+from psa_car_controller.psa.setup.apk_parser import ApkParser
+p = ApkParser("app.apk", "FR")
+p.retrieve_content_from_apk()
+print("Client ID     =", p.client_id)
+print("Client Secret =", p.client_secret)
+PY
+```
+
+Copy the two displayed values into the plugin configuration, and select the brand matching the APK used.
+
+APK per brand (repository [flobz/psa_apk](https://github.com/flobz/psa_apk), which archives versions
+known to work):
+
+| Brand | File to download |
+|---|---|
+| Peugeot | `mypeugeot.apk.bz2` |
+| Citroën | `mycitroen.apk.bz2` |
+| DS | `myds.apk.bz2` |
+| Opel | `myopel.apk.bz2` |
+| Vauxhall | `myvauxhall.apk.bz2` |
+
+### Alternative method: psa_car_controller graphical wizard
+
+If you prefer a web interface over the command line, the psa_car_controller wizard downloads the APK
+and extracts the credentials automatically — but it also makes you **go all the way through an OAuth
+login** (the same as the "Connecting your account" step below) before it writes the values to disk:
+
+1. `pip3 install psa-car-controller`, then run `psa-car-controller -l 0.0.0.0 --web-conf`.
+2. Open `http://<machine-address>:5000` and fill in the brand, email, account password and country code.
+3. Complete the connection procedure (it uses the same F12 code retrieval described below).
+4. Open the `config.json` file created in the working directory: copy its `client_id` and
+   `client_secret` values into the plugin.
+
+> This wizard installs and runs a second tool (and makes you log in twice, once here and once in
+> Jeedom). The plugin **does not depend on it** afterwards, which is why the direct method above is
+> preferable.
 
 ## Connecting your account
 
 Once the configuration is saved, connect the plugin to your account (the "Account connection"
-section of the configuration page):
+section of the configuration page). This connection is best done from a **computer with a browser
+that has developer tools**:
 
 1. Click **Generate authorization URL**, then open the displayed link in your browser.
 2. Log in with the credentials of your brand's mobile application (email + password).
-3. After logging in, the browser tries to open the mobile application and displays an **error
-   page: this is normal**. Copy the **full URL** of this page (address bar), which starts with the
-   application's scheme (e.g. `mymap://oauth2redirect/fr?code=...`).
-4. Paste this URL into the **Authorization code** field and click **Validate code**.
+   > ⚠️ PSA accounts limit the **password to 16 characters**: if yours is longer, the login may fail
+   > on the brand's website.
+3. After logging in, the browser tries to open the mobile application (address starting with
+   `mymap://…`, `mymacsdk://…` depending on the brand) and displays an **error page: this is normal**,
+   the browser cannot open this kind of address.
+   - **Simple case**: the address bar contains the full URL `…://oauth2redirect/…?code=…`. Copy it
+     **entirely**.
+   - **If the address bar shows nothing usable**: open the developer tools (**F12**) → **Network**
+     tab, then trigger the redirection. Find the line whose address starts with your brand's scheme
+     (`mymap://…`) and copy the value of the **`code`** parameter (a string of **36 characters**).
+4. Paste the full URL (or, failing that, the `code` alone) into the **Authorization code** field, then
+   click **Validate code** **without delay**: the code is valid for only a few moments and is
+   single-use.
+   > If a "code invalid, expired or already used" or "re-authentication required" message appears,
+   > regenerate the URL (step 1) and paste the new URL quickly. A message mentioning the *realm* means
+   > the **selected brand does not match the account**.
 
 The status changes to "Connected to account". You can check that it works at any time using the
 **Test connection** button on the plugin page (`Plugins → Connected devices → Stellantis

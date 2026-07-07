@@ -24,7 +24,7 @@
         "Ouvrir la page de connexion de votre marque": "Open your brand's login page",
         "URL de redirection attendue": "Expected redirect URL",
         "2. Code d'autorisation": "2. Authorization code",
-        "Après connexion, le navigateur affiche une erreur de redirection : copiez l'URL complète de cette page et collez-la ici (à défaut, le paramètre code seul)": "After logging in, the browser displays a redirect error: copy the full URL of this page and paste it here (failing that, the code parameter alone)",
+        "Après connexion, le navigateur affiche une page d'erreur (c'est normal) : copiez l'URL complète (commençant par mymap://... et contenant code=). Si rien n'apparaît, récupérez le paramètre code (36 caractères) dans l'onglet Réseau (F12). Collez-le sans attendre : le code expire vite.": "After logging in, the browser shows an error page (this is normal): copy the full URL (starting with mymap://... and containing code=). If nothing appears, retrieve the code parameter (36 characters) from the Network tab (F12). Paste it without delay: the code expires quickly.",
         "Collez l'URL de redirection complète (recommandé) ou le code seul": "Paste the full redirect URL (recommended) or the code alone",
         "Valider le code": "Validate code",
         "Collez d'abord l'URL de redirection (ou le code) dans le champ": "First paste the redirect URL (or the code) into the field"

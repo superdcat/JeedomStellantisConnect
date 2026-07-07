@@ -51,9 +51,19 @@
 - Champs `configKey` : `brand` (select, 5 marques, défaut peugeot), `client_id`, `client_secret`
   (`type="password"`), `country` (défaut `fr`), `redirect_uri` (placeholder « laisser vide = défaut marque »).
 
-### `docs/fr_FR/index.md`
-Section configuration : rôle des champs + **procédure d'extraction des credentials** depuis l'APK
-(`app_decoder.py` de psa_car_controller, dépôt d'APK `flobz/psa_apk`) — le plugin ne fait pas l'extraction.
+### `docs/fr_FR/index.md` (+ en_US/de_DE/es_ES, mêmes sections)
+Section configuration : rôle des champs + **procédure d'extraction des credentials** depuis l'APK.
+**Réécrite le 2026-07-06** (l'ancienne « `python3 app_decoder.py <apk>` » était trop lapidaire et peu
+reproductible pour un non-dev) → deux méthodes explicites :
+- **A (recommandée)** : assistant `psa-car-controller` (`--web-conf` ou Docker) qui **télécharge l'APK
+  et extrait automatiquement** `client_id`/`client_secret` (via `setup/github.py` + `app_decoder.py`) ;
+  l'utilisateur recopie ensuite les valeurs dans le plugin, sans laisser PSACC tourner.
+- **B (manuelle/avancée)** : APK récupéré sur `flobz/psa_apk`, `app_decoder.py` lancé dessus (androguard).
+⚠️ **Credentials par pays/locale** (`res/raw-{lang}-r{country}/parameters.json`) : extraire ceux du
+**pays du compte**. Le plugin ne télécharge/n'analyse **aucun** APK (rappel).
+La section « Connexion au compte » documente en plus le **repli F12/Réseau** (durcissement OAuth PSA,
+scheme `mymap://…` non ouvrable par le navigateur → page d'erreur normale) et le caractère **éphémère
+du `code`** (à coller sans attendre). Cf. `stellantis-psacc-vs-natif.md` § 6.
 
 ## Server vs Client
 100 % serveur (PHP). Le formulaire repose sur le mécanisme `configKey`/`data-l1key` du core
