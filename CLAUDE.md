@@ -27,14 +27,14 @@ Un plugin Jeedom **n'est pas autonome** : il s'installe sous `<jeedom>/plugins/s
 PHP dépend du core Jeedom, atteint via `require_once __DIR__ . '/../../../../core/php/core.inc.php';`.
 Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 
-> **État d'avancement (2026-07-07)** : l'id a été renommé `template` → `stellantis` (classes
-> `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP en cours** : UC01 à UC07 sont
+> **État d'avancement (2026-07-08)** : l'id a été renommé `template` → `stellantis` (classes
+> `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP en cours** : UC01 à UC08 sont
 > implémentées (configuration du plugin, client HTTP REST, authentification OAuth2 PKCE/token, test de
 > connexion, découverte des véhicules, création/synchronisation des équipements, commandes info de
-> télémétrie — `createCommands()`/`parseStatus()`/`refreshTelemetry()`, peuplées au clic « Synchroniser »).
-> Reste à faire pour clore le MVP : UC08 (cron de rafraîchissement) à UC10 (robustesse). Cette note est
-> **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
-> réel, pas un instantané figé.
+> télémétrie, rafraîchissement périodique — hook `stellantis::cron()` chaque minute, cadence par défaut
+> 5 min + `autorefresh` par véhicule, sans wakeup). Reste à faire pour clore le MVP : UC09 (état
+> connexion/fraîcheur) et UC10 (robustesse). Cette note est **mise à jour en fin de chaque `/feature`**
+> (dernière étape du workflow) — elle reflète l'avancement réel, pas un instantané figé.
 
 ## Feuille de route & specs
 
@@ -54,8 +54,8 @@ Disposition Jeedom fixe (type MVC). Pièces principales, toutes nommées d'aprè
 
 - **`core/class/stellantis.class.php`** — le cœur. Plusieurs classes (1 classe ↔ 1 logique) :
   - `stellantis extends eqLogic` — **une instance par véhicule** (clé `logicalId = VIN`). Hooks de cycle
-    de vie (`preSave/postSave`, `preRemove/postRemove`…) ; crons (`cron`/`cron5`) → **polling REST** de la
-    télémétrie ; `$_encryptConfigKey` chiffre les champs sensibles.
+    de vie (`preSave/postSave`, `preRemove/postRemove`…) ; hook `cron()` (chaque minute) → **polling REST**
+    de la télémétrie (cadence par défaut 5 min + `autorefresh` par véhicule) ; `$_encryptConfigKey` chiffre les champs sensibles.
   - `stellantisCmd extends cmd` — commande (info ou action). `execute($_options)` exécute les actions
     (réveil, charge, préconditionnement, verrouillage…) — **post-MVP**, en passant par le démon MQTT.
 - **Client API `stellantisApi`** (définie dans `core/class/stellantis.class.php`, cf. `MVP/02`,`03`) —

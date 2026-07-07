@@ -23,10 +23,14 @@ puisque l'API consommateur **n'offre pas de push** accessible.
   cf. analyse § 1.4 et UC73). Le polling REST est peu coûteux en énergie véhicule.
 - Robustesse : un véhicule en erreur ne casse pas la boucle (try/catch **par véhicule**).
 
-## Critères d'acceptation
-- [ ] Les commandes info se mettent à jour automatiquement au fil des passes de cron.
-- [ ] Un véhicule injoignable n'interrompt pas la mise à jour des autres.
-- [ ] La cadence par défaut reste raisonnable (pas de martèlement) ; pas de wakeup déclenché.
+## Critères d'acceptation (implémentés 2026-07-08 — reviews qualité pass + sécurité OK ; à valider en recette Jeedom réel)
+- [x] Les commandes info se mettent à jour automatiquement au fil des passes de cron.
+- [x] Un véhicule injoignable n'interrompt pas la mise à jour des autres.
+- [x] La cadence par défaut reste raisonnable (pas de martèlement) ; pas de wakeup déclenché.
+
+> **Écart d'implémentation** : hook `cron()` (chaque minute) retenu au lieu de `cron5()` — sous `cron5`
+> (multiples de 5 min), `isDue()` (correspondance exacte) ne matcherait jamais une expression
+> `autorefresh` non alignée (ex. `*/7`). Détail : `08-refresh-cron-tech.md`.
 
 ## Notes / risques
 - Fraîcheur limitée : sans wakeup, la donnée reflète le dernier événement remonté par la voiture

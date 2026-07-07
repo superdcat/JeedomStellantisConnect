@@ -46,6 +46,9 @@ class stellantis extends eqLogic {
   // Base commune de l'API REST consommateur (identique pour toutes les marques)
   const API_BASE_URL = 'https://api.groupe-psa.com/connectedcar/v4';
 
+  // Expression cron par défaut (véhicule sans « Auto-actualisation » renseignée) : toutes les 5 minutes.
+  const CRON_DEFAUT = '*/5 * * * *';
+
   /*     * ***********************Methode static*************************** */
 
   /**
@@ -630,15 +633,54 @@ class stellantis extends eqLogic {
     }
   }
 
-  /*
-  * Fonction exécutée automatiquement toutes les minutes par Jeedom
-  public static function cron() {}
-  */
-
-  /*
-  * Fonction exécutée automatiquement toutes les 5 minutes par Jeedom
-  public static function cron5() {}
-  */
+  /**
+   * Hook cron Jeedom (chaque minute) : rafraîchit la télémétrie des véhicules dus. On utilise cron()
+   * (pas cron5) car isDue() teste une correspondance EXACTE à la minute ; sous cron5 (multiples de 5),
+   * une expression autorefresh non alignée (ex. */7) ne matcherait jamais. Chaque minute est visitée →
+   * toute expression valide finit par être honorée. Cadence par défaut 5 min via CRON_DEFAUT.
+   * Lecture REST seule : PAS de wakeup (cf. spec 08 / analyse § 1.4).
+   */
+  public static function cron() {
+    $vehicules = eqLogic::byType('stellantis', true); // activés seulement
+    if (count($vehicules) == 0) {
+      return;
+    }
+    // Prime le token une seule fois par passe : si le refresh OAuth échoue, inutile que chaque véhicule
+    // retente son propre refreshToken() et épuise le quota anti-ban (REFRESH_QUOTA_MAX) en une passe.
+    try {
+      stellantisApi::getToken();
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'info', 'Cron : rafraîchissement ignoré (' . $e->getMessage() . ') — authentifiez-vous depuis la configuration du plugin');
+      return;
+    }
+    foreach ($vehicules as $eqLogic) {
+      $autorefresh = trim((string) $eqLogic->getConfiguration('autorefresh', ''));
+      $expression = ($autorefresh != '') ? $autorefresh : self::CRON_DEFAUT;
+      try {
+        $cron = new Cron\CronExpression(checkAndFixCron($expression), new Cron\FieldFactory());
+        if (!$cron->isDue()) {
+          continue;
+        }
+      } catch (\Throwable $e) {
+        // Expression invalide : on NE rafraîchit PAS (le repli agressif contredirait l'anti-ban). Warning
+        // throttlé (1×/h/véhicule) pour ne pas noyer les logs (cron chaque minute) ; détail en debug.
+        $cleWarn = 'stellantis::cron_warn::' . $eqLogic->getId();
+        if (cache::byKey($cleWarn)->getValue('') == '') {
+          // eqLogic #id (jamais getHumanName/logicalId : le nom peut valoir le VIN si brand+label vides, cf. UC06)
+          log::add('stellantis', 'warning', 'Cron : « Auto-actualisation » invalide pour l\'équipement #' . $eqLogic->getId() . ', véhicule non rafraîchi');
+          cache::set($cleWarn, '1', 3600);
+        }
+        log::add('stellantis', 'debug', 'Cron : expression « Auto-actualisation » rejetée pour l\'équipement #' . $eqLogic->getId() . ' : ' . $e->getMessage());
+        continue;
+      }
+      // Robustesse : un véhicule en erreur (API injoignable, statut illisible…) n'interrompt pas la boucle
+      try {
+        $eqLogic->refreshTelemetry();
+      } catch (\Throwable $e) {
+        log::add('stellantis', 'warning', 'Cron : erreur de rafraîchissement de l\'équipement #' . $eqLogic->getId() . ' : ' . $e->getMessage());
+      }
+    }
+  }
 
   /*
   * Fonction exécutée automatiquement toutes les 10 minutes par Jeedom
