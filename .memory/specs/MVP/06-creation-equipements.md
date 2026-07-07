@@ -23,10 +23,10 @@ jour les eqLogic véhicules **sans doublon**.
 - UI : bouton « Synchroniser les véhicules » (page plugin), action AJAX `sync`, puis rafraîchir la liste.
 - Conserver les champs de config standard par équipement (objet parent, activer/visible).
 
-## Critères d'acceptation
-- [ ] La 1re synchro crée un équipement par véhicule (clé VIN).
-- [ ] Une 2e synchro ne crée pas de doublon et préserve nom + objet parent personnalisés.
-- [ ] `apiId`/`vin`/`brand`/motorisation sont visibles dans la config avancée de l'équipement.
+## Critères d'acceptation (implémentés 2026-07-07 — reviews `code-reviewer` pass + `security-reviewer` OK ; à valider en recette Jeedom réel)
+- [x] La 1re synchro crée un équipement par véhicule (clé VIN).
+- [x] Une 2e synchro ne crée pas de doublon et préserve nom + objet parent personnalisés.
+- [x] `apiId`/`vin`/`brand`/motorisation sont visibles dans la config avancée de l'équipement.
 
 ## Notes / risques
 - Décider du sort d'un véhicule disparu du compte : **désactiver** plutôt que supprimer (cf. UC76 sync

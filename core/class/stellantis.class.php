@@ -232,6 +232,87 @@ class stellantis extends eqLogic {
     return '';
   }
 
+  /**
+   * Synchronise les véhicules du compte avec les équipements Jeedom (idempotent, clé logicalId = VIN).
+   * Crée les équipements manquants, met à jour les champs techniques des existants SANS écraser la
+   * personnalisation utilisateur (nom, objet parent, activation), désactive ceux disparus du compte.
+   * Retourne TOUJOURS ['ok','created','updated','disabled','reactivables','message'] — stellantisException
+   * mappée en interne (pas de levée), comme testConnection(). Appelée par l'action AJAX 'sync'.
+   */
+  public static function syncVehicles(): array {
+    // Cooldown serveur (guardrail anti-ban) : chaque synchro = 1 vrai appel API ; l'anti double-clic JS
+    // est contournable par rejeu POST — même protection que testConnection()
+    if (cache::byKey('stellantis::sync_cooldown')->getValue('') != '') {
+      return array('ok' => false, 'created' => 0, 'updated' => 0, 'disabled' => 0, 'reactivables' => 0,
+        'message' => __('Une synchronisation vient d\'être effectuée : patientez quelques secondes avant de réessayer', __FILE__));
+    }
+    cache::set('stellantis::sync_cooldown', '1', 15);
+    try {
+      $vehicules = self::discoverVehicles();
+    } catch (stellantisException $e) {
+      return array('ok' => false, 'created' => 0, 'updated' => 0, 'disabled' => 0, 'reactivables' => 0,
+        'message' => self::messageDepuisException($e));
+    }
+    $crees = 0;
+    $majs = 0;
+    $reactivables = 0;
+    $vinsDecouverts = array();
+    foreach ($vehicules as $v) {
+      // Robustesse (convention cron) : un véhicule en erreur n'interrompt pas la synchro
+      try {
+        $vinsDecouverts[] = $v['vin'];
+        // byLogicalId retrouve aussi les équipements désactivés (pas de filtre onlyEnable) → pas de doublon
+        $eqLogic = eqLogic::byLogicalId($v['vin'], 'stellantis');
+        $creation = !is_object($eqLogic);
+        if ($creation) {
+          $eqLogic = new stellantis();
+          $eqLogic->setLogicalId($v['vin']);
+          $eqLogic->setEqType_name('stellantis');
+          $eqLogic->setIsEnable(1);
+          $eqLogic->setIsVisible(1);
+          $nom = trim($v['brand'] . ' ' . $v['label']);
+          $eqLogic->setName($nom != '' ? $nom : $v['vin']);
+        } elseif (!$eqLogic->getIsEnable()) {
+          // Véhicule de nouveau présent mais équipement désactivé : on NE réactive PAS automatiquement
+          // (impossible de distinguer désactivation auto vs manuelle) — on signale juste la possibilité
+          $reactivables++;
+        }
+        // Champs techniques : jamais name/object_id/isEnable sur un équipement existant (perso préservée)
+        $eqLogic->setConfiguration('apiId', $v['id']); // requis pour les appels REST (UC07+), réécrit → self-heal
+        $eqLogic->setConfiguration('vin', $v['vin']);
+        $eqLogic->setConfiguration('brand', $v['brand']);
+        // energy : écrit seulement si absent — ne jamais écraser une valeur raffinée par le /status (UC07)
+        if (trim((string) $eqLogic->getConfiguration('energy', '')) == '' && $v['energy'] != '') {
+          $eqLogic->setConfiguration('energy', $v['energy']);
+        }
+        $eqLogic->save();
+        if ($creation) {
+          $crees++;
+        } else {
+          $majs++;
+        }
+      } catch (Exception $e) {
+        // Jamais de VIN en clair dans les logs (convention CLAUDE.md)
+        log::add('stellantis', 'warning', 'Synchronisation : véhicule ignoré (erreur de sauvegarde) : ' . $e->getMessage());
+      }
+    }
+    // Véhicules disparus du compte → désactiver plutôt que supprimer (cf. UC76)
+    $desactives = 0;
+    foreach (eqLogic::byType('stellantis') as $eqExistant) {
+      if (!in_array($eqExistant->getLogicalId(), $vinsDecouverts, true) && $eqExistant->getIsEnable()) {
+        $eqExistant->setIsEnable(0);
+        $eqExistant->save();
+        $desactives++;
+      }
+    }
+    log::add('stellantis', 'info', 'Synchronisation : ' . $crees . ' créé(s), ' . $majs . ' mis à jour, ' . $desactives . ' désactivé(s)');
+    $message = sprintf(__('Synchronisation terminée : %1$d créé(s), %2$d mis à jour, %3$d désactivé(s)', __FILE__), $crees, $majs, $desactives);
+    if ($reactivables > 0) {
+      $message .= ' — ' . sprintf(__('%d véhicule(s) réapparu(s) laissé(s) désactivé(s) : réactivez-les manuellement si besoin', __FILE__), $reactivables);
+    }
+    return array('ok' => true, 'created' => $crees, 'updated' => $majs, 'disabled' => $desactives, 'reactivables' => $reactivables, 'message' => $message);
+  }
+
   // Traduit une erreur API typée en message utilisateur actionnable (chaîne UI → enveloppée __()).
   // Pas de cas « privacy » : jamais produit avant UC07. Le corps brut des réponses d'erreur reste
   // dans les logs debug, il n'est pas réinjecté dans l'UI.

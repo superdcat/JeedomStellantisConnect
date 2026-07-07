@@ -28,11 +28,12 @@ PHP dépend du core Jeedom, atteint via `require_once __DIR__ . '/../../../../co
 Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 
 > **État d'avancement (2026-07-07)** : l'id a été renommé `template` → `stellantis` (classes
-> `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP en cours** : UC01 à UC05 sont
+> `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP en cours** : UC01 à UC06 sont
 > implémentées (configuration du plugin, client HTTP REST, authentification OAuth2 PKCE/token, test de
-> connexion, découverte des véhicules). Reste à faire pour clore le MVP : UC06 (création des
-> équipements) à UC10 (robustesse). Cette note est **mise à jour en fin de chaque `/feature`** (dernière
-> étape du workflow) — elle reflète l'avancement réel, pas un instantané figé.
+> connexion, découverte des véhicules, création/synchronisation des équipements — bouton « Synchroniser »
+> + `stellantis::syncVehicles()`). Reste à faire pour clore le MVP : UC07 (commandes info télémétrie) à
+> UC10 (robustesse). Cette note est **mise à jour en fin de chaque `/feature`** (dernière étape du
+> workflow) — elle reflète l'avancement réel, pas un instantané figé.
 
 ## Feuille de route & specs
 

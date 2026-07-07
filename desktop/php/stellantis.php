@@ -29,6 +29,11 @@ $eqLogics = eqLogic::byType($plugin->getId());
 				<br>
 				<span>{{Tester la connexion}}</span>
 			</div>
+			<div class="cursor logoSecondary" id="stellantis_btSync">
+				<i class="fas fa-sync"></i>
+				<br>
+				<span>{{Synchroniser les véhicules}}</span>
+			</div>
 		</div>
 		<legend><i class="fas fa-table"></i> {{Mes véhicules}}</legend>
 		<?php
@@ -132,20 +137,37 @@ $eqLogics = eqLogic::byType($plugin->getId());
 							</div>
 
 							<legend><i class="fas fa-cogs"></i> {{Paramètres spécifiques}}</legend>
+							<!-- Champs renseignés automatiquement par la synchronisation (lecture seule) — voir bouton « Synchroniser les véhicules » -->
 							<div class="form-group">
-								<label class="col-sm-4 control-label">{{Nom du paramètre n°1}}
-									<sup><i class="fas fa-question-circle tooltips" title="{{Renseignez le paramètre n°1 de l'équipement}}"></i></sup>
+								<label class="col-sm-4 control-label">{{VIN}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Numéro d'identification du véhicule (renseigné par la synchronisation)}}"></i></sup>
 								</label>
 								<div class="col-sm-6">
-									<input type="text" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="param1" placeholder="{{Paramètre n°1}}">
+									<input type="text" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="vin" readonly>
 								</div>
 							</div>
 							<div class="form-group">
-								<label class="col-sm-4 control-label"> {{Mot de passe}}
-									<sup><i class="fas fa-question-circle tooltips" title="{{Renseignez le mot de passe}}"></i></sup>
+								<label class="col-sm-4 control-label">{{ID API}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Identifiant du véhicule côté API Stellantis (différent du VIN, requis pour les appels)}}"></i></sup>
 								</label>
 								<div class="col-sm-6">
-									<input type="text" class="eqLogicAttr form-control inputPassword" data-l1key="configuration" data-l2key="password">
+									<input type="text" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="apiId" readonly>
+								</div>
+							</div>
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Marque}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Marque du véhicule (renseignée par la synchronisation)}}"></i></sup>
+								</label>
+								<div class="col-sm-6">
+									<input type="text" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="brand" readonly>
+								</div>
+							</div>
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Motorisation}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Motorisation détectée (Electric / Thermal / Hybrid) — indicative, affinée par le suivi de statut}}"></i></sup>
+								</label>
+								<div class="col-sm-6">
+									<input type="text" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="energy" readonly>
 								</div>
 							</div>
 							<!-- Exemple de champ de saisie du cron d'auto-actualisation avec assistant -->

@@ -55,6 +55,45 @@ $('#stellantis_btTestConnexion').off('click').on('click', function () {
   })
 })
 
+/* Synchronisation des véhicules du compte → équipements (1 vrai appel API : bouton désactivé pendant la requête).
+   Délégation sur body : la page de config plugin peut être rechargée en AJAX (évite les handlers dupliqués). */
+$('body').off('click', '#stellantis_btSync').on('click', '#stellantis_btSync', function () {
+  var bouton = $(this)
+  if (bouton.hasClass('disabled')) {
+    return
+  }
+  $.ajax({
+    type: 'POST',
+    url: 'plugins/stellantis/core/ajax/stellantis.ajax.php',
+    data: { action: 'sync' },
+    dataType: 'json',
+    beforeSend: function () {
+      bouton.addClass('disabled')
+    },
+    complete: function () {
+      bouton.removeClass('disabled')
+    },
+    error: function (request, status, error) {
+      handleAjaxError(request, status, error)
+    },
+    success: function (data) {
+      // data.state != 'ok' → data.result est une chaîne (ajax::error), pas un objet
+      if (data.state != 'ok') {
+        $('#div_alert').showAlert({ message: data.result, level: 'danger' })
+        return
+      }
+      $('#div_alert').showAlert({ message: data.result.message, level: data.result.ok ? 'success' : 'warning' })
+      // Rafraîchit la liste des cartes véhicules après une synchro réussie.
+      // Dette technique MVP assumée : reload complet (perte scroll/tri) — à remplacer par un
+      // re-render AJAX quand un endpoint de listing existera (post-MVP). Léger délai pour laisser
+      // l'utilisateur voir l'alerte de succès avant le rechargement.
+      if (data.result.ok) {
+        setTimeout(function () { window.location.reload() }, 1200)
+      }
+    }
+  })
+})
+
 /* Fonction permettant l'affichage des commandes dans l'équipement */
 function addCmdToTable(_cmd) {
   if (!isset(_cmd)) {

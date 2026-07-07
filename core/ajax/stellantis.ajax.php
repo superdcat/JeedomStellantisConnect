@@ -54,6 +54,12 @@ try {
         ajax::success(__('Authentification réussie : le plugin est connecté à votre compte', __FILE__));
     }
 
+    // syncVehicles répond en structure uniforme {ok, created, updated, disabled, reactivables, message}
+    // (mappe stellantisException en interne, comme testConnection)
+    if (init('action') == 'sync') {
+        ajax::success(stellantis::syncVehicles());
+    }
+
     throw new Exception(__('Aucune méthode correspondante à', __FILE__) . ' : ' . init('action'));
     /*     * *********Catch exeption*************** */
 }
