@@ -110,7 +110,7 @@
         "Tester la connexion": "Test connection",
         "Synchroniser les véhicules": "Synchronize vehicles",
         "Mes véhicules": "My vehicles",
-        "Aucun véhicule trouvé, cliquer sur \"Ajouter\" pour commencer": "No vehicle found, click \"Add\" to get started",
+        "Aucun véhicule trouvé, cliquer sur \"Synchroniser les véhicules\" pour commencer": "No vehicle found, click \"Sync vehicles\" to get started",
         "Rechercher": "Search",
         "Equipement visible": "Device visible",
         "Equipement non visible": "Device not visible",

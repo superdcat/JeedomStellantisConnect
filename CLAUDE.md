@@ -124,9 +124,15 @@ Configuration & secrets :
 Support :
 - **`plugin_info/info.json`** — manifeste (id, version, `require`, OS, `category`, dépendances, langues, compat).
 - **`plugin_info/install.php`** — `stellantis_install/update/remove()` ; `pre_install.php` → `stellantis_pre_update()`.
-- **`plugin_info/packages.json`** — dépendances. **MVP : vide** (100 % PHP). **Post-MVP commandes** :
-  `pip3 paho-mqtt` **épinglé `<2.0.0`** (2.0 casse le client MQTT de référence ; Debian 12 → virtualenv /
-  `--break-system-packages`) (cf. `.memory/specs/post-mvp/80-livraison/82-packaging-doc.md`).
+- **`plugin_info/packages.json`** — dépendances. **Post-MVP commandes** : `pip3 paho-mqtt` **épinglé
+  `==1.6.1`** (dernière 1.x ; la 2.0 casse le client MQTT de référence ; Debian 12 → virtualenv /
+  `--break-system-packages`) + `requests`. **UC61 (extraction APK)** : clé `apt` `php-zip` / `php-bz2`
+  (les extensions PHP `zip`/`bz2` requises par l'extraction auto des credentials ; déclencheur dpkg
+  Debian → reload php-fpm/apache automatique). (cf. `.memory/specs/post-mvp/80-livraison/82-packaging-doc.md`).
+  ⚠️ **Piège shell** : Jeedom colle la **clé** du package **non quotée** dans un script shell → un
+  `<`/`>` dans un spec de version (ex. `paho-mqtt<2.0.0`) est interprété comme une **redirection**
+  (`2.0.0: No such file or directory`, package jamais installé). N'utiliser que des specs sans `<`/`>` :
+  pin exact `==x.y.z` (ou `~=`, `!=`).
 
 ## Workflows / CI
 

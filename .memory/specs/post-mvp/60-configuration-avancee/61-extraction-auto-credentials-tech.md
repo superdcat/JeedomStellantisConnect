@@ -120,9 +120,12 @@ sauvegarde pas : l'admin valide via le bouton Sauvegarder habituel du core.
   clic) ; non figé en SHA pour ne pas perdre la fraîcheur des APK.
 
 ## Dépendances
-Aucune dépendance PHP packagée (`packages.json` reste vide). `ext-zip` / `ext-bz2` = extensions
-runtime, **vérifiées au clic** avec repli manuel documenté si absentes (pas un prérequis
-d'installation dur — le reste du plugin fonctionne sans).
+`ext-zip` / `ext-bz2` sont **packagées via `packages.json` (clé `apt` : `php-zip`, `php-bz2`)** et
+installées avec le reste des dépendances du plugin. Sur Debian (systèmes Jeedom), les paquets
+d'extension PHP embarquent un déclencheur dpkg qui recharge php-fpm/apache → l'extension devient
+active sans manip manuelle. La vérification `extension_loaded('zip')`/`('bz2')` **au clic** est
+conservée comme garde-fou (repli manuel documenté) au cas où l'installation des dépendances
+n'aurait pas été jouée ou aurait échoué — le reste du plugin fonctionne sans.
 
 ## Chaînes i18n FR introduites (traduction différée — étape 10 translator)
 Toutes en chaîne **littérale** (`{{...}}` / `__('...', __FILE__)`) :

@@ -1,6 +1,10 @@
 {
+  "apt": {
+    "php-zip": {},
+    "php-bz2": {}
+  },
   "pip3": {
-    "paho-mqtt>=1.6.0,<2.0.0": {},
+    "paho-mqtt==1.6.1": {},
     "requests": {}
   }
 }
