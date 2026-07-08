@@ -6,11 +6,21 @@ if (!isConnect('admin')) {
 $plugin = plugin::byId('stellantis');
 sendVarToJS('eqType', $plugin->getId());
 $eqLogics = eqLogic::byType($plugin->getId());
+// UC09 — État du lien au compte (sans appel réseau). detail déjà traduit par connectionState().
+$etatConnexion = stellantis::connectionState();
+$niveauConnexion = ($etatConnexion['state'] == 'ok') ? 'success' : (($etatConnexion['state'] == 'unauthenticated') ? 'warning' : 'danger');
+$iconeConnexion = ($etatConnexion['state'] == 'ok') ? 'fa-check-circle' : (($etatConnexion['state'] == 'unauthenticated') ? 'fa-exclamation-triangle' : 'fa-times-circle');
 ?>
 
 <div class="row row-overflow">
 	<!-- Page d'accueil du plugin -->
 	<div class="col-xs-12 eqLogicThumbnailDisplay">
+		<!-- Bandeau d'état de la connexion au compte Stellantis (UC09) -->
+		<div class="alert alert-<?php echo $niveauConnexion; ?>" style="margin-bottom:10px;">
+			<i class="fas <?php echo $iconeConnexion; ?>"></i>
+			<strong>{{État de la connexion}} :</strong>
+			<?php echo htmlspecialchars($etatConnexion['detail'], ENT_QUOTES, 'UTF-8'); ?>
+		</div>
 		<legend><i class="fas fa-cog"></i> {{Gestion}}</legend>
 		<!-- Boutons de gestion du plugin -->
 		<div class="eqLogicThumbnailContainer">

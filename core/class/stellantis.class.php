@@ -49,6 +49,10 @@ class stellantis extends eqLogic {
   // Expression cron par défaut (véhicule sans « Auto-actualisation » renseignée) : toutes les 5 minutes.
   const CRON_DEFAUT = '*/5 * * * *';
 
+  // Flag du dernier échec de lien (UC09), posé/effacé par cron() : distingue un refresh KO (rate-limit/
+  // transport, token encore présent mais expiré) d'un état sain. TTL borné → auto-guérison.
+  const LINK_ERROR_KEY = 'stellantis::link_error';
+
   /*     * ***********************Methode static*************************** */
 
   /**
@@ -415,6 +419,10 @@ class stellantis extends eqLogic {
     // Position indisponible si mode privacy actif (cf. data-model § 2.6 / UC75)
     $position = null;
     $privacy = isset($status['privacy']['state']) ? (string) $status['privacy']['state'] : 'None';
+    // UC09 : mémoriser l'état privacy pour la page Santé (lecture locale, sans réappel API). Cache 2 j
+    // (auto-purge des équipements supprimés) — préféré à une clé de config effaçable au Sauvegarder du
+    // formulaire desktop/php (qui ne renvoie que les champs présents).
+    cache::set('stellantis::privacy::' . $this->getId(), $privacy, 172800);
     if (strcasecmp($privacy, 'None') == 0) {
       try {
         $position = stellantisApi::callWithToken('GET', '/user/vehicles/' . $apiId . '/lastPosition');
@@ -633,6 +641,108 @@ class stellantis extends eqLogic {
     }
   }
 
+  /* * ******************* UC09 — État de connexion & fraîcheur ******************* */
+
+  /**
+   * État global du LIEN au compte (auth), dérivé du cache — AUCUN appel réseau (guardrail anti-ban).
+   * Retourne ['state' => 'ok'|'unauthenticated'|'error', 'detail' => <message UI déjà traduit>].
+   * Le mode privacy est PAR VÉHICULE (cf. health()), volontairement absent de cet état global qui
+   * reflète le seul lien compte/auth (cf. 09-tech). Consommé par le bandeau page plugin et par health().
+   */
+  public static function connectionState(): array {
+    if (!self::isConfigured()) {
+      return array('state' => 'unauthenticated',
+        'detail' => __('Plugin non configuré : renseignez la marque, le Client ID et le Client Secret puis sauvegardez', __FILE__));
+    }
+    // getTokenInfo()['authenticated'] reste vrai tant qu'un token existe MÊME expiré (pas de contrôle
+    // d'expiration pour ce booléen) — l'expiration réelle est couverte par le flag link_error ci-dessous.
+    if (!stellantisApi::getTokenInfo()['authenticated']) {
+      return array('state' => 'unauthenticated',
+        'detail' => __('Aucune connexion au compte ou session expirée : (ré)authentifiez-vous depuis la configuration du plugin', __FILE__));
+    }
+    $erreur = (string) cache::byKey(self::LINK_ERROR_KEY)->getValue('');
+    if ($erreur == 'rate_limited') {
+      return array('state' => 'error', 'detail' => __('Trop de requêtes vers l\'API : réessayez plus tard', __FILE__));
+    }
+    if ($erreur == 'transport') {
+      return array('state' => 'error', 'detail' => __('API injoignable : vérifiez la connexion Internet de votre Jeedom', __FILE__));
+    }
+    if ($erreur != '') {
+      return array('state' => 'error', 'detail' => __('Erreur au dernier rafraîchissement : consultez les logs du plugin', __FILE__));
+    }
+    return array('state' => 'ok', 'detail' => __('Connecté au compte Stellantis', __FILE__));
+  }
+
+  /**
+   * Page Santé du plugin. Contrat core (vérifié dans plugin.class.php : method_exists($id, 'health')) :
+   * méthode STATIQUE retournant des lignes ['test','result','advice','state' => bool].
+   * Une ligne « Connexion au compte » (état global) puis une ligne de fraîcheur par véhicule activé.
+   * AUCUN appel réseau : lecture du cache + valeur courante de la commande last_update.
+   */
+  public static function health(): array {
+    $lignes = array();
+    $etat = self::connectionState();
+    $lignes[] = array(
+      'test' => __('Connexion au compte', __FILE__),
+      'result' => $etat['detail'],
+      'advice' => ($etat['state'] == 'ok') ? '' : __('Reconnectez-vous depuis la configuration du plugin', __FILE__),
+      'state' => ($etat['state'] == 'ok'),
+    );
+    foreach (eqLogic::byType('stellantis', true) as $eqLogic) {
+      $nom = $eqLogic->getName();
+      // Privacy connu du dernier /status (cf. refreshTelemetry) : signalé sans être une erreur dure.
+      $privacy = (string) cache::byKey('stellantis::privacy::' . $eqLogic->getId())->getValue('');
+      if ($privacy != '' && strcasecmp($privacy, 'None') != 0) {
+        $lignes[] = array(
+          'test' => $nom,
+          'result' => __('Mode privacy actif — données de localisation restreintes', __FILE__),
+          'advice' => __('Le véhicule masque ses données (mode vie privée) : ce n\'est pas une erreur', __FILE__),
+          'state' => true,
+        );
+        continue;
+      }
+      // Fraîcheur : valeur courante de la commande info last_update (peuplée par extraireFraicheur, UC07).
+      // Lecture via execCmd() (cmd n'expose pas de getValue()) ; défensif si jamais peuplée.
+      $cmd = $eqLogic->getCmd('info', 'last_update');
+      $valeur = is_object($cmd) ? (string) $cmd->execCmd() : '';
+      $ts = ($valeur != '') ? strtotime($valeur) : false;
+      if ($ts !== false) {
+        $lignes[] = array(
+          'test' => $nom,
+          'result' => sprintf(__('Dernière donnée reçue %s', __FILE__), self::formaterAge($ts)),
+          'advice' => '',
+          'state' => true,
+        );
+      } else {
+        $lignes[] = array(
+          'test' => $nom,
+          'result' => __('Aucune donnée remontée pour le moment', __FILE__),
+          'advice' => __('Les données seront renseignées au prochain rafraîchissement', __FILE__),
+          'state' => false,
+        );
+      }
+    }
+    return $lignes;
+  }
+
+  // Âge lisible d'un timestamp Unix (chaînes UI LITTÉRALES pour l'extracteur i18n — cf. definitionsCommandes).
+  private static function formaterAge(int $_ts): string {
+    $delta = time() - $_ts;
+    if ($delta < 0) {
+      $delta = 0;
+    }
+    if ($delta < 60) {
+      return __('à l\'instant', __FILE__);
+    }
+    if ($delta < 3600) {
+      return sprintf(__('il y a %d min', __FILE__), intdiv($delta, 60));
+    }
+    if ($delta < 86400) {
+      return sprintf(__('il y a %d h', __FILE__), intdiv($delta, 3600));
+    }
+    return sprintf(__('il y a %d j', __FILE__), intdiv($delta, 86400));
+  }
+
   /**
    * Hook cron Jeedom (chaque minute) : rafraîchit la télémétrie des véhicules dus. On utilise cron()
    * (pas cron5) car isDue() teste une correspondance EXACTE à la minute ; sous cron5 (multiples de 5),
@@ -643,13 +753,27 @@ class stellantis extends eqLogic {
   public static function cron() {
     $vehicules = eqLogic::byType('stellantis', true); // activés seulement
     if (count($vehicules) == 0) {
+      // Aucun véhicule à suivre : purge un éventuel flag d'erreur résiduel (sinon bloqué en « error »).
+      cache::delete(self::LINK_ERROR_KEY);
       return;
     }
     // Prime le token une seule fois par passe : si le refresh OAuth échoue, inutile que chaque véhicule
     // retente son propre refreshToken() et épuise le quota anti-ban (REFRESH_QUOTA_MAX) en une passe.
     try {
       stellantisApi::getToken();
+      // Lien au compte OK pour cette passe (UC09) : efface tout flag d'erreur antérieur.
+      cache::delete(self::LINK_ERROR_KEY);
     } catch (\Throwable $e) {
+      // link_error ne couvre QUE le priming du token : rate-limit/transport = token présent mais refresh
+      // KO (connectionState resterait faussement « ok » sans ce flag). auth_required supprime déjà le
+      // token → connectionState = unauthenticated (pas de flag). Les échecs /status par véhicule (boucle
+      // ci-dessous) restent hors périmètre de l'état global compte/auth.
+      $type = ($e instanceof stellantisException) ? $e->getApiType() : 'error';
+      if ($type == 'rate_limited' || $type == 'transport') {
+        cache::set(self::LINK_ERROR_KEY, $type, 3600);
+      } else {
+        cache::delete(self::LINK_ERROR_KEY);
+      }
       log::add('stellantis', 'info', 'Cron : rafraîchissement ignoré (' . $e->getMessage() . ') — authentifiez-vous depuis la configuration du plugin');
       return;
     }
