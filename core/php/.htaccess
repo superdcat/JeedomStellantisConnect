@@ -1,2 +1,8 @@
 Order allow,deny
 Deny from all
+# Exception UC11 : le callback du démon MQTT (jeeStellantis.php) doit être joignable en HTTP par le
+# démon (jeedom_com). Tout le reste du dossier (dont stellantis.inc.php) demeure interdit d'accès web.
+<Files jeeStellantis.php>
+  Order allow,deny
+  Allow from all
+</Files>

@@ -23,8 +23,20 @@ function stellantis_install() {
 
 // Fonction exécutée automatiquement après la mise à jour du plugin
 function stellantis_update() {
+  // UC11 : arrêter le démon avant relance (le core le redémarre ensuite si hasOwnDeamon). Best-effort.
+  try {
+    stellantis::deamon_stop();
+  } catch (\Throwable $e) {
+    log::add('stellantis', 'warning', 'Mise à jour : arrêt du démon ignoré (' . $e->getMessage() . ')');
+  }
 }
 
 // Fonction exécutée automatiquement après la suppression du plugin
 function stellantis_remove() {
+  // UC11 : ne jamais laisser un process démon orphelin après désinstallation. Best-effort.
+  try {
+    stellantis::deamon_stop();
+  } catch (\Throwable $e) {
+    log::add('stellantis', 'warning', 'Suppression : arrêt du démon ignoré (' . $e->getMessage() . ')');
+  }
 }

@@ -32,7 +32,21 @@ manuelle** sur un Jeedom réel : la « preuve » qu'une UC marche vraiment (lint
   cron ; un véhicule injoignable n'interrompt pas les autres.
 - **Robustesse (09-10)** : couper la config → message clair, pas de crash ; provoquer un 401 → refresh
   transparent.
-- **Commandes (post-MVP 10-x)** : OTP réalisée une fois ; wakeup throttlé ; lock/charge → ack remonté ;
+- **Socle démon MQTT (post-MVP 11, ajouté 2026-07-08 — les 5 AC de `11-socle-demon-mqtt.md`)** :
+  1. Plugin configuré + authentifié → la page plugin affiche le bloc démon avec l'état **« OK »**
+     après « Démarrer le démon » ; logs `stellantis_daemon` : « Démarrage du démon MQTT » puis
+     « connecté au broker MQTT ». Non authentifié → démon **non lançable** + message explicite.
+  2. `grep -iE "IMA_OAUTH|access_token|password|Bearer"` sur les logs du démon **et** du plugin →
+     **0 occurrence** d'un token en clair (seulement `***` / longueurs).
+  3. Couper le réseau puis le rétablir → le démon se **reconnecte** (log « connecté au broker »
+     réapparaît) sans intervention.
+  4. Simuler l'expiration du token (attendre le refresh proactif du cron, ou forcer un 400) → log
+     « token rafraîchi », **pas de boucle** refresh→400→refresh dans les logs.
+  5. « Arrêter le démon » puis désinstaller/mettre à jour le plugin → **aucun** process `demond.py`
+     orphelin (`ps aux | grep demond`), port socket libéré.
+  > CID inconnu au socle → log « abonnement différé (customer id inconnu) » attendu, sans erreur
+  > (l'abonnement effectif et l'ack de commande relèvent de UC12+).
+- **Commandes (post-MVP 12-x)** : OTP réalisée une fois ; wakeup throttlé ; lock/charge → ack remonté ;
   refus véhicule signalé.
 - **Anti-ban/batterie (72/73)** : vérifier qu'aucune rafale n'est émise ; auto-wakeup off par défaut.
 

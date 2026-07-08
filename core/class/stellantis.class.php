@@ -1023,6 +1023,259 @@ class stellantis extends eqLogic {
     return sprintf(__('il y a %d j', __FILE__), intdiv($delta, 86400));
   }
 
+  /* * ******************* UC11 — Socle démon MQTT (pilotage à distance) ******************* */
+
+  // Broker MQTT par défaut (confirmé par le code de référence psa_car_controller, 2026-07-08).
+  // Surchargeable par la config 'broker_host' (forme par marque mw-{code}-m2c.mym.awsmpsa.com si besoin).
+  const MQTT_BROKER_DEFAUT = 'mwa.mpsa.com';
+  const MQTT_PORT = 8885;
+  const MQTT_USERNAME = 'IMA_OAUTH_ACCESS_TOKEN';
+  const DAEMON_TOKEN_MARKER = 'stellantis::daemon_token_marker';
+
+  // Hôte du broker MQTT (config 'broker_host' sinon défaut). Le port est constant (8885 TLS).
+  public static function brokerHost(): string {
+    $host = trim((string) config::byKey('broker_host', 'stellantis'));
+    return ($host != '') ? $host : self::MQTT_BROKER_DEFAUT;
+  }
+
+  // Customer id (CID) nécessaire aux topics psa/RemoteServices/.../cid/{CID}/... . Source API non figée
+  // (relève de UC12/OTP) → lu en config au socle ; vide = abonnement différé, sans échec.
+  public static function getCustomerId(): string {
+    return trim((string) config::byKey('customer_id', 'stellantis'));
+  }
+
+  // Topics de réponse à souscrire (les deux du contrat). Vide si CID inconnu (abonnement différé).
+  public static function subscribeTopics(): array {
+    $cid = self::getCustomerId();
+    if ($cid == '') {
+      return array();
+    }
+    return array(
+      'psa/RemoteServices/to/cid/' . $cid . '/#',
+      'psa/RemoteServices/events/MPHRTServices/',
+    );
+  }
+
+  // URL de callback démon→Jeedom, source UNIQUE (évite toute divergence de casse, fatale sous Linux).
+  public static function callbackUrl(): string {
+    return network::getNetworkAccess('internal') . '/plugins/stellantis/core/php/jeeStellantis.php';
+  }
+
+  private static function pidFile(): string {
+    return jeedom::getTmpFolder('stellantis') . '/demond.pid';
+  }
+
+  private static function socketPort(): int {
+    return (int) config::byKey('socketport', 'stellantis', 55009);
+  }
+
+  /**
+   * Contrat core (plugin.class.php) : retourne l'état du démon. Clés : state ('ok'|'nok'), launchable
+   * ('ok'|'nok'), launchable_message, log. Le démon n'est lançable que si le plugin est configuré ET
+   * authentifié (sinon le client MQTT n'aurait pas de mot de passe = access_token OAuth2).
+   */
+  public static function deamon_info(): array {
+    $return = array('log' => 'stellantis', 'state' => 'nok', 'launchable' => 'ok');
+    $pidFile = self::pidFile();
+    if (file_exists($pidFile)) {
+      if (@posix_getsid((int) trim((string) file_get_contents($pidFile)))) {
+        $return['state'] = 'ok';
+      } else {
+        @unlink($pidFile);
+      }
+    }
+    if (!self::isConfigured()) {
+      $return['launchable'] = 'nok';
+      $return['launchable_message'] = __('Plugin non configuré : renseignez et sauvegardez la configuration', __FILE__);
+    } elseif (!stellantisApi::getTokenInfo()['authenticated']) {
+      $return['launchable'] = 'nok';
+      $return['launchable_message'] = __('Compte non connecté : authentifiez-vous avant de démarrer le démon', __FILE__);
+    }
+    return $return;
+  }
+
+  /**
+   * Démarre le démon Python MQTT, puis lui pousse la connexion + l'abonnement. Interpréteur résolu via
+   * system::getCmdPython3 (respecte virtualenv / Debian 12). Retourne false si le démarrage échoue.
+   */
+  public static function deamon_start(bool $_debug = false): bool {
+    self::deamon_stop();
+    $deamon_info = self::deamon_info();
+    if ($deamon_info['launchable'] != 'ok') {
+      // Message de log en français brut (convention : log::add non traduit)
+      log::add('stellantis', 'error', 'Démon non lançable : ' . ($deamon_info['launchable_message'] ?? ''));
+      return false;
+    }
+    $path = realpath(dirname(__FILE__) . '/../../resources/demond');
+    $cmd = system::getCmdPython3('stellantis') . ' ' . $path . '/demond.py';
+    // Bouton « Démarrer en debug » du core → force le niveau debug, sinon niveau de log configuré
+    $niveauLog = $_debug ? 'debug' : log::convertLogLevel(log::getLogLevel('stellantis'));
+    $cmd .= ' --loglevel ' . escapeshellarg($niveauLog);
+    $cmd .= ' --socketport ' . escapeshellarg((string) self::socketPort());
+    $cmd .= ' --callback ' . escapeshellarg(self::callbackUrl());
+    $cmd .= ' --apikey ' . escapeshellarg(jeedom::getApiKey('stellantis'));
+    $cmd .= ' --pid ' . escapeshellarg(self::pidFile());
+    log::add('stellantis', 'info', 'Démarrage du démon MQTT');
+    $result = exec($cmd . ' >> ' . log::getPathToLog('stellantis_daemon') . ' 2>&1 &');
+    $i = 0;
+    while ($i < 20) {
+      $deamon_info = self::deamon_info();
+      if ($deamon_info['state'] == 'ok') {
+        break;
+      }
+      sleep(1);
+      $i++;
+    }
+    if ($i >= 20) {
+      log::add('stellantis', 'error', 'Le démon MQTT n\'a pas démarré dans le délai imparti');
+      return false;
+    }
+    message::removeAll('stellantis', 'unableStartDeamon');
+    // Laisse le socket s'ouvrir, puis pousse la connexion MQTT + l'abonnement (best-effort)
+    sleep(1);
+    self::pushDaemonConnect();
+    return true;
+  }
+
+  // Arrête le démon (kill du PID + libération du port socket).
+  public static function deamon_stop(): void {
+    $pidFile = self::pidFile();
+    if (file_exists($pidFile)) {
+      $pid = (int) trim((string) file_get_contents($pidFile));
+      if ($pid > 0) {
+        system::kill((string) $pid);
+      }
+      @unlink($pidFile);
+    }
+    system::fuserk(self::socketPort());
+    cache::delete(self::DAEMON_TOKEN_MARKER);
+    sleep(1);
+  }
+
+  /**
+   * Pousse au démon la connexion au broker (avec le token OAuth2 courant comme mot de passe MQTT) puis
+   * l'abonnement aux topics de réponse. Best-effort : toute erreur (token indisponible, socket) est
+   * logguée sans interrompre. Le CID inconnu → pas d'abonnement (le broker reste connecté).
+   */
+  private static function pushDaemonConnect(): void {
+    try {
+      $token = stellantisApi::getToken();
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'warning', 'Démon : token indisponible pour la connexion MQTT (' . $e->getMessage() . ')');
+      return;
+    }
+    self::sendToDaemon('connect', array(
+      'host' => self::brokerHost(),
+      'port' => self::MQTT_PORT,
+      'username' => self::MQTT_USERNAME,
+      'password' => $token,
+    ));
+    self::memoriserMarqueurToken($token);
+    $topics = self::subscribeTopics();
+    if (count($topics) > 0) {
+      self::sendToDaemon('subscribe', array('topics' => $topics));
+    } else {
+      log::add('stellantis', 'info', 'Démon : abonnement différé (customer id inconnu — sera défini en UC12)');
+    }
+  }
+
+  /**
+   * Propage le token OAuth2 courant au démon (nouveau mot de passe MQTT) SEULEMENT s'il a changé depuis
+   * le dernier envoi et si le démon tourne. Best-effort, silencieux si démon arrêté. Appelé par le cron
+   * (refresh proactif) pour éviter que le démon travaille avec un token périmé jusqu'à un rejet 400.
+   */
+  public static function syncDaemonToken(): void {
+    try {
+      if (self::deamon_info()['state'] != 'ok') {
+        return;
+      }
+      $token = stellantisApi::getToken();
+      if ((string) cache::byKey(self::DAEMON_TOKEN_MARKER)->getValue('') === self::marqueurToken($token)) {
+        return; // token inchangé depuis le dernier push
+      }
+      self::sendToDaemon('set_token', array('password' => $token));
+      self::memoriserMarqueurToken($token);
+      log::add('stellantis', 'debug', 'Démon : token MQTT mis à jour');
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'debug', 'Démon : synchro token ignorée (' . $e->getMessage() . ')');
+    }
+  }
+
+  // Marqueur non réversible (hash court, jamais le token en clair) servant à détecter un changement de
+  // token sans jamais mettre le token en cache. Source unique pour comparaison ET stockage.
+  private static function marqueurToken(string $_token): string {
+    return substr(hash('sha256', $_token), 0, 16);
+  }
+
+  // Mémorise le marqueur du dernier token poussé au démon.
+  private static function memoriserMarqueurToken(string $_token): void {
+    cache::set(self::DAEMON_TOKEN_MARKER, self::marqueurToken($_token), 0);
+  }
+
+  /**
+   * Envoie une action au démon via le socket TCP local (protocole {apikey, action, ...params}).
+   * Best-effort : toute erreur est logguée en warning, jamais propagée (le démon peut être arrêté).
+   */
+  public static function sendToDaemon(string $_action, array $_params = array()): void {
+    $params = $_params;
+    $params['action'] = $_action;
+    $params['apikey'] = jeedom::getApiKey('stellantis');
+    $payload = json_encode($params);
+    $socket = @socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+    if ($socket === false) {
+      log::add('stellantis', 'warning', 'Démon : création du socket impossible pour l\'action ' . $_action);
+      return;
+    }
+    try {
+      if (@socket_connect($socket, '127.0.0.1', self::socketPort()) === false) {
+        log::add('stellantis', 'warning', 'Démon : connexion au socket impossible (démon arrêté ?) pour l\'action ' . $_action);
+        return;
+      }
+      @socket_write($socket, $payload, strlen($payload));
+    } finally {
+      @socket_close($socket);
+    }
+  }
+
+  /**
+   * Traite un message remonté par le démon (callback jeeStellantis.php). Dispatch défensif sur 'type' :
+   * - token_expired : rafraîchit le token OAuth2 (une fois, borné — pas de boucle) et le repousse ;
+   * - connected/disconnected/message : trace (le parsing métier des acks est en UC18) ;
+   * - inconnu : ignoré silencieusement (types futurs UC13-18).
+   * Jamais de levée : appelé depuis un point d'entrée externe qui doit toujours répondre 200.
+   */
+  public static function handleDaemonMessage(array $_data): void {
+    $type = isset($_data['type']) ? (string) $_data['type'] : '';
+    switch ($type) {
+      case 'token_expired':
+        // Rafraîchissement réactif borné : un seul getToken(true) ; s'il échoue, on n'insiste pas
+        // (pas de boucle refresh→set_token→400→refresh). Le nouveau token est repoussé au démon.
+        try {
+          $token = stellantisApi::getToken(true);
+          self::sendToDaemon('set_token', array('password' => $token));
+          self::memoriserMarqueurToken($token);
+          log::add('stellantis', 'info', 'Démon : token rafraîchi après rejet 400 du broker');
+        } catch (\Throwable $e) {
+          log::add('stellantis', 'warning', 'Démon : échec du rafraîchissement de token après 400 (' . $e->getMessage() . ')');
+        }
+        break;
+      case 'connected':
+        log::add('stellantis', 'info', 'Démon : connecté au broker MQTT');
+        break;
+      case 'disconnected':
+        log::add('stellantis', 'info', 'Démon : déconnecté du broker MQTT');
+        break;
+      case 'message':
+        // Socle : on trace la réception ; le décodage métier des acks/états arrive en UC18.
+        $topic = isset($_data['topic']) ? (string) $_data['topic'] : '?';
+        log::add('stellantis', 'debug', 'Démon : message MQTT reçu sur ' . $topic);
+        break;
+      default:
+        // Type inconnu (futurs UC) : ignoré sans erreur.
+        break;
+    }
+  }
+
   /**
    * Hook cron Jeedom (chaque minute) : rafraîchit la télémétrie des véhicules dus. On utilise cron()
    * (pas cron5) car isDue() teste une correspondance EXACTE à la minute ; sous cron5 (multiples de 5),
@@ -1052,6 +1305,9 @@ class stellantis extends eqLogic {
       // Lien au compte OK pour cette passe (UC09) : efface tout flag d'erreur antérieur.
       cache::delete(self::LINK_ERROR_KEY);
       cache::delete('stellantis::degraded_warn');
+      // UC11 : propager proactivement le token courant au démon MQTT (si lancé et token changé),
+      // sans attendre un rejet réactif du broker. Best-effort, jamais bloquant pour le polling.
+      self::syncDaemonToken();
     } catch (\Throwable $e) {
       // link_error ne couvre QUE le priming du token : rate-limit/transport = token présent mais refresh
       // KO (connectionState resterait faussement « ok » sans ce flag). auth_required supprime déjà le

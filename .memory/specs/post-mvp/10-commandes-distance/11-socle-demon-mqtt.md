@@ -22,6 +22,11 @@ réactive `resources/demond` (squelette Jeedom déjà présent) avec un client M
 ## Détails techniques (confirmés recherche 2026-06-25)
 - **Broker** : `mw-{brand_code}-m2c.mym.awsmpsa.com:8885` (TLS) — ex. `mw-vx-m2c` (Vauxhall),
   `mw-ap-m2c` (autres) ; `mwa.mpsa.com:8885` aussi cité (dépannage). MQTT v3.1.1.
+  > ⚠️ **Écart relevé à l'implémentation UC11 (2026-07-08)** : le **code de référence actuel**
+  > `psa_car_controller/psa/RemoteClient.py` utilise **`mwa.mpsa.com:8885`** (constante `MQTT_SERVER`),
+  > pas la forme par marque. Le socle prend donc **`mwa.mpsa.com` en défaut** (contrat réel du code de
+  > référence) et rend l'hôte **configurable** (`broker_host`) pour retomber sur `mw-{code}-m2c...` si
+  > une marque le nécessite. Cf. `11-socle-demon-mqtt-tech.md`.
 - **Lib** : **`paho-mqtt >=1.5,<2.0`** — ⚠️ **2.0 casse `RemoteClient`** (épingler `<2.0.0`).
 - **Auth MQTT** : `username="IMA_OAUTH_ACCESS_TOKEN"`, `password = access_token` courant ; token aussi
   réinjecté dans le payload. Remote token OTP distinct (UC12).

@@ -21,6 +21,10 @@
         "URL de l'application mobile (avancé)": "Mobile app URL (advanced)",
         "Facultatif : URL complète de l'archive .apk.bz2 utilisée par l'extraction automatique. À ne renseigner que si le dépôt communautaire par défaut est indisponible ou a été déplacé.": "Optional: full URL of the .apk.bz2 archive used by the automatic extraction. Only fill this in if the default community repository is unavailable or has been moved.",
         "Laisser vide pour utiliser le dépôt par défaut": "Leave empty to use the default repository",
+        "Hôte du broker MQTT (avancé)": "MQTT broker host (advanced)",
+        "Facultatif : serveur MQTT utilisé par le démon de pilotage à distance. À ne renseigner que si le serveur par défaut ne fonctionne pas pour votre marque.": "Optional: MQTT server used by the remote control daemon. Only fill this in if the default server does not work for your brand.",
+        "Port du démon (avancé)": "Daemon port (advanced)",
+        "Facultatif : port du socket local entre Jeedom et le démon. À modifier uniquement en cas de conflit de port avec un autre plugin.": "Optional: local socket port between Jeedom and the daemon. Only change it in case of a port conflict with another plugin.",
         "Connexion au compte": "Account connection",
         "État de la connexion": "Connection status",
         "Connecté au compte": "Connected to account",
@@ -46,6 +50,8 @@
         "Aucune méthode correspondante à": "No method matching"
     },
     "plugins/stellantis/core/class/stellantis.class.php": {
+        "Plugin non configuré : renseignez et sauvegardez la configuration": "Plugin not configured: enter and save the configuration",
+        "Compte non connecté : authentifiez-vous avant de démarrer le démon": "Account not connected: authenticate before starting the daemon",
         "Plugin non configuré : renseignez la marque, le Client ID et le Client Secret puis sauvegardez": "Plugin not configured: enter the brand, the Client ID and the Client Secret then save",
         "Marque inconnue : impossible de déterminer l'application mobile à télécharger": "Unknown brand: unable to determine which mobile app to download",
         "Extensions PHP « zip » et/ou « bz2 » absentes de votre installation : extraction automatique impossible, saisissez les identifiants manuellement (voir la documentation du plugin).": "PHP extensions «zip» and/or «bz2» are missing from your installation: automatic extraction is not possible, enter the credentials manually (see the plugin documentation).",

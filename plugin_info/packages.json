@@ -1,23 +1,6 @@
 {
-  "pre-install": {
-  },
-  "apt": {
-  },
   "pip3": {
-    "pyserial" : {"reinstall" : true},
-    "requests" : {"reinstall" : true}
-  },
-  "npm": {
-    "plugins/stellantis/ressources/demond"  : {}
-  },
-  "composer": {
-       "plugins/stellantis"  : {}
-  },
-  "yarn": {
-    "plugins/stellantis/ressources/demond"  : {}
-  },
-  "plugin": {
-  },
-  "post-install": {
+    "paho-mqtt>=1.6.0,<2.0.0": {},
+    "requests": {}
   }
 }

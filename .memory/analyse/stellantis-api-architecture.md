@@ -102,6 +102,11 @@ C'est **le** piège conceptuel. Il y a deux systèmes de tokens **indépendants*
 - Broker **`mw-{brand_code}-m2c.mym.awsmpsa.com:8885`** (TLS) — ex. `mw-vx-m2c` (Vauxhall),
   `mw-ap-m2c` (autres). `mwa.mpsa.com:8885` aussi cité (dépannage). Lib Python **`paho-mqtt` ≥1.5,<2.0**
   (⚠️ **paho-mqtt 2.0 casse `RemoteClient`** → épingler `<2.0.0` dans `packages.json`).
+  > ⚠️ **Précision UC11 (2026-07-08)** : le **code de référence actuel** (`RemoteClient.py`,
+  > `MQTT_SERVER`) utilise **`mwa.mpsa.com:8885`** pour toutes les marques, pas la forme `mw-{code}-m2c`.
+  > Le socle a donc pris `mwa.mpsa.com` en défaut + hôte configurable (`broker_host`). Le mapping par
+  > marque reste l'alternative documentée si une marque le nécessite. TLS via `tls_set_context()`
+  > (vérif certif/hostname par défaut), MQTTv311, `clean_session`.
 - Topics : publish `psa/RemoteServices/from/cid/{CID}/{ServiceType}/state` ; subscribe
   `psa/RemoteServices/to/cid/{CID}/#` + `psa/RemoteServices/events/MPHRTServices/`. `CID` = format
   `AP-ACNT…` (Peugeot/Citroën/DS) ou `OV-ACNT…` (Opel/Vauxhall).

@@ -20,8 +20,9 @@ verrouillage, klaxon, feux).
   - **MVP = lecture seule, 100 % PHP, sans démon** (`hasOwnDeamon:false`). OAuth2 + REST v4 +
     **polling** dans le cron Jeedom (l'API n'a **pas de push** accessible). C'est l'essentiel de la valeur.
   - **Commandes à distance = post-MVP, via démon Python MQTT** (`resources/demond`, `paho-mqtt`) : le
-    canal MQTT persistant + OTP justifie un démon (contrairement à une API purement REST). On réactive
-    alors `resources/` et `hasOwnDeamon:true`.
+    canal MQTT persistant + OTP justifie un démon (contrairement à une API purement REST). Le **socle
+    démon est en place depuis UC11** (`resources/demond` réactivé, `hasOwnDeamon:true`) ; les commandes
+    métier et l'OTP suivent (UC12-18).
 
 Un plugin Jeedom **n'est pas autonome** : il s'installe sous `<jeedom>/plugins/stellantis/`, et tout le
 PHP dépend du core Jeedom, atteint via `require_once __DIR__ . '/../../../../core/php/core.inc.php';`.
@@ -38,8 +39,13 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > dégradé throttlé sur auth cassée, taxonomie d'erreurs `stellantisException`). **Post-MVP : UC61**
 > (extraction auto des `client_id`/`client_secret` depuis l'APK de la marque, 100 % PHP via
 > `ZipArchive`/`bz2`, bouton sur la page de config — `stellantis::extractCredentialsFromApk()`,
-> `stellantisApi::downloadToFile()`). Suite = post-MVP
-> (commandes à distance via démon MQTT, énergie/charge, localisation, entretien…). Cette note est
+> `stellantisApi::downloadToFile()`). **Post-MVP : UC11** — socle du démon Python MQTT
+> (`hasOwnDeamon:true`, `hasDependency:true`, `paho-mqtt<2.0.0`) : transport MQTT générique
+> (`resources/demond/demond.py`), pont PHP↔démon (`stellantis::sendToDaemon()`, hooks
+> `deamon_info/start/stop`), callback démon→Jeedom (`core/php/jeeStellantis.php` +
+> `stellantis::handleDaemonMessage()`), propagation du token OAuth2 au démon (`syncDaemonToken()`).
+> Suite = post-MVP (OTP/remote token UC12, commandes métier UC13-17, retour d'état UC18, énergie/charge,
+> localisation, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
 
@@ -81,9 +87,13 @@ Disposition Jeedom fixe (type MVC). Pièces principales, toutes nommées d'aprè
 - **`plugin_info/configuration.php`** — formulaire de la page de config plugin (`gotoPluginConf`).
   Champs liés en `class="configKey" data-l1key="<clé>"` (auto-load/save core via
   `config::byKey/save(..., 'stellantis')`).
-- **`resources/demond/`** — **démon Python MQTT** (post-MVP commandes uniquement). Réutilise le squelette
-  `demond.py` + lib `jeedom/` (socket `jeedom_socket` PHP→démon, `jeedom_com` démon→Jeedom). MVP : dossier
-  non utilisé (`hasOwnDeamon:false`).
+- **`resources/demond/`** — **démon Python MQTT** (commandes à distance). Réutilise le squelette
+  `demond.py` + lib `jeedom/` (socket `jeedom_socket` PHP→démon, `jeedom_com` démon→Jeedom). **Actif
+  depuis UC11** (`hasOwnDeamon:true`) : `demond.py` = transport MQTT générique (`paho-mqtt`, TLS) piloté
+  par `stellantis::sendToDaemon()` (actions `connect`/`subscribe`/`publish`/`set_token`) ; remontées
+  démon→Jeedom via le callback `core/php/jeeStellantis.php` (exception `.htaccess` dédiée) →
+  `stellantis::handleDaemonMessage()`. `jeedom.py` a été allégé (retrait serial/pyudev) et corrigé
+  (aucun secret loggué). Toute commande MQTT passe par le démon (jamais de MQTT épars).
 
 > ⚠️ **Accès restreint à `plugin_info/configuration.php`** — Claude Code **ne peut pas lire ni
 > éditer** ce fichier via les outils Read/Edit/Write (refusé par les permissions de session).
@@ -104,7 +114,9 @@ Configuration & secrets :
 - **Par plugin** (`config::save/byKey(..., 'stellantis')`) : **marque** (détermine TLD `idpcvs.{}` +
   realm `clientsB2C…`), `client_id`, `client_secret` (extraits de l'APK — manuellement via un outil
   externe, ou automatiquement via **UC61** `Extraire automatiquement`), `redirect_uri`, `apk_url`
-  (optionnel : override de l'URL de l'APK pour UC61). `client_secret` **chiffré**, jamais loggué.
+  (optionnel : override de l'URL de l'APK pour UC61), `broker_host`/`socketport` (optionnels : démon MQTT
+  UC11 ; défauts `mwa.mpsa.com`/`55009`), `customer_id` (CID MQTT, alimenté en UC12). `client_secret`
+  **chiffré**, jamais loggué.
 - **Par véhicule** (`configuration` de l'eqLogic) : `id` API, `vin`, `brand`, motorisation, capacités.
 - **Tokens** OAuth2 (access/refresh) + (post-MVP) remote token OTP : en cache **chiffré** (classe `cache`).
   ⚠️ `access_token` à durée courte (~15 min) → refresh proactif/réactif.

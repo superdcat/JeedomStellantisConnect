@@ -13,9 +13,9 @@
 		"max" : 12.99
 	},
 	"category": "devicecommunication",
-	"hasDependency": false,
-	"hasOwnDeamon": false,
-	"maxDependancyInstallTime": 0,
+	"hasDependency": true,
+	"hasOwnDeamon": true,
+	"maxDependancyInstallTime": 30,
 	"changelog_beta": "https:\/\/doc.jeedom.com\/#language#\/plugins\/devicecommunication\/stellantis\/beta\/changelog",
 	"changelog": "https:\/\/doc.jeedom.com\/#language#\/plugins\/devicecommunication\/stellantis\/changelog",
 	"documentation_beta": "https:\/\/doc.jeedom.com\/#language#\/plugins\/devicecommunication\/stellantis\/beta",

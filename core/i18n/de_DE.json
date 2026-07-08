@@ -21,6 +21,10 @@
         "URL de l'application mobile (avancé)": "URL der mobilen App (erweitert)",
         "Facultatif : URL complète de l'archive .apk.bz2 utilisée par l'extraction automatique. À ne renseigner que si le dépôt communautaire par défaut est indisponible ou a été déplacé.": "Optional: vollständige URL des .apk.bz2-Archivs, das von der automatischen Extraktion verwendet wird. Nur ausfüllen, wenn das standardmäßige Community-Repository nicht verfügbar ist oder verschoben wurde.",
         "Laisser vide pour utiliser le dépôt par défaut": "Leer lassen, um das Standard-Repository zu verwenden",
+        "Hôte du broker MQTT (avancé)": "MQTT-Broker-Host (erweitert)",
+        "Facultatif : serveur MQTT utilisé par le démon de pilotage à distance. À ne renseigner que si le serveur par défaut ne fonctionne pas pour votre marque.": "Optional: MQTT-Server, der vom Fernsteuerungsdienst (Daemon) verwendet wird. Nur ausfüllen, wenn der Standardserver für Ihre Marke nicht funktioniert.",
+        "Port du démon (avancé)": "Daemon-Port (erweitert)",
+        "Facultatif : port du socket local entre Jeedom et le démon. À modifier uniquement en cas de conflit de port avec un autre plugin.": "Optional: lokaler Socket-Port zwischen Jeedom und dem Daemon. Nur bei einem Portkonflikt mit einem anderen Plugin ändern.",
         "Connexion au compte": "Kontoverbindung",
         "État de la connexion": "Verbindungsstatus",
         "Connecté au compte": "Mit Konto verbunden",
@@ -46,6 +50,8 @@
         "Aucune méthode correspondante à": "Keine passende Methode für"
     },
     "plugins/stellantis/core/class/stellantis.class.php": {
+        "Plugin non configuré : renseignez et sauvegardez la configuration": "Plugin nicht konfiguriert: Geben Sie die Konfiguration ein und speichern Sie sie",
+        "Compte non connecté : authentifiez-vous avant de démarrer le démon": "Konto nicht verbunden: Authentifizieren Sie sich, bevor Sie den Daemon starten",
         "Plugin non configuré : renseignez la marque, le Client ID et le Client Secret puis sauvegardez": "Plugin nicht konfiguriert: Geben Sie die Marke, die Client-ID und das Client-Secret ein und speichern Sie anschließend",
         "Marque inconnue : impossible de déterminer l'application mobile à télécharger": "Unbekannte Marke: Die herunterzuladende mobile App kann nicht bestimmt werden",
         "Extensions PHP « zip » et/ou « bz2 » absentes de votre installation : extraction automatique impossible, saisissez les identifiants manuellement (voir la documentation du plugin).": "Die PHP-Erweiterungen «zip» und/oder «bz2» fehlen in Ihrer Installation: automatische Extraktion nicht möglich, geben Sie die Zugangsdaten manuell ein (siehe Plugin-Dokumentation).",

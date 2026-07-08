@@ -97,6 +97,22 @@ $infoToken = $stellantisConfigure ? stellantisApi::getTokenInfo() : array('authe
         <input class="configKey form-control" data-l1key="apk_url" placeholder="{{Laisser vide pour utiliser le dépôt par défaut}}"/>
       </div>
     </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{Hôte du broker MQTT (avancé)}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{Facultatif : serveur MQTT utilisé par le démon de pilotage à distance. À ne renseigner que si le serveur par défaut ne fonctionne pas pour votre marque.}}"></i></sup>
+      </label>
+      <div class="col-md-4">
+        <input class="configKey form-control" data-l1key="broker_host" placeholder="mwa.mpsa.com"/>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{Port du démon (avancé)}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{Facultatif : port du socket local entre Jeedom et le démon. À modifier uniquement en cas de conflit de port avec un autre plugin.}}"></i></sup>
+      </label>
+      <div class="col-md-4">
+        <input class="configKey form-control" data-l1key="socketport" placeholder="55009"/>
+      </div>
+    </div>
   </fieldset>
   <fieldset>
     <legend><i class="fas fa-link"></i> {{Connexion au compte}}</legend>

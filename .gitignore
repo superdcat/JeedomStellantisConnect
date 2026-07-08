@@ -12,3 +12,5 @@ docs/Gemfile.lock
 docs/.sass-cache/
 .remote-sync.json
 .vscode
+__pycache__/
+*.pyc
