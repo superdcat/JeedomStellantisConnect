@@ -130,7 +130,7 @@ class stellantis extends eqLogic {
   /* * ******************* UC61 — Extraction auto des identifiants depuis l'APK ******************* */
 
   // Structure d'échec uniforme de l'extraction APK (partagée par extractCredentialsFromApk et
-  // parseApkCredentials) : mêmes clés que le succès, ok=false. Jamais de succès partiel.
+  // parseApkViaPython) : mêmes clés que le succès, ok=false. Jamais de succès partiel.
   private static function echecApk(string $_msg): array {
     return array('ok' => false, 'client_id' => '', 'client_secret' => '', 'message' => $_msg);
   }
@@ -170,20 +170,14 @@ class stellantis extends eqLogic {
     if ($country == '') {
       $country = 'fr';
     }
-    // 2. Extensions PHP requises (repli propre vers la saisie manuelle si absentes). Note : les paquets
-    // php-zip/php-bz2 sont installés par les dépendances, mais Apache/mod_php ne les charge qu'après un
-    // redémarrage → message qui invite à installer les dépendances PUIS redémarrer Jeedom (ou Apache).
-    if (!extension_loaded('zip') || !extension_loaded('bz2')) {
-      return self::echecApk(__('Extensions PHP « zip » et/ou « bz2 » non chargées : installez les dépendances du plugin puis redémarrez Jeedom (ou Apache), ou saisissez les identifiants manuellement (voir la documentation du plugin).', __FILE__));
-    }
-    // 3. Cooldown serveur (guardrail anti-ban + anti double-clic contournable par rejeu POST). Calé
+    // 2. Cooldown serveur (guardrail anti-ban + anti double-clic contournable par rejeu POST). Calé
     // sur la durée réaliste d'un téléchargement de ~100 Mo (bien plus long qu'un test/sync) pour
     // éviter qu'un 2e clic ne lance un téléchargement CONCURRENT pendant que le 1er tourne encore.
     if (cache::byKey('stellantis::apk_cooldown')->getValue('') != '') {
       return self::echecApk(__('Une extraction vient d\'être lancée : patientez avant de réessayer', __FILE__));
     }
     cache::set('stellantis::apk_cooldown', '1', 120);
-    // 4. Chemins temporaires uniques (tempnam → pas de collision entre deux extractions concurrentes)
+    // 3. Chemins temporaires uniques (tempnam → pas de collision entre deux extractions concurrentes)
     $bz2Path = tempnam(sys_get_temp_dir(), 'stellantis_apk_');
     $apkPath = tempnam(sys_get_temp_dir(), 'stellantis_apk_');
     if ($bz2Path === false || $apkPath === false) {
@@ -196,7 +190,7 @@ class stellantis extends eqLogic {
       return self::echecApk(__('Impossible de créer un fichier temporaire pour le téléchargement', __FILE__));
     }
     try {
-      // 5. Téléchargement. URL surchargeable : formulaire puis config avancée, sinon défaut par marque.
+      // 4. Téléchargement. URL surchargeable : formulaire puis config avancée, sinon défaut par marque.
       $urlOverride = trim((string) $_apkUrl);
       if ($urlOverride == '') {
         $urlOverride = trim((string) config::byKey('apk_url', 'stellantis'));
@@ -208,66 +202,18 @@ class stellantis extends eqLogic {
         log::add('stellantis', 'warning', 'UC61 : échec du téléchargement de l\'APK : ' . $e->getMessage());
         return self::echecApk(__('Échec du téléchargement de l\'application mobile : vérifiez la connexion Internet de votre Jeedom, ou saisissez les identifiants manuellement.', __FILE__));
       }
-      // 6. Décompression .bz2 en flux borné (anti-bombe bz2, jamais 100 Mo en mémoire)
-      if (!self::decompresserBz2Borne($bz2Path, $apkPath)) {
-        return self::echecApk(__('Échec de la décompression de l\'application mobile téléchargée : fichier corrompu, incomplet ou trop volumineux. Réessayez ou saisissez les identifiants manuellement.', __FILE__));
-      }
-      // 7. Parsing pur (zip → cultures.json → parameters.json)
-      return self::parseApkCredentials($apkPath, $country);
+      // 5. Décompression (bz2) + parsing (zip → cultures.json → parameters.json) délégués au script
+      // Python resources/extract_credentials.py (bibliothèque standard bz2+zipfile) : aucune extension
+      // PHP requise, donc aucun redémarrage d'Apache après l'installation des dépendances.
+      return self::parseApkViaPython($bz2Path, $apkPath, $country);
     } finally {
-      // 8. Nettoyage systématique : ne JAMAIS conserver l'APK/le .bz2 sur le disque Jeedom
+      // 6. Nettoyage systématique : ne JAMAIS conserver l'APK/le .bz2 sur le disque Jeedom
       foreach (array($bz2Path, $apkPath) as $chemin) {
         if (is_string($chemin) && $chemin != '' && file_exists($chemin)) {
           @unlink($chemin);
         }
       }
     }
-  }
-
-  /**
-   * Décompresse un .bz2 vers $_destPath en FLUX BORNÉ : lecture par blocs, interruption dès que la
-   * sortie dépasse APK_TAILLE_MAX (anti-bombe bz2 : petit compressé → énorme décompressé qui
-   * saturerait le disque d'un Raspberry Pi). Jamais de chargement en mémoire. Retourne true si la
-   * décompression a produit un fichier non vide dans la limite, false sinon (échec loggué en warning).
-   */
-  private static function decompresserBz2Borne(string $_bz2Path, string $_destPath): bool {
-    $in = @fopen('compress.bzip2://' . $_bz2Path, 'rb');
-    $out = @fopen($_destPath, 'wb');
-    if ($in === false || $out === false) {
-      if (is_resource($in)) { fclose($in); }
-      if (is_resource($out)) { fclose($out); }
-      log::add('stellantis', 'warning', 'UC61 : ouverture des flux de décompression impossible');
-      return false;
-    }
-    $total = 0;
-    $erreur = false;
-    while (!feof($in)) {
-      $bloc = fread($in, 1048576);
-      if ($bloc === false) {
-        $erreur = true;
-        break;
-      }
-      if ($bloc === '') {
-        continue;
-      }
-      $total += strlen($bloc);
-      if ($total > self::APK_TAILLE_MAX) {
-        $erreur = true;
-        log::add('stellantis', 'warning', 'UC61 : décompression interrompue, taille > ' . self::APK_TAILLE_MAX . ' o (bombe de décompression ?)');
-        break;
-      }
-      if (fwrite($out, $bloc) === false) {
-        $erreur = true;
-        break;
-      }
-    }
-    fclose($in);
-    fclose($out);
-    if ($erreur || $total <= 0) {
-      log::add('stellantis', 'warning', 'UC61 : échec de la décompression bz2 de l\'APK (' . $total . ' o écrits)');
-      return false;
-    }
-    return true;
   }
 
   // Supprime les fichiers temporaires stellantis_apk_* de plus d'une heure (orphelins laissés par une
@@ -287,100 +233,74 @@ class stellantis extends eqLogic {
   }
 
   /**
-   * Extraction PURE (sans réseau, sans effet de bord → testable sur fixture) des identifiants d'un
-   * fichier APK déjà téléchargé et décompressé. Retourne la même structure uniforme que
-   * extractCredentialsFromApk(). SEUL endroit où vivent les chemins internes de l'APK (cultures.json,
-   * res/raw-{lang}-r{country}/parameters.json) et les noms de champs (cvsClientId/cvsSecret) — à faire
-   * évoluer ici si Stellantis change la structure de l'APK. Ne retourne JAMAIS de succès partiel.
+   * Décompresse (bz2) et lit l'APK via le script Python resources/extract_credentials.py (bibliothèque
+   * standard bz2+zipfile) — AUCUNE extension PHP requise, donc pas de redémarrage d'Apache après
+   * l'installation des dépendances. PHP a téléchargé le .bz2 et possède les fichiers temp ; Python
+   * décompresse (borné anti-bombe) + lit cultures.json/parameters.json et renvoie sur STDOUT un JSON
+   * {status, client_id, client_secret}. Les chemins internes de l'APK et les noms de champs vivent
+   * désormais DANS le script Python (à faire évoluer là-bas si Stellantis change la structure). Le
+   * mapping status → message utilisateur (i18n) reste ici. Ne retourne JAMAIS de succès partiel.
    */
-  public static function parseApkCredentials(string $_apkPath, string $_country): array {
-    $zip = new ZipArchive();
-    // ZipArchive::open() renvoie un CODE ENTIER (true seulement en succès), pas d'exception
-    if ($zip->open($_apkPath) !== true) {
-      log::add('stellantis', 'warning', 'UC61 : ouverture de l\'APK impossible (archive illisible)');
-      return self::echecApk(__('Application mobile illisible (archive invalide) : réessayez ou saisissez les identifiants manuellement.', __FILE__));
+  private static function parseApkViaPython(string $_bz2Path, string $_apkPath, string $_country): array {
+    $dossier = realpath(__DIR__ . '/../../resources');
+    if ($dossier === false) {
+      log::add('stellantis', 'warning', 'UC61 : dossier resources/ introuvable pour le script d\'extraction');
+      return self::echecApk(__('Extraction automatique indisponible : réessayez ou saisissez les identifiants manuellement.', __FILE__));
     }
-    try {
-      // Garde-fou : un vrai APK a des milliers d'entrées mais pas des millions ; un décompte aberrant
-      // signale une archive forgée (déni de service à l'énumération du répertoire central).
-      if ($zip->numFiles > 100000) {
-        log::add('stellantis', 'warning', 'UC61 : APK au nombre d\'entrées aberrant (' . $zip->numFiles . '), rejeté');
-        return self::echecApk(__('Application mobile illisible (archive invalide) : réessayez ou saisissez les identifiants manuellement.', __FILE__));
-      }
-      // cultures.json : mappe le pays vers une culture ({lang}_{COUNTRY}, ex. fr_FR)
-      $cultures = self::lireJsonEntreeApk($zip, 'res/raw/cultures.json');
-      if ($cultures === null) {
-        return self::echecApk(__('Structure de l\'application mobile inattendue (cultures.json introuvable ou illisible) : elle a peut-être changé. Saisissez les identifiants manuellement.', __FILE__));
-      }
-      // Casse : cultures.json est indexé en MAJUSCULES (FR) ; la config stocke le pays en minuscule.
-      // Repli défensif sur la valeur telle quelle si jamais la casse diffère.
-      $paysMaj = strtoupper($_country);
-      $cle = null;
-      foreach (array($paysMaj, $_country) as $candidat) {
-        if (isset($cultures[$candidat]['languages'][0]) && is_scalar($cultures[$candidat]['languages'][0])) {
-          $cle = $candidat;
-          break;
+    $cmd = system::getCmdPython3('stellantis')
+      . ' ' . escapeshellarg($dossier . '/extract_credentials.py')
+      . ' --bz2 ' . escapeshellarg($_bz2Path)
+      . ' --apk ' . escapeshellarg($_apkPath)
+      . ' --country ' . escapeshellarg($_country)
+      . ' --max-total ' . escapeshellarg((string) self::APK_TAILLE_MAX)
+      . ' --max-entry ' . escapeshellarg((string) self::APK_ENTREE_MAX)
+      . ' 2>/dev/null'; // stderr écarté (le script n'y met qu'un éventuel traceback, jamais de secret)
+    $sortie = array();
+    $code = 0;
+    exec($cmd, $sortie, $code);
+    $resultat = json_decode(implode('', $sortie), true);
+    if (!is_array($resultat) || !isset($resultat['status'])) {
+      log::add('stellantis', 'warning', 'UC61 : script d\'extraction Python injoignable ou sortie illisible (code ' . $code . ')');
+      return self::echecApk(__('Extraction automatique indisponible (dépendances Python manquantes ?) : installez les dépendances du plugin ou saisissez les identifiants manuellement.', __FILE__));
+    }
+    switch ((string) $resultat['status']) {
+      case 'ok':
+        $clientId = isset($resultat['client_id']) ? trim((string) $resultat['client_id']) : '';
+        $clientSecret = isset($resultat['client_secret']) ? trim((string) $resultat['client_secret']) : '';
+        // Jamais de succès partiel : les DEUX identifiants doivent être présents et non vides
+        if ($clientId == '' || $clientSecret == '') {
+          log::add('stellantis', 'warning', 'UC61 : identifiants absents de parameters.json (cvsClientId/cvsSecret)');
+          return self::echecApk(__('Identifiants introuvables dans l\'application mobile (champs absents) : saisissez-les manuellement.', __FILE__));
         }
-      }
-      if ($cle === null) {
-        return self::echecApk(sprintf(__('Pays « %s » absent de la liste des cultures de l\'application mobile : vérifiez le code pays ou saisissez les identifiants manuellement.', __FILE__), $paysMaj));
-      }
-      $culture = (string) $cultures[$cle]['languages'][0];
-      // Culture "{lang}_{COUNTRY}" → dossier res/raw-{lang}-r{COUNTRY}/parameters.json
-      $parts = explode('_', $culture);
-      if (count($parts) < 2 || trim($parts[0]) == '' || trim($parts[1]) == '') {
-        log::add('stellantis', 'warning', 'UC61 : culture au format inattendu : ' . $culture);
+        log::add('stellantis', 'info', 'UC61 : identifiants extraits de l\'APK avec succès');
+        return array(
+          'ok' => true,
+          'client_id' => $clientId,
+          'client_secret' => $clientSecret,
+          'message' => __('Identifiants extraits : vérifiez les champs puis sauvegardez la configuration.', __FILE__),
+        );
+      case 'decompress_failed':
+        log::add('stellantis', 'warning', 'UC61 : échec de la décompression bz2 de l\'APK');
+        return self::echecApk(__('Échec de la décompression de l\'application mobile téléchargée : fichier corrompu, incomplet ou trop volumineux. Réessayez ou saisissez les identifiants manuellement.', __FILE__));
+      case 'zip_unreadable':
+        log::add('stellantis', 'warning', 'UC61 : ouverture de l\'APK impossible (archive illisible)');
+        return self::echecApk(__('Application mobile illisible (archive invalide) : réessayez ou saisissez les identifiants manuellement.', __FILE__));
+      case 'cultures_missing':
+        return self::echecApk(__('Structure de l\'application mobile inattendue (cultures.json introuvable ou illisible) : elle a peut-être changé. Saisissez les identifiants manuellement.', __FILE__));
+      case 'country_absent':
+        return self::echecApk(sprintf(__('Pays « %s » absent de la liste des cultures de l\'application mobile : vérifiez le code pays ou saisissez les identifiants manuellement.', __FILE__), strtoupper($_country)));
+      case 'culture_invalid':
+        log::add('stellantis', 'warning', 'UC61 : culture au format inattendu');
         return self::echecApk(__('Structure de l\'application mobile inattendue (culture illisible) : saisissez les identifiants manuellement.', __FILE__));
-      }
-      $lang = strtolower($parts[0]);
-      $pays = strtoupper($parts[1]);
-      $params = self::lireJsonEntreeApk($zip, 'res/raw-' . $lang . '-r' . $pays . '/parameters.json');
-      if ($params === null) {
+      case 'parameters_missing':
         return self::echecApk(__('Structure de l\'application mobile inattendue (parameters.json introuvable ou illisible) : elle a peut-être changé. Saisissez les identifiants manuellement.', __FILE__));
-      }
-      $clientId = (isset($params['cvsClientId']) && is_scalar($params['cvsClientId'])) ? trim((string) $params['cvsClientId']) : '';
-      $clientSecret = (isset($params['cvsSecret']) && is_scalar($params['cvsSecret'])) ? trim((string) $params['cvsSecret']) : '';
-      // Jamais de succès partiel : les DEUX identifiants doivent être présents et non vides
-      if ($clientId == '' || $clientSecret == '') {
+      case 'credentials_missing':
         log::add('stellantis', 'warning', 'UC61 : identifiants absents de parameters.json (cvsClientId/cvsSecret)');
         return self::echecApk(__('Identifiants introuvables dans l\'application mobile (champs absents) : saisissez-les manuellement.', __FILE__));
-      }
-      log::add('stellantis', 'info', 'UC61 : identifiants extraits de l\'APK avec succès (culture ' . $lang . '-r' . $pays . ')');
-      return array(
-        'ok' => true,
-        'client_id' => $clientId,
-        'client_secret' => $clientSecret,
-        'message' => __('Identifiants extraits : vérifiez les champs puis sauvegardez la configuration.', __FILE__),
-      );
-    } finally {
-      $zip->close();
+      default:
+        log::add('stellantis', 'warning', 'UC61 : status d\'extraction inattendu « ' . (string) $resultat['status'] . ' »');
+        return self::echecApk(__('Extraction automatique impossible : réessayez ou saisissez les identifiants manuellement.', __FILE__));
     }
-  }
-
-  /**
-   * Lit et décode une entrée JSON d'un APK ouvert, avec garde-fou anti zip-bomb (refus si la taille
-   * ANNONCÉE dépasse APK_ENTREE_MAX, avant toute lecture en mémoire). Retourne le tableau décodé, ou
-   * null si l'entrée est absente / trop grosse / n'est pas du JSON valide.
-   */
-  private static function lireJsonEntreeApk(ZipArchive $_zip, string $_nom): ?array {
-    $stat = $_zip->statName($_nom);
-    if ($stat === false) {
-      return null; // entrée absente
-    }
-    if (isset($stat['size']) && $stat['size'] > self::APK_ENTREE_MAX) {
-      log::add('stellantis', 'warning', 'UC61 : entrée APK ' . $_nom . ' trop volumineuse (' . $stat['size'] . ' o), ignorée');
-      return null;
-    }
-    $contenu = $_zip->getFromName($_nom);
-    if ($contenu === false || $contenu === '') {
-      return null;
-    }
-    $decode = json_decode($contenu, true);
-    if (json_last_error() !== JSON_ERROR_NONE || !is_array($decode)) {
-      log::add('stellantis', 'warning', 'UC61 : entrée APK ' . $_nom . ' non-JSON ou illisible');
-      return null;
-    }
-    return $decode;
   }
 
   /**

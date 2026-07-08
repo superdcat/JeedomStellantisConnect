@@ -120,19 +120,36 @@ sauvegarde pas : l'admin valide via le bouton Sauvegarder habituel du core.
   clic) ; non figé en SHA pour ne pas perdre la fraîcheur des APK.
 
 ## Dépendances
-`ext-zip` / `ext-bz2` sont **packagées via `packages.json` (clé `apt` : `php-zip`, `php-bz2`)** et
-installées avec le reste des dépendances du plugin. Sur Debian (systèmes Jeedom), les paquets
-d'extension PHP embarquent un déclencheur dpkg qui recharge php-fpm/apache → l'extension devient
-active sans manip manuelle. La vérification `extension_loaded('zip')`/`('bz2')` **au clic** est
-conservée comme garde-fou (repli manuel documenté) au cas où l'installation des dépendances
-n'aurait pas été jouée ou aurait échoué — le reste du plugin fonctionne sans.
+**Aucune dépendance PHP.** La décompression bz2 + la lecture du zip (APK) sont **déléguées au script
+Python `resources/extract_credentials.py`** (bibliothèque **standard** `bz2` + `zipfile`, zéro pip
+supplémentaire), invoqué via `system::getCmdPython3('stellantis')`. Motivation (constatée 2026-07-08) :
+les extensions `php-zip`/`php-bz2` installées par apt **ne sont pas chargées dans le PHP web (mod_php)
+tant qu'Apache n'est pas redémarré** → l'extraction (AJAX) échouait juste après l'install. Python
+contourne totalement le problème (nouveau process, config à froid, stdlib toujours présente) et réutilise
+l'interpréteur déjà requis par le démon MQTT (UC11).
+
+- **Découpage PHP ↔ Python** : PHP garde cooldown, résolution marque/pays/URL, **téléchargement**
+  (`stellantisApi::downloadToFile`, tout HTTP reste dans `stellantisApi`), gestion + nettoyage des
+  fichiers temp, et le **mapping `status` → message i18n**. Python ne fait que décompresser (borné) + lire
+  cultures.json/parameters.json et renvoie sur **stdout un JSON `{status, client_id, client_secret}`**.
+- **Contrat status** : `ok` | `decompress_failed` | `zip_unreadable` | `cultures_missing` |
+  `country_absent` | `culture_invalid` | `parameters_missing` | `credentials_missing` | `error`. Sort
+  toujours en code 0 avec un status connu ; secret **uniquement** dans le JSON (jamais loggué). PHP
+  discarde `stderr` (`2>/dev/null`) pour ne pas corrompre le JSON.
+- **Garde-fous anti-bombe reportés en Python** : décompression bz2 en flux plafonné à `APK_TAILLE_MAX` ;
+  refus d'une entrée zip > `APK_ENTREE_MAX` (taille annoncée **et** lecture plafonnée) ; rejet si
+  `> 100000` entrées. Les chemins internes de l'APK et les noms de champs (`cvsClientId`/`cvsSecret`)
+  vivent désormais **dans le script Python** (à faire évoluer là-bas si Stellantis change la structure).
+- **Repli** : si l'invocation Python échoue (interpréteur/deps absents, sortie illisible), message
+  d'échec propre orientant vers l'installation des dépendances ou la saisie manuelle.
 
 ## Chaînes i18n FR introduites (traduction différée — étape 10 translator)
 Toutes en chaîne **littérale** (`{{...}}` / `__('...', __FILE__)`) :
 - UI : `Extraire automatiquement` ; tooltip bouton ; texte d'aide APK ; texte `bootbox.confirm` ;
   « Téléchargement de l'application mobile en cours (~100 Mo), veuillez patienter… » ; label +
   tooltip `apk_url`.
-- PHP : extensions manquantes ; marque inconnue ; échec téléchargement ; échec décompression ;
-  `cultures.json` introuvable ; pays absent de la liste des cultures de l'APK ;
-  `parameters.json` introuvable ; identifiants absents de l'APK ; succès
-  « Identifiants extraits : vérifiez puis sauvegardez la configuration ».
+- PHP : marque inconnue ; échec téléchargement ; échec décompression ; archive illisible ;
+  `cultures.json` introuvable ; pays absent de la liste des cultures de l'APK ; culture illisible ;
+  `parameters.json` introuvable ; identifiants absents de l'APK ; extraction indisponible (deps Python
+  manquantes) / impossible (fallbacks) ; succès « Identifiants extraits : vérifiez puis sauvegardez la
+  configuration ». (Les anciennes clés « extensions PHP zip/bz2 » sont supprimées — plus de dépendance PHP.)

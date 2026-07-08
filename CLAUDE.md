@@ -37,10 +37,12 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > `stellantis::connectionState()`, page Santé `stellantis::health()`, bandeau page plugin, indicateur
 > privacy par véhicule ; robustesse — rejeu token borné, backoff/cooldown anti-ban sur HTTP 429, mode
 > dégradé throttlé sur auth cassée, taxonomie d'erreurs `stellantisException`). **Post-MVP : UC61**
-> (extraction auto des `client_id`/`client_secret` depuis l'APK de la marque, 100 % PHP via
-> `ZipArchive`/`bz2`, bouton sur la page de config — `stellantis::extractCredentialsFromApk()`,
-> `stellantisApi::downloadToFile()`). **Post-MVP : UC11** — socle du démon Python MQTT
-> (`hasOwnDeamon:true`, `hasDependency:true`, `paho-mqtt<2.0.0`) : transport MQTT générique
+> (extraction auto des `client_id`/`client_secret` depuis l'APK de la marque, bouton sur la page de
+> config — `stellantis::extractCredentialsFromApk()`, `stellantisApi::downloadToFile()` pour le
+> téléchargement ; **décompression bz2 + lecture zip déléguées au script Python
+> `resources/extract_credentials.py`** — stdlib `bz2`/`zipfile`, donc **aucune extension PHP** ni
+> redémarrage d'Apache). **Post-MVP : UC11** — socle du démon Python MQTT
+> (`hasOwnDeamon:true`, `hasDependency:true`, `paho-mqtt==1.6.1`) : transport MQTT générique
 > (`resources/demond/demond.py`), pont PHP↔démon (`stellantis::sendToDaemon()`, hooks
 > `deamon_info/start/stop`), callback démon→Jeedom (`core/php/jeeStellantis.php` +
 > `stellantis::handleDaemonMessage()`), propagation du token OAuth2 au démon (`syncDaemonToken()`).
@@ -124,15 +126,14 @@ Configuration & secrets :
 Support :
 - **`plugin_info/info.json`** — manifeste (id, version, `require`, OS, `category`, dépendances, langues, compat).
 - **`plugin_info/install.php`** — `stellantis_install/update/remove()` ; `pre_install.php` → `stellantis_pre_update()`.
-- **`plugin_info/packages.json`** — dépendances. **Post-MVP commandes** : `pip3 paho-mqtt` **épinglé
-  `==1.6.1`** (dernière 1.x ; la 2.0 casse le client MQTT de référence ; Debian 12 → virtualenv /
-  `--break-system-packages`) + `requests`. **UC61 (extraction APK)** : clé `apt` `php-zip` / `php-bz2`
-  (les extensions PHP `zip`/`bz2` requises par l'extraction auto des credentials). ⚠️ **Sur Jeedom en
-  `libapache2-mod-php` (mod_php), installer une extension PHP ne recharge PAS Apache** → l'extension
-  n'est chargée dans le PHP web (AJAX/pages) qu'après un **redémarrage d'Apache** (`systemctl restart
-  apache2`) ou de Jeedom. Ne pas auto-restart Apache pendant l'install des deps (ça tuerait la session
-  web qui pilote l'install) → l'utilisateur redémarre manuellement une fois.
-  (cf. `.memory/specs/post-mvp/80-livraison/82-packaging-doc.md`).
+- **`plugin_info/packages.json`** — dépendances (uniquement `pip3`). **Post-MVP commandes** : `pip3
+  paho-mqtt` **épinglé `==1.6.1`** (dernière 1.x ; la 2.0 casse le client MQTT de référence ; Debian 12 →
+  virtualenv / `--break-system-packages`) + `requests`. ⚠️ **Piège shell** : Jeedom colle la clé du
+  package **non quotée** → pas de `<`/`>` dans un spec de version (redirection shell → package jamais
+  installé) ; utiliser `==`/`~=`. **UC61 (extraction APK)** n'a **aucune dépendance PHP** : la
+  décompression bz2 + lecture zip passe par `resources/extract_credentials.py` (stdlib Python `bz2` +
+  `zipfile`, réutilise l'interpréteur déjà présent pour le démon) → pas d'extension PHP, pas de
+  redémarrage d'Apache. (cf. `.memory/specs/post-mvp/80-livraison/82-packaging-doc.md`).
   ⚠️ **Piège shell** : Jeedom colle la **clé** du package **non quotée** dans un script shell → un
   `<`/`>` dans un spec de version (ex. `paho-mqtt<2.0.0`) est interprété comme une **redirection**
   (`2.0.0: No such file or directory`, package jamais installé). N'utiliser que des specs sans `<`/`>` :
