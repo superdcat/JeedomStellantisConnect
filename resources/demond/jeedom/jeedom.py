@@ -137,7 +137,9 @@ class jeedom_utils():
 
     @staticmethod
     def stripped(str):
-        return "".join([i for i in str if i in range(32, 127)])
+        # Le message vient du socket sous forme de bytes (rfile.readline()). En Python 3,
+        # itérer des bytes donne des int → convertir chaque octet imprimable via chr().
+        return "".join([chr(i) for i in str if i in range(32, 127)])
 
     @staticmethod
     def ByteToHex(byteStr: bytes):
