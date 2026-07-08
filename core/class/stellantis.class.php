@@ -170,9 +170,11 @@ class stellantis extends eqLogic {
     if ($country == '') {
       $country = 'fr';
     }
-    // 2. Extensions PHP requises (repli propre vers la saisie manuelle si absentes)
+    // 2. Extensions PHP requises (repli propre vers la saisie manuelle si absentes). Note : les paquets
+    // php-zip/php-bz2 sont installés par les dépendances, mais Apache/mod_php ne les charge qu'après un
+    // redémarrage → message qui invite à installer les dépendances PUIS redémarrer Jeedom (ou Apache).
     if (!extension_loaded('zip') || !extension_loaded('bz2')) {
-      return self::echecApk(__('Extensions PHP « zip » et/ou « bz2 » absentes de votre installation : extraction automatique impossible, saisissez les identifiants manuellement (voir la documentation du plugin).', __FILE__));
+      return self::echecApk(__('Extensions PHP « zip » et/ou « bz2 » non chargées : installez les dépendances du plugin puis redémarrez Jeedom (ou Apache), ou saisissez les identifiants manuellement (voir la documentation du plugin).', __FILE__));
     }
     // 3. Cooldown serveur (guardrail anti-ban + anti double-clic contournable par rejeu POST). Calé
     // sur la durée réaliste d'un téléchargement de ~100 Mo (bien plus long qu'un test/sync) pour
@@ -1067,6 +1069,35 @@ class stellantis extends eqLogic {
 
   private static function socketPort(): int {
     return (int) config::byKey('socketport', 'stellantis', 55009);
+  }
+
+  /**
+   * Contrat core (plugin.class.php) : état des dépendances du plugin. Obligatoire dès hasDependency:true,
+   * sinon le core ne peut jamais confirmer l'installation et laisse l'indicateur sur « NOK ». On vérifie
+   * la SEULE dépendance dure : les modules Python du démon MQTT (paho + requests), via l'interpréteur
+   * résolu par le core (respecte virtualenv / Debian 12). L'install elle-même reste déléguée à
+   * packages.json (script auto-généré par le core). Les extensions php-zip/php-bz2 ne conditionnent PAS
+   * cet état : elles ne servent qu'à l'extraction APK (UC61, optionnelle) et exigent un redémarrage
+   * d'Apache pour être chargées — les inclure ici bloquerait l'état sur NOK alors que le plugin marche.
+   */
+  public static function dependancy_info(): array {
+    $return = array('log' => 'stellantis_dep', 'progress_file' => '/tmp/jeedom_install_in_progress_stellantis');
+    if (file_exists($return['progress_file'])) {
+      $return['state'] = 'in_progress';
+      return $return;
+    }
+    $return['state'] = 'ok';
+    try {
+      $output = array();
+      $code = 0;
+      exec(system::getCmdPython3('stellantis') . ' -c ' . escapeshellarg('import paho.mqtt.client, requests') . ' 2>&1', $output, $code);
+      if ($code !== 0) {
+        $return['state'] = 'nok';
+      }
+    } catch (\Throwable $e) {
+      $return['state'] = 'nok';
+    }
+    return $return;
   }
 
   /**
