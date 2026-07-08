@@ -746,7 +746,8 @@ class stellantis extends eqLogic {
   /**
    * Hook cron Jeedom (chaque minute) : rafraîchit la télémétrie des véhicules dus. On utilise cron()
    * (pas cron5) car isDue() teste une correspondance EXACTE à la minute ; sous cron5 (multiples de 5),
-   * une expression autorefresh non alignée (ex. */7) ne matcherait jamais. Chaque minute est visitée →
+   * une expression autorefresh non alignée (ex. « toutes les 7 min ») ne matcherait jamais. Chaque
+   * minute est visitée →
    * toute expression valide finit par être honorée. Cadence par défaut 5 min via CRON_DEFAUT.
    * Lecture REST seule : PAS de wakeup (cf. spec 08 / analyse § 1.4).
    */
