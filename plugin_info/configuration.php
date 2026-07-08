@@ -65,6 +65,15 @@ $infoToken = $stellantisConfigure ? stellantisApi::getTokenInfo() : array('authe
       </div>
     </div>
     <div class="form-group">
+      <label class="col-md-4 control-label">{{Extraction automatique}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{Télécharge l'application mobile de la marque sélectionnée (~100 Mo) et en extrait automatiquement le Client ID et le Client Secret, sans installer d'outil externe. Sélectionnez d'abord la marque et le pays.}}"></i></sup>
+      </label>
+      <div class="col-md-6">
+        <a class="btn btn-default" id="stellantis_btExtraireApk"><i class="fas fa-download"></i> {{Extraire automatiquement}}</a>
+        <div class="help-block">{{Renseigne le Client ID et le Client Secret à partir de l'application mobile de votre marque. En cas d'échec, la saisie manuelle reste possible (voir la documentation du plugin).}}</div>
+      </div>
+    </div>
+    <div class="form-group">
       <label class="col-md-4 control-label">{{Pays}}
         <sup><i class="fas fa-question-circle tooltips" title="{{Code pays à 2 lettres (ex. fr) utilisé pour construire l'URL de redirection par défaut}}"></i></sup>
       </label>
@@ -78,6 +87,14 @@ $infoToken = $stellantisConfigure ? stellantisApi::getTokenInfo() : array('authe
       </label>
       <div class="col-md-4">
         <input class="configKey form-control" data-l1key="redirect_uri" placeholder="{{Laisser vide pour utiliser le défaut de la marque}}"/>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{URL de l'application mobile (avancé)}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{Facultatif : URL complète de l'archive .apk.bz2 utilisée par l'extraction automatique. À ne renseigner que si le dépôt communautaire par défaut est indisponible ou a été déplacé.}}"></i></sup>
+      </label>
+      <div class="col-md-4">
+        <input class="configKey form-control" data-l1key="apk_url" placeholder="{{Laisser vide pour utiliser le dépôt par défaut}}"/>
       </div>
     </div>
   </fieldset>
@@ -117,6 +134,46 @@ $infoToken = $stellantisConfigure ? stellantisApi::getTokenInfo() : array('authe
   </fieldset>
 </form>
 <script>
+  $('body').off('click', '#stellantis_btExtraireApk').on('click', '#stellantis_btExtraireApk', function () {
+    var brand = $('.configKey[data-l1key=brand]').value();
+    var country = $('.configKey[data-l1key=country]').value();
+    var apkUrl = $('.configKey[data-l1key=apk_url]').value();
+    if (!brand) {
+      $('#div_alert').showAlert({ message: "{{Sélectionnez d'abord la marque de votre véhicule}}", level: 'warning' });
+      return;
+    }
+    bootbox.confirm(
+      "{{Le plugin va télécharger (~100 Mo) et analyser l'application mobile de votre marque, hébergée sur un dépôt communautaire tiers, pour en extraire vos identifiants. Cette API n'est pas officielle. Continuer ?}}",
+      function (resultat) {
+        if (!resultat) {
+          return;
+        }
+        $('#div_alert').showAlert({ message: "{{Téléchargement de l'application mobile en cours (~100 Mo), veuillez patienter…}}", level: 'info' });
+        $.ajax({
+          type: 'POST',
+          url: 'plugins/stellantis/core/ajax/stellantis.ajax.php',
+          data: { action: 'extractCredentials', brand: brand, country: country, apk_url: apkUrl },
+          dataType: 'json',
+          error: function (request, status, error) {
+            handleAjaxError(request, status, error);
+          },
+          success: function (data) {
+            if (data.state != 'ok') {
+              $('#div_alert').showAlert({ message: data.result, level: 'danger' });
+              return;
+            }
+            if (!data.result.ok) {
+              $('#div_alert').showAlert({ message: data.result.message, level: 'danger' });
+              return;
+            }
+            $('.configKey[data-l1key=client_id]').value(data.result.client_id);
+            $('.configKey[data-l1key=client_secret]').value(data.result.client_secret);
+            $('#div_alert').showAlert({ message: data.result.message, level: 'success' });
+          }
+        });
+      }
+    );
+  });
   $('body').off('click', '#stellantis_btGenererAuthUrl').on('click', '#stellantis_btGenererAuthUrl', function () {
     $.ajax({
       type: 'POST',

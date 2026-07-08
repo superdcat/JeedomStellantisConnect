@@ -35,6 +35,14 @@ try {
         ajax::success(stellantis::testConnection());
     }
 
+    // UC61 : extraction auto des identifiants depuis l'APK. AVANT le garde isConfigured() (on extrait
+    // justement client_id/client_secret manquants). Reçoit brand+country du formulaire → l'admin n'a
+    // pas à sauvegarder d'abord. Téléchargement ~100 Mo → délai serveur allongé pour cette action.
+    if (init('action') == 'extractCredentials') {
+        set_time_limit(300);
+        ajax::success(stellantis::extractCredentialsFromApk((string) init('brand'), (string) init('country'), (string) init('apk_url')));
+    }
+
     // Garde-fou autoload : appeler stellantis:: AVANT tout stellantisApi::/stellantisException
     // (l'autoloader Jeedom ne connaît que stellantis.class.php — cf. CLAUDE.md)
     if (!stellantis::isConfigured()) {

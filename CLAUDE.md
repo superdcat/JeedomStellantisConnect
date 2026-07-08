@@ -35,7 +35,10 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > défaut 5 min + `autorefresh` par véhicule, sans wakeup ; état de connexion & fraîcheur —
 > `stellantis::connectionState()`, page Santé `stellantis::health()`, bandeau page plugin, indicateur
 > privacy par véhicule ; robustesse — rejeu token borné, backoff/cooldown anti-ban sur HTTP 429, mode
-> dégradé throttlé sur auth cassée, taxonomie d'erreurs `stellantisException`). Suite = post-MVP
+> dégradé throttlé sur auth cassée, taxonomie d'erreurs `stellantisException`). **Post-MVP : UC61**
+> (extraction auto des `client_id`/`client_secret` depuis l'APK de la marque, 100 % PHP via
+> `ZipArchive`/`bz2`, bouton sur la page de config — `stellantis::extractCredentialsFromApk()`,
+> `stellantisApi::downloadToFile()`). Suite = post-MVP
 > (commandes à distance via démon MQTT, énergie/charge, localisation, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
@@ -99,8 +102,9 @@ Disposition Jeedom fixe (type MVC). Pièces principales, toutes nommées d'aprè
 
 Configuration & secrets :
 - **Par plugin** (`config::save/byKey(..., 'stellantis')`) : **marque** (détermine TLD `idpcvs.{}` +
-  realm `clientsB2C…`), `client_id`, `client_secret` (extraits de l'APK par l'utilisateur via un outil
-  externe — cf. analyse), `redirect_uri`. `client_secret` **chiffré**, jamais loggué.
+  realm `clientsB2C…`), `client_id`, `client_secret` (extraits de l'APK — manuellement via un outil
+  externe, ou automatiquement via **UC61** `Extraire automatiquement`), `redirect_uri`, `apk_url`
+  (optionnel : override de l'URL de l'APK pour UC61). `client_secret` **chiffré**, jamais loggué.
 - **Par véhicule** (`configuration` de l'eqLogic) : `id` API, `vin`, `brand`, motorisation, capacités.
 - **Tokens** OAuth2 (access/refresh) + (post-MVP) remote token OTP : en cache **chiffré** (classe `cache`).
   ⚠️ `access_token` à durée courte (~15 min) → refresh proactif/réactif.

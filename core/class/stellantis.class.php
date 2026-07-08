@@ -35,16 +35,28 @@ class stellantis extends eqLogic {
   // par stellantisApi (UC02/03) via getApiConfig() — ne pas la dupliquer.
   // ⚠️ Orthographe du realm Peugeot à confirmer au runtime (clientsB2CPeugeot chez psa_car_controller
   // vs clientsB2CPeugot sur le portail officiel).
+  // 'apkFile' = nom de base de l'archive APK par marque dans le dépôt communautaire flobz/psa_apk
+  // (UC61, extraction auto des identifiants) ; l'URL complète est APK_BASE_URL . apkFile . '.apk.bz2'.
   const BRANDS = array(
-    'peugeot' => array('tld' => 'peugeot.com', 'realm' => 'clientsB2CPeugeot', 'redirectUri' => 'mymap://oauth2redirect/{pays}'),
-    'citroen' => array('tld' => 'citroen.com', 'realm' => 'clientsB2CCitroen', 'redirectUri' => 'mymacsdk://oauth2redirect/{pays}'),
-    'ds' => array('tld' => 'driveds.com', 'realm' => 'clientsB2CDS', 'redirectUri' => 'mymdssdk://oauth2redirect/{pays}'),
-    'opel' => array('tld' => 'opel.com', 'realm' => 'clientsB2COpel', 'redirectUri' => 'mymopsdk://oauth2redirect/{pays}'),
-    'vauxhall' => array('tld' => 'vauxhall.co.uk', 'realm' => 'clientsB2CVauxhall', 'redirectUri' => 'mymvxsdk://oauth2redirect/{pays}'),
+    'peugeot' => array('tld' => 'peugeot.com', 'realm' => 'clientsB2CPeugeot', 'redirectUri' => 'mymap://oauth2redirect/{pays}', 'apkFile' => 'mypeugeot'),
+    'citroen' => array('tld' => 'citroen.com', 'realm' => 'clientsB2CCitroen', 'redirectUri' => 'mymacsdk://oauth2redirect/{pays}', 'apkFile' => 'mycitroen'),
+    'ds' => array('tld' => 'driveds.com', 'realm' => 'clientsB2CDS', 'redirectUri' => 'mymdssdk://oauth2redirect/{pays}', 'apkFile' => 'myds'),
+    'opel' => array('tld' => 'opel.com', 'realm' => 'clientsB2COpel', 'redirectUri' => 'mymopsdk://oauth2redirect/{pays}', 'apkFile' => 'myopel'),
+    'vauxhall' => array('tld' => 'vauxhall.co.uk', 'realm' => 'clientsB2CVauxhall', 'redirectUri' => 'mymvxsdk://oauth2redirect/{pays}', 'apkFile' => 'myvauxhall'),
   );
 
   // Base commune de l'API REST consommateur (identique pour toutes les marques)
   const API_BASE_URL = 'https://api.groupe-psa.com/connectedcar/v4';
+
+  // UC61 : base du dépôt communautaire d'APK (flobz/psa_apk). L'archive .apk.bz2 y est un blob git
+  // normal (seuls les *.apk sont en LFS) → le lien raw renvoie le vrai binaire. Surchargeable par la
+  // clé de config 'apk_url' (URL complète) pour absorber un déplacement/une indisponibilité du dépôt.
+  const APK_BASE_URL = 'https://github.com/flobz/psa_apk/raw/main/';
+
+  // Plafond de sécurité de l'APK décompressé (anti-DoS disque) et taille max d'une entrée JSON lue en
+  // mémoire dans l'APK (anti zip-bomb) — les JSON ciblés font quelques Ko.
+  const APK_TAILLE_MAX = 314572800; // 300 Mo
+  const APK_ENTREE_MAX = 1048576;   // 1 Mo
 
   // Expression cron par défaut (véhicule sans « Auto-actualisation » renseignée) : toutes les 5 minutes.
   const CRON_DEFAUT = '*/5 * * * *';
@@ -113,6 +125,260 @@ class stellantis extends eqLogic {
       stellantisApi::purgeTokenCache();
     }
     return $_value;
+  }
+
+  /* * ******************* UC61 — Extraction auto des identifiants depuis l'APK ******************* */
+
+  // Structure d'échec uniforme de l'extraction APK (partagée par extractCredentialsFromApk et
+  // parseApkCredentials) : mêmes clés que le succès, ok=false. Jamais de succès partiel.
+  private static function echecApk(string $_msg): array {
+    return array('ok' => false, 'client_id' => '', 'client_secret' => '', 'message' => $_msg);
+  }
+
+  /**
+   * Télécharge l'APK de la marque depuis le dépôt communautaire, en extrait client_id/client_secret
+   * et les retourne pour pré-remplissage (SANS rien sauvegarder). Retourne TOUJOURS la structure
+   * uniforme ['ok'=>bool, 'client_id'=>string, 'client_secret'=>string, 'message'=>string] — toute
+   * erreur est mappée en interne (jamais de levée), comme testConnection()/syncVehicles().
+   * Découplé des credentials sauvegardés : marque, pays ET url d'APK viennent du formulaire (repli sur
+   * la config si vides), l'admin n'a donc pas besoin de sauvegarder avant. Sur échec, le message
+   * renvoie explicitement vers la procédure manuelle (jamais de crash ni d'état partiel).
+   * @param string|null $_brand   marque du formulaire (vide/null → config sauvegardée puis peugeot)
+   * @param string|null $_country code pays 2 lettres (vide/null → config sauvegardée puis fr)
+   * @param string|null $_apkUrl  override d'URL du formulaire (vide/null → config puis défaut marque)
+   */
+  public static function extractCredentialsFromApk(?string $_brand = null, ?string $_country = null, ?string $_apkUrl = null): array {
+    // Balayage des orphelins d'une exécution précédente tuée par SIGKILL (OOM, timeout proxy) : le
+    // finally ci-dessous ne s'exécute pas dans ce cas → auto-guérison ici (fichiers > 1 h).
+    self::purgerApkOrphelins();
+    // 1. Résolution/validation de la marque (jamais d'index indéfini) et du pays. Une chaîne vide
+    // (cas réel : le formulaire poste toujours une chaîne, jamais null) retombe sur la config puis défaut.
+    $brand = strtolower(trim((string) $_brand));
+    if ($brand == '') {
+      $brand = strtolower(trim((string) config::byKey('brand', 'stellantis')));
+    }
+    if ($brand == '') {
+      $brand = 'peugeot';
+    }
+    if (!array_key_exists($brand, self::BRANDS)) {
+      return self::echecApk(__('Marque inconnue : impossible de déterminer l\'application mobile à télécharger', __FILE__));
+    }
+    $country = strtolower(trim((string) $_country));
+    if ($country == '') {
+      $country = strtolower(trim((string) config::byKey('country', 'stellantis', 'fr')));
+    }
+    if ($country == '') {
+      $country = 'fr';
+    }
+    // 2. Extensions PHP requises (repli propre vers la saisie manuelle si absentes)
+    if (!extension_loaded('zip') || !extension_loaded('bz2')) {
+      return self::echecApk(__('Extensions PHP « zip » et/ou « bz2 » absentes de votre installation : extraction automatique impossible, saisissez les identifiants manuellement (voir la documentation du plugin).', __FILE__));
+    }
+    // 3. Cooldown serveur (guardrail anti-ban + anti double-clic contournable par rejeu POST). Calé
+    // sur la durée réaliste d'un téléchargement de ~100 Mo (bien plus long qu'un test/sync) pour
+    // éviter qu'un 2e clic ne lance un téléchargement CONCURRENT pendant que le 1er tourne encore.
+    if (cache::byKey('stellantis::apk_cooldown')->getValue('') != '') {
+      return self::echecApk(__('Une extraction vient d\'être lancée : patientez avant de réessayer', __FILE__));
+    }
+    cache::set('stellantis::apk_cooldown', '1', 120);
+    // 4. Chemins temporaires uniques (tempnam → pas de collision entre deux extractions concurrentes)
+    $bz2Path = tempnam(sys_get_temp_dir(), 'stellantis_apk_');
+    $apkPath = tempnam(sys_get_temp_dir(), 'stellantis_apk_');
+    if ($bz2Path === false || $apkPath === false) {
+      // Nettoyer celui qui aurait été créé (l'autre a échoué) : le finally ci-dessous n'est pas encore actif
+      foreach (array($bz2Path, $apkPath) as $chemin) {
+        if (is_string($chemin) && $chemin != '' && file_exists($chemin)) {
+          @unlink($chemin);
+        }
+      }
+      return self::echecApk(__('Impossible de créer un fichier temporaire pour le téléchargement', __FILE__));
+    }
+    try {
+      // 5. Téléchargement. URL surchargeable : formulaire puis config avancée, sinon défaut par marque.
+      $urlOverride = trim((string) $_apkUrl);
+      if ($urlOverride == '') {
+        $urlOverride = trim((string) config::byKey('apk_url', 'stellantis'));
+      }
+      $url = ($urlOverride != '') ? $urlOverride : self::APK_BASE_URL . self::BRANDS[$brand]['apkFile'] . '.apk.bz2';
+      try {
+        stellantisApi::downloadToFile($url, $bz2Path);
+      } catch (stellantisException $e) {
+        log::add('stellantis', 'warning', 'UC61 : échec du téléchargement de l\'APK : ' . $e->getMessage());
+        return self::echecApk(__('Échec du téléchargement de l\'application mobile : vérifiez la connexion Internet de votre Jeedom, ou saisissez les identifiants manuellement.', __FILE__));
+      }
+      // 6. Décompression .bz2 en flux borné (anti-bombe bz2, jamais 100 Mo en mémoire)
+      if (!self::decompresserBz2Borne($bz2Path, $apkPath)) {
+        return self::echecApk(__('Échec de la décompression de l\'application mobile téléchargée : fichier corrompu, incomplet ou trop volumineux. Réessayez ou saisissez les identifiants manuellement.', __FILE__));
+      }
+      // 7. Parsing pur (zip → cultures.json → parameters.json)
+      return self::parseApkCredentials($apkPath, $country);
+    } finally {
+      // 8. Nettoyage systématique : ne JAMAIS conserver l'APK/le .bz2 sur le disque Jeedom
+      foreach (array($bz2Path, $apkPath) as $chemin) {
+        if (is_string($chemin) && $chemin != '' && file_exists($chemin)) {
+          @unlink($chemin);
+        }
+      }
+    }
+  }
+
+  /**
+   * Décompresse un .bz2 vers $_destPath en FLUX BORNÉ : lecture par blocs, interruption dès que la
+   * sortie dépasse APK_TAILLE_MAX (anti-bombe bz2 : petit compressé → énorme décompressé qui
+   * saturerait le disque d'un Raspberry Pi). Jamais de chargement en mémoire. Retourne true si la
+   * décompression a produit un fichier non vide dans la limite, false sinon (échec loggué en warning).
+   */
+  private static function decompresserBz2Borne(string $_bz2Path, string $_destPath): bool {
+    $in = @fopen('compress.bzip2://' . $_bz2Path, 'rb');
+    $out = @fopen($_destPath, 'wb');
+    if ($in === false || $out === false) {
+      if (is_resource($in)) { fclose($in); }
+      if (is_resource($out)) { fclose($out); }
+      log::add('stellantis', 'warning', 'UC61 : ouverture des flux de décompression impossible');
+      return false;
+    }
+    $total = 0;
+    $erreur = false;
+    while (!feof($in)) {
+      $bloc = fread($in, 1048576);
+      if ($bloc === false) {
+        $erreur = true;
+        break;
+      }
+      if ($bloc === '') {
+        continue;
+      }
+      $total += strlen($bloc);
+      if ($total > self::APK_TAILLE_MAX) {
+        $erreur = true;
+        log::add('stellantis', 'warning', 'UC61 : décompression interrompue, taille > ' . self::APK_TAILLE_MAX . ' o (bombe de décompression ?)');
+        break;
+      }
+      if (fwrite($out, $bloc) === false) {
+        $erreur = true;
+        break;
+      }
+    }
+    fclose($in);
+    fclose($out);
+    if ($erreur || $total <= 0) {
+      log::add('stellantis', 'warning', 'UC61 : échec de la décompression bz2 de l\'APK (' . $total . ' o écrits)');
+      return false;
+    }
+    return true;
+  }
+
+  // Supprime les fichiers temporaires stellantis_apk_* de plus d'une heure (orphelins laissés par une
+  // requête tuée avant le finally de extractCredentialsFromApk). Best-effort, jamais bloquant.
+  private static function purgerApkOrphelins(): void {
+    $motif = rtrim(sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . 'stellantis_apk_*';
+    $fichiers = glob($motif);
+    if (!is_array($fichiers)) {
+      return;
+    }
+    $limite = time() - 3600;
+    foreach ($fichiers as $fichier) {
+      if (is_file($fichier) && @filemtime($fichier) !== false && filemtime($fichier) < $limite) {
+        @unlink($fichier);
+      }
+    }
+  }
+
+  /**
+   * Extraction PURE (sans réseau, sans effet de bord → testable sur fixture) des identifiants d'un
+   * fichier APK déjà téléchargé et décompressé. Retourne la même structure uniforme que
+   * extractCredentialsFromApk(). SEUL endroit où vivent les chemins internes de l'APK (cultures.json,
+   * res/raw-{lang}-r{country}/parameters.json) et les noms de champs (cvsClientId/cvsSecret) — à faire
+   * évoluer ici si Stellantis change la structure de l'APK. Ne retourne JAMAIS de succès partiel.
+   */
+  public static function parseApkCredentials(string $_apkPath, string $_country): array {
+    $zip = new ZipArchive();
+    // ZipArchive::open() renvoie un CODE ENTIER (true seulement en succès), pas d'exception
+    if ($zip->open($_apkPath) !== true) {
+      log::add('stellantis', 'warning', 'UC61 : ouverture de l\'APK impossible (archive illisible)');
+      return self::echecApk(__('Application mobile illisible (archive invalide) : réessayez ou saisissez les identifiants manuellement.', __FILE__));
+    }
+    try {
+      // Garde-fou : un vrai APK a des milliers d'entrées mais pas des millions ; un décompte aberrant
+      // signale une archive forgée (déni de service à l'énumération du répertoire central).
+      if ($zip->numFiles > 100000) {
+        log::add('stellantis', 'warning', 'UC61 : APK au nombre d\'entrées aberrant (' . $zip->numFiles . '), rejeté');
+        return self::echecApk(__('Application mobile illisible (archive invalide) : réessayez ou saisissez les identifiants manuellement.', __FILE__));
+      }
+      // cultures.json : mappe le pays vers une culture ({lang}_{COUNTRY}, ex. fr_FR)
+      $cultures = self::lireJsonEntreeApk($zip, 'res/raw/cultures.json');
+      if ($cultures === null) {
+        return self::echecApk(__('Structure de l\'application mobile inattendue (cultures.json introuvable ou illisible) : elle a peut-être changé. Saisissez les identifiants manuellement.', __FILE__));
+      }
+      // Casse : cultures.json est indexé en MAJUSCULES (FR) ; la config stocke le pays en minuscule.
+      // Repli défensif sur la valeur telle quelle si jamais la casse diffère.
+      $paysMaj = strtoupper($_country);
+      $cle = null;
+      foreach (array($paysMaj, $_country) as $candidat) {
+        if (isset($cultures[$candidat]['languages'][0]) && is_scalar($cultures[$candidat]['languages'][0])) {
+          $cle = $candidat;
+          break;
+        }
+      }
+      if ($cle === null) {
+        return self::echecApk(sprintf(__('Pays « %s » absent de la liste des cultures de l\'application mobile : vérifiez le code pays ou saisissez les identifiants manuellement.', __FILE__), $paysMaj));
+      }
+      $culture = (string) $cultures[$cle]['languages'][0];
+      // Culture "{lang}_{COUNTRY}" → dossier res/raw-{lang}-r{COUNTRY}/parameters.json
+      $parts = explode('_', $culture);
+      if (count($parts) < 2 || trim($parts[0]) == '' || trim($parts[1]) == '') {
+        log::add('stellantis', 'warning', 'UC61 : culture au format inattendu : ' . $culture);
+        return self::echecApk(__('Structure de l\'application mobile inattendue (culture illisible) : saisissez les identifiants manuellement.', __FILE__));
+      }
+      $lang = strtolower($parts[0]);
+      $pays = strtoupper($parts[1]);
+      $params = self::lireJsonEntreeApk($zip, 'res/raw-' . $lang . '-r' . $pays . '/parameters.json');
+      if ($params === null) {
+        return self::echecApk(__('Structure de l\'application mobile inattendue (parameters.json introuvable ou illisible) : elle a peut-être changé. Saisissez les identifiants manuellement.', __FILE__));
+      }
+      $clientId = (isset($params['cvsClientId']) && is_scalar($params['cvsClientId'])) ? trim((string) $params['cvsClientId']) : '';
+      $clientSecret = (isset($params['cvsSecret']) && is_scalar($params['cvsSecret'])) ? trim((string) $params['cvsSecret']) : '';
+      // Jamais de succès partiel : les DEUX identifiants doivent être présents et non vides
+      if ($clientId == '' || $clientSecret == '') {
+        log::add('stellantis', 'warning', 'UC61 : identifiants absents de parameters.json (cvsClientId/cvsSecret)');
+        return self::echecApk(__('Identifiants introuvables dans l\'application mobile (champs absents) : saisissez-les manuellement.', __FILE__));
+      }
+      log::add('stellantis', 'info', 'UC61 : identifiants extraits de l\'APK avec succès (culture ' . $lang . '-r' . $pays . ')');
+      return array(
+        'ok' => true,
+        'client_id' => $clientId,
+        'client_secret' => $clientSecret,
+        'message' => __('Identifiants extraits : vérifiez les champs puis sauvegardez la configuration.', __FILE__),
+      );
+    } finally {
+      $zip->close();
+    }
+  }
+
+  /**
+   * Lit et décode une entrée JSON d'un APK ouvert, avec garde-fou anti zip-bomb (refus si la taille
+   * ANNONCÉE dépasse APK_ENTREE_MAX, avant toute lecture en mémoire). Retourne le tableau décodé, ou
+   * null si l'entrée est absente / trop grosse / n'est pas du JSON valide.
+   */
+  private static function lireJsonEntreeApk(ZipArchive $_zip, string $_nom): ?array {
+    $stat = $_zip->statName($_nom);
+    if ($stat === false) {
+      return null; // entrée absente
+    }
+    if (isset($stat['size']) && $stat['size'] > self::APK_ENTREE_MAX) {
+      log::add('stellantis', 'warning', 'UC61 : entrée APK ' . $_nom . ' trop volumineuse (' . $stat['size'] . ' o), ignorée');
+      return null;
+    }
+    $contenu = $_zip->getFromName($_nom);
+    if ($contenu === false || $contenu === '') {
+      return null;
+    }
+    $decode = json_decode($contenu, true);
+    if (json_last_error() !== JSON_ERROR_NONE || !is_array($decode)) {
+      log::add('stellantis', 'warning', 'UC61 : entrée APK ' . $_nom . ' non-JSON ou illisible');
+      return null;
+    }
+    return $decode;
   }
 
   /**
@@ -1430,5 +1696,70 @@ class stellantisApi {
     }
     log::add('stellantis', 'debug', 'Corps d\'erreur HTTP ' . $httpCode . ' : ' . $body);
     throw new stellantisException('Erreur API HTTP ' . $httpCode . ' : ' . $body, $httpCode, $type);
+  }
+
+  /**
+   * Télécharge un gros fichier binaire (UC61 : l'APK d'une marque, ~100 Mo) vers $_destPath, en flux
+   * (jamais en mémoire). Distinct de httpRequest() (qui décode du JSON en RAM) : ici la réponse est
+   * écrite directement sur disque via CURLOPT_FILE. Suit les redirections (GitHub raw → CDN) mais
+   * uniquement en HTTPS — anti-SSRF sur override d'URL en config avancée (pas de rétrogradation HTTP,
+   * pas de file://, gopher://…).
+   * ⚠️ Ne porte JAMAIS le header Authorization: Bearer de call()/callWithToken() : l'URL est un dépôt
+   * public GitHub, un token n'a rien à y faire (barrière contre un futur refactor de mutualisation).
+   * @throws stellantisException type 'transport' sur erreur réseau / fichier / HTTP non-2xx
+   */
+  public static function downloadToFile(string $_url, string $_destPath): void {
+    // Défense en profondeur : n'accepter que du HTTPS avant même d'armer cURL (l'URL peut venir d'un
+    // champ de config libre). Les protocoles cURL sont en plus restreints ci-dessous.
+    $scheme = strtolower((string) parse_url($_url, PHP_URL_SCHEME));
+    if ($scheme !== 'https') {
+      throw new stellantisException('URL de téléchargement refusée (HTTPS obligatoire)', 0, 'transport');
+    }
+    $urlSansQuery = strtok($_url, '?');
+    $fp = @fopen($_destPath, 'wb');
+    if ($fp === false) {
+      throw new stellantisException('Impossible d\'ouvrir le fichier temporaire en écriture', 0, 'transport');
+    }
+    // HTTPS STRICT (initial + redirections) : une réponse 302 vers http://169.254.169.254 ou file://
+    // serait sinon suivie malgré le contrôle de schéma initial (FOLLOWLOCATION actif).
+    $protos = defined('CURLPROTO_HTTPS') ? CURLPROTO_HTTPS : 0;
+    $ch = curl_init();
+    $options = array(
+      CURLOPT_URL => $_url,
+      CURLOPT_HTTPGET => true,
+      CURLOPT_FILE => $fp,
+      CURLOPT_FOLLOWLOCATION => true,
+      CURLOPT_MAXREDIRS => 5,
+      CURLOPT_TIMEOUT => 300,
+      CURLOPT_CONNECTTIMEOUT => 15,
+      // Abandonne un transfert quasi bloqué (< 1 Ko/s pendant 60 s) plutôt que d'attendre 300 s
+      CURLOPT_LOW_SPEED_LIMIT => 1024,
+      CURLOPT_LOW_SPEED_TIME => 60,
+      // Anti-DoS disque : coupe si le contenu dépasse le plafond
+      CURLOPT_MAXFILESIZE => stellantis::APK_TAILLE_MAX,
+      CURLOPT_HTTPHEADER => array('Accept: application/octet-stream'),
+    );
+    // Anti-SSRF : cantonner cURL (y compris sur redirection) au seul HTTPS — pas de HTTP, file://, gopher://…
+    if ($protos !== 0) {
+      $options[CURLOPT_PROTOCOLS] = $protos;
+      $options[CURLOPT_REDIR_PROTOCOLS] = $protos;
+    }
+    curl_setopt_array($ch, $options);
+    $ok = curl_exec($ch);
+    $curlErrno = curl_errno($ch);
+    $curlError = curl_error($ch);
+    $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    fclose($fp);
+    if ($ok === false || $curlErrno !== 0) {
+      @unlink($_destPath);
+      log::add('stellantis', 'warning', 'GET ' . $urlSansQuery . ' → erreur de transport cURL #' . $curlErrno . ' : ' . $curlError);
+      throw new stellantisException('Erreur de transport au téléchargement (cURL #' . $curlErrno . ' : ' . $curlError . ')', 0, 'transport');
+    }
+    log::add('stellantis', 'debug', 'GET ' . $urlSansQuery . ' → HTTP ' . $httpCode . ' (téléchargement fichier)');
+    if ($httpCode < 200 || $httpCode >= 300) {
+      @unlink($_destPath);
+      throw new stellantisException('Téléchargement refusé par le serveur (HTTP ' . $httpCode . ')', $httpCode, 'transport');
+    }
   }
 }
