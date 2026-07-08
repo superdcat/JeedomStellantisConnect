@@ -46,8 +46,10 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > (`resources/demond/demond.py`), pont PHP↔démon (`stellantis::sendToDaemon()`, hooks
 > `deamon_info/start/stop`), callback démon→Jeedom (`core/php/jeeStellantis.php` +
 > `stellantis::handleDaemonMessage()`), propagation du token OAuth2 au démon (`syncDaemonToken()`).
-> Suite = post-MVP (OTP/remote token UC12, commandes métier UC13-17, retour d'état UC18, énergie/charge,
-> localisation, entretien…). Cette note est
+> **Post-MVP : UC83** — icône du plugin (`plugin_info/stellantis_icon.png`, PNG 309×348 « véhicule
+> connecté » générique remplaçant le placeholder du template ; script de génération Pillow versionné
+> dans la spec technique). Suite = post-MVP (OTP/remote token UC12, commandes métier UC13-17, retour
+> d'état UC18, énergie/charge, localisation, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
 
