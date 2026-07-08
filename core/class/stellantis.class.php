@@ -628,6 +628,10 @@ class stellantis extends eqLogic {
   // dans les logs debug, il n'est pas réinjecté dans l'UI.
   private static function messageDepuisException(stellantisException $_e): string {
     switch ($_e->getApiType()) {
+      // Garde défensive : aujourd'hui l'AJAX bloque en amont (isConfigured) avant d'atteindre
+      // buildAuthUrl() ; ce cas couvre un futur appelant qui n'aurait pas ce pré-check. Ne pas retirer.
+      case 'not_configured':
+        return __('Plugin non configuré : renseignez la marque, le Client ID et le Client Secret puis sauvegardez', __FILE__);
       case 'auth_required':
         return __('Aucune connexion au compte ou session expirée : (ré)authentifiez-vous depuis la configuration du plugin', __FILE__);
       case 'token_expired':
@@ -660,7 +664,17 @@ class stellantis extends eqLogic {
       return array('state' => 'unauthenticated',
         'detail' => __('Aucune connexion au compte ou session expirée : (ré)authentifiez-vous depuis la configuration du plugin', __FILE__));
     }
+    // Backoff 429 (UC10) : cooldown anti rate-limit actif = état error avec le temps restant. Placé
+    // AVANT link_error car c'est le signal autoritatif (timing) posé sur tout vrai 429.
+    $resteRateLimit = stellantisApi::rateLimitRemaining();
+    if ($resteRateLimit > 0) {
+      return array('state' => 'error',
+        'detail' => sprintf(__('Trop de requêtes vers l\'API : pause de protection, reprise dans ~%d min', __FILE__), max(1, (int) ceil($resteRateLimit / 60))));
+    }
     $erreur = (string) cache::byKey(self::LINK_ERROR_KEY)->getValue('');
+    // Ne sert plus qu'au cas « quota local de refresh (REFRESH_QUOTA) épuisé » : celui-ci lève un
+    // rate_limited synthétique sans passer par httpRequest, donc SANS armer le cooldown ci-dessus.
+    // Ne pas supprimer cette branche en la croyant morte.
     if ($erreur == 'rate_limited') {
       return array('state' => 'error', 'detail' => __('Trop de requêtes vers l\'API : réessayez plus tard', __FILE__));
     }
@@ -758,12 +772,20 @@ class stellantis extends eqLogic {
       cache::delete(self::LINK_ERROR_KEY);
       return;
     }
+    // Backoff 429 (UC10) : un cooldown anti rate-limit court → on saute TOUTE la passe, sans même primer
+    // le token (zéro appel réseau). C'est le respect du cooldown côté cron (anti-ban).
+    $resteRateLimit = stellantisApi::rateLimitRemaining();
+    if ($resteRateLimit > 0) {
+      log::add('stellantis', 'info', 'Cron : passe sautée, cooldown anti rate-limit actif (~' . $resteRateLimit . ' s restantes)');
+      return;
+    }
     // Prime le token une seule fois par passe : si le refresh OAuth échoue, inutile que chaque véhicule
     // retente son propre refreshToken() et épuise le quota anti-ban (REFRESH_QUOTA_MAX) en une passe.
     try {
       stellantisApi::getToken();
       // Lien au compte OK pour cette passe (UC09) : efface tout flag d'erreur antérieur.
       cache::delete(self::LINK_ERROR_KEY);
+      cache::delete('stellantis::degraded_warn');
     } catch (\Throwable $e) {
       // link_error ne couvre QUE le priming du token : rate-limit/transport = token présent mais refresh
       // KO (connectionState resterait faussement « ok » sans ce flag). auth_required supprime déjà le
@@ -775,7 +797,20 @@ class stellantis extends eqLogic {
       } else {
         cache::delete(self::LINK_ERROR_KEY);
       }
-      log::add('stellantis', 'info', 'Cron : rafraîchissement ignoré (' . $e->getMessage() . ') — authentifiez-vous depuis la configuration du plugin');
+      // Mode dégradé (UC10) : auth cassée = les commandes gardent leurs dernières valeurs, aucun appel
+      // véhicule tenté jusqu'à ré-auth. Alerte en warning THROTTLÉE 1×/h (cron chaque minute → sinon on
+      // noie les logs) ; les autres types (transport/rate-limit transitoires) restent en info.
+      if ($type == 'auth_required') {
+        $cleWarn = 'stellantis::degraded_warn';
+        if (cache::byKey($cleWarn)->getValue('') == '') {
+          log::add('stellantis', 'warning', 'Mode dégradé : authentification requise — (ré)authentifiez-vous depuis la configuration du plugin. Les dernières valeurs des commandes sont conservées.');
+          cache::set($cleWarn, '1', 3600);
+        } else {
+          log::add('stellantis', 'debug', 'Cron : authentification requise (warning throttlé) : ' . $e->getMessage());
+        }
+      } else {
+        log::add('stellantis', 'info', 'Cron : rafraîchissement ignoré (' . $e->getMessage() . ') — réessai à la prochaine passe');
+      }
       return;
     }
     foreach ($vehicules as $eqLogic) {
@@ -940,8 +975,8 @@ class stellantisCmd extends cmd {
 
 /**
  * Exception typée du plugin pour toute erreur d'appel à l'API Stellantis/PSA.
- * Types possibles : token_expired | auth_required | rate_limited | no_vehicle | privacy | api_error
- * | transport.
+ * Types possibles : not_configured | token_expired | auth_required | rate_limited | no_vehicle |
+ * privacy | api_error | transport.
  * ⚠️ « privacy » n'est jamais produit par typeFromResponse() : réservé au code métier (UC07), qui le
  * construira lui-même face à une réponse 2xx vide de statut (mode privé activé sur le véhicule).
  */
@@ -1009,6 +1044,12 @@ class stellantisApi {
   const REFRESH_QUOTA_KEY = 'stellantis::refresh_quota';
   const REFRESH_QUOTA_MAX = 6;
   const REFRESH_QUOTA_FENETRE = 1800;
+  // Backoff anti-ban (UC10) : sur un vrai HTTP 429 serveur, on pose un cooldown pendant lequel AUCUN
+  // appel n'est tenté (cron + appels métier). Distinct du quota de refresh ci-dessus (compteur local
+  // proactif). 900 s = ~3 passes de cron au défaut 5 min ; valeur calibrable en UC72 (idéalement
+  // remplacée par l'en-tête Retry-After, non exposé par httpRequest aujourd'hui).
+  const RATELIMIT_KEY = 'stellantis::ratelimit_until';
+  const RATELIMIT_COOLDOWN = 900;
 
   /**
    * Appel authentifié à l'API connectedcar v4 : client_id en query (toutes méthodes),
@@ -1062,7 +1103,7 @@ class stellantisApi {
    */
   public static function buildAuthUrl(): string {
     if (!stellantis::isConfigured()) {
-      throw new stellantisException('Plugin non configuré : renseignez le Client ID et le Client Secret', 0, 'auth_required');
+      throw new stellantisException('Plugin non configuré : renseignez le Client ID et le Client Secret', 0, 'not_configured');
     }
     $config = stellantis::getApiConfig();
     $verifier = self::genCodeVerifier();
@@ -1177,6 +1218,14 @@ class stellantisApi {
    * @throws stellantisException
    */
   public static function callWithToken(string $_method, string $_path, array $_params = array()): array {
+    // Backoff 429 (UC10) : court-circuit AVANT getToken() — sinon un token expiré déclencherait un
+    // refresh réseau (et consommerait REFRESH_QUOTA) pendant le cooldown. Protège aussi les véhicules
+    // #2..N d'une même passe cron (la boucle avale l'erreur par véhicule sans re-tester le cooldown).
+    // Ne pas retirer : c'est une protection fonctionnelle, pas seulement défensive.
+    $reste = self::rateLimitRemaining();
+    if ($reste > 0) {
+      throw new stellantisException('Appel court-circuité : cooldown anti rate-limit actif (~' . $reste . ' s restantes)', 429, 'rate_limited');
+    }
     $accessToken = self::getToken();
     try {
       return self::call($_method, $_path, $_params, $accessToken);
@@ -1187,6 +1236,20 @@ class stellantisApi {
       $accessToken = self::getToken(true, $accessToken);
       return self::call($_method, $_path, $_params, $accessToken);
     }
+  }
+
+  // Secondes restantes du cooldown anti rate-limit (0 si aucun). Recalculé depuis le timestamp absolu
+  // stocké → robuste quelle que soit la sémantique d'expiration du cache. Consommé par cron(),
+  // callWithToken() et stellantis::connectionState().
+  public static function rateLimitRemaining(): int {
+    return max(0, (int) cache::byKey(self::RATELIMIT_KEY)->getValue(0) - time());
+  }
+
+  // Pose le cooldown anti rate-limit (timestamp de fin + TTL = durée). Appelé par httpRequest() sur un
+  // vrai HTTP 429 (jamais par le rate_limited SYNTHÉTIQUE du quota de refresh, levé avant le réseau).
+  private static function enterRateLimitCooldown(): void {
+    cache::set(self::RATELIMIT_KEY, time() + self::RATELIMIT_COOLDOWN, self::RATELIMIT_COOLDOWN);
+    log::add('stellantis', 'warning', 'Rate-limit API (HTTP 429) : pause anti-blocage de ' . self::RATELIMIT_COOLDOWN . ' s, appels suspendus');
   }
 
   // Statut non sensible pour l'UI (aucun token exposé)
@@ -1350,6 +1413,11 @@ class stellantisApi {
       return is_array($decoded) ? $decoded : array();
     }
     $type = stellantisException::typeFromResponse($httpCode, is_array($decoded) ? $decoded : null);
+    // Backoff 429 (UC10) : un vrai rate-limit serveur (métier OU OAuth, les deux passent ici) arme le
+    // cooldown avant de lever, quel que soit le chemin d'appel (une seule fois, hors branches ci-dessous).
+    if ($type == 'rate_limited') {
+      self::enterRateLimitCooldown();
+    }
     if ($_reponseSensible) {
       // Jamais le corps brut d'une réponse OAuth (peut contenir des artefacts de session/token)
       $detail = '';

@@ -46,6 +46,7 @@
         "Aucune connexion au compte ou session expirée : (ré)authentifiez-vous depuis la configuration du plugin": "Keine Verbindung zum Konto oder Sitzung abgelaufen: (erneut) authentifizieren Sie sich über die Plugin-Konfiguration",
         "Token invalide malgré un rafraîchissement : réessayez, puis ré-authentifiez-vous si le problème persiste": "Token trotz Aktualisierung ungültig: Versuchen Sie es erneut und authentifizieren Sie sich erneut, falls das Problem weiterhin besteht",
         "Trop de requêtes vers l'API : réessayez plus tard": "Zu viele Anfragen an die API: Versuchen Sie es später erneut",
+        "Trop de requêtes vers l'API : pause de protection, reprise dans ~%d min": "Zu viele Anfragen an die API: Schutzpause, Fortsetzung in ~%d Min.",
         "API injoignable : vérifiez la connexion Internet de votre Jeedom": "API nicht erreichbar: Überprüfen Sie die Internetverbindung Ihres Jeedom",
         "Erreur API (HTTP %d) : consultez les logs du plugin pour le détail": "API-Fehler (HTTP %d): Weitere Details finden Sie in den Plugin-Protokollen",
         "Erreur au dernier rafraîchissement : consultez les logs du plugin": "Fehler bei der letzten Aktualisierung: Prüfen Sie die Plugin-Protokolle",
