@@ -17,7 +17,7 @@
 └── post-mvp/
     ├── 10-commandes-distance/      ⚠️ introduit le DÉMON Python MQTT. 11 socle démon, 12 OTP/remote token,
     │                               13 wakeup, 14 charge, 15 préconditionnement, 16 portes, 17 klaxon/feux,
-    │                               18 retour d'état asynchrone
+    │                               18 retour d'état asynchrone, 19 résilience connexion démon (backoff + arrêt sur échec d'auth)
     ├── 20-energie-charge/          21 détail batterie/charge, 22 programmation de charge, 23 carburant/hybride,
     │                               24 suivi/statistiques de charge
     ├── 30-localisation-trajets/    31 position GPS, 32 panneau carte « Mes véhicules », 33 historique trajets,
