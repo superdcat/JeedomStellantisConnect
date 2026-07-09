@@ -11,7 +11,12 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-09 (UC15 : `stellantis-data-model.md` § 2.5 — commande MQTT
+> **Dernière synchro** : 2026-07-09 (UC16 : `stellantis-data-model.md` § 2.4 — commande MQTT
+> verrouillage confirmée contre `psa_car_controller` : service `/Doors`, payload
+> `{"action":"lock"|"unlock"}`, aucun `failure_cause` dédié ; `jeedom-widgets-commandes.md` § 4 —
+> **activation serveur de la confirmation d'action** `setConfiguration('actionConfirm',1)` → garde core
+> `-32006` (dialog natif), anti-fausse-manip UI et **non** une frontière d'autorisation). Précédemment
+> 2026-07-09 (UC15 : `stellantis-data-model.md` § 2.5 — commande MQTT
 > préconditionnement confirmée contre `psa_car_controller` : service `/ThermalPrecond`, payload
 > `{"asap":"activate"|"deactivate","programs":<4 créneaux>}` ; le code de réf. n'envoie les programmes
 > réels que s'il les a appris par events MQTT, sinon littéral figé `on:0` — comportement repris à
@@ -52,6 +57,7 @@
 | **Widget de commande** Jeedom (fichier `cmd.<type>.<subType>.<nom>.html`, `setTemplate`, tokens `#id#`…) | `jeedom-widgets-commandes.md` §§ 1-2 |
 | Widget pilotant **plusieurs commandes** (carte + actions) ; résoudre les sœurs par `byEqLogic` | `jeedom-widgets-commandes.md` § 3 |
 | Exécuter une action depuis un widget + récupérer le retour PHP ; auth/CSRF AJAX ; AJAX plugin admin-only | `jeedom-widgets-commandes.md` §§ 4-5 |
+| **Confirmation avant une action sensible** (dialog anti-fausse-manip) : comment l'activer côté serveur | `jeedom-widgets-commandes.md` § 4 (`actionConfirm=1` → -32006) |
 | **CSP Jeedom bloque tout média/image EXTERNE** → proxy same-origin (ex. tuile carte) | `jeedom-widgets-commandes.md` § 7 |
 | Ajouter une **PAGE** au menu Jeedom (panel) ; toggle natif `displayDesktopPanel/Mobile` ; page non-admin | `jeedom-panel-page-menu.md` |
 

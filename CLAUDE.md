@@ -95,8 +95,21 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > **double n**) ; un refus véhicule (`Failure`) est loggué avec `failure_cause` (validation stricte
 > batterie/branchement = UC18). Garde-fous : **aucune** garde motorisation (universel) ni batterie
 > proactive côté plugin ; debounce per-véhicule court (10 s, réutilise le pipeline d'ack générique
-> UC13/14 sans modification) + quota global compte réutilisé de `publishRemoteCommand`. Suite = post-MVP
-> (verrouillage UC16, klaxon/feux UC17, retour d'état UC18, localisation, entretien…). Cette note est
+> UC13/14 sans modification) + quota global compte réutilisé de `publishRemoteCommand`. **Post-MVP : UC16**
+> — **commande de verrouillage / déverrouillage des portes** : commandes action `lock`/`unlock` créées
+> **universellement** (les portes existent sur tout véhicule), `execute()` → `stellantis->doorControl(bool)`.
+> Publiées via `publishRemoteCommand()` sur le service `/Doors` (payload `{"action":"lock"|"unlock"}`) —
+> contrat `RemoteClient.lock_door` de `psa_car_controller`. Le **déverrouillage** porte une **confirmation
+> native du core** (anti-fausse-manip) : `definitionsActions()` gagne un **4e élément optionnel**
+> `confirmRequis` (tuple `[nom, subType, genericType, confirmRequis?]`, rétro-compatible via `isset`/`empty`),
+> et `ensureActionCommand()` pose `setConfiguration('actionConfirm', 1)` à la création → le core lève
+> `-32006` avant `execute()` et affiche un dialog natif (aucun code JS/HTML custom ; chaîne « Cette action
+> nécessite une confirmation » traduite par le core). ⚠️ `actionConfirm` est un garde-fou **UI**, **pas**
+> une frontière d'autorisation (scénario/apikey le contournent) — cf. `jeedom-widgets-commandes.md` § 4.
+> L'info `doors_locked` (MVP07) reflète l'état après l'ack ; l'API `/Doors` n'expose **aucun `failure_cause`**
+> dédié (indisponibilité thermique/équipement ⇒ `doors_locked` inchangé, retour d'état fin renvoyé à UC18).
+> Garde-fous : debounce per-véhicule court (10 s) + quota global compte réutilisé de `publishRemoteCommand`.
+> Suite = post-MVP (klaxon/feux UC17, retour d'état UC18, localisation, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
 
@@ -122,8 +135,9 @@ Disposition Jeedom fixe (type MVC). Pièces principales, toutes nommées d'aprè
     de la télémétrie (cadence par défaut 5 min + `autorefresh` par véhicule) ; `$_encryptConfigKey` chiffre les champs sensibles.
   - `stellantisCmd extends cmd` — commande (info ou action). `execute($_options)` aiguille les actions
     (`switch` sur `logicalId`) vers la méthode métier du véhicule, en passant par le démon MQTT. **Wakeup
-    (UC13)** → `stellantis->wakeup()` et **charge start/stop (UC14)** → `stellantis->chargeControl(bool)`
-    implémentés ; préconditionnement/verrouillage/klaxon-feux… = post-MVP (UC15-17). Publication MQTT
+    (UC13)** → `stellantis->wakeup()`, **charge start/stop (UC14)** → `stellantis->chargeControl(bool)`,
+    **préconditionnement (UC15)** → `stellantis->precondControl(bool)` et **verrouillage/déverrouillage
+    (UC16)** → `stellantis->doorControl(bool)` implémentés ; klaxon/feux… = post-MVP (UC17). Publication MQTT
     centralisée par `stellantis::publishRemoteCommand()`/`buildMqttRequest()`.
 - **Client API `stellantisApi`** (définie dans `core/class/stellantis.class.php`, cf. `MVP/02`,`03`) —
   **brique unique** par laquelle passent **tous** les appels HTTP REST : OAuth2 PKCE (URL d'autorisation,

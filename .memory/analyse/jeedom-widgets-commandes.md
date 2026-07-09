@@ -52,6 +52,17 @@ véhicule (lit `battery_soc`/`autonomy`/`position` ensemble).
 - `success(data)` reçoit `{state, result}` où **`result` = la valeur de retour PHP de `cmd::execute()`**.
   ⇒ Faire `return $payload;` dans l'action PHP livre la donnée au widget en **un seul aller-retour**.
   `notify:false` supprime le toast (utile pour un refresh périodique d'une tuile).
+- ⚠️ **Activer la confirmation d'une action (anti-fausse-manip)** — vérifié UC16, 2026-07-09, source
+  `jeedom/core` : côté **serveur**, poser `$cmd->setConfiguration('actionConfirm', 1)` (à la création, avant
+  `save()`). `core/ajax/cmd.ajax.php` fait alors, **avant** `cmd::execCmd()` :
+  `if ($cmd->getType()=='action' && $cmd->getConfiguration('actionConfirm')==1 && init('confirmAction')!=1)
+  throw new Exception(__('Cette action nécessite une confirmation', __FILE__), -32006);`. Le **-32006** est
+  intercepté par `jeedom.cmd.execute` (JS core) qui affiche un `jeeDialog.confirm` (desktop) / `confirm`
+  (mobile) natif et rejoue avec `confirmAction=1`. **Zéro code JS/HTML custom** ; la chaîne « Cette action
+  nécessite une confirmation » est **traduite par le core** (ne pas la mettre dans les i18n du plugin).
+  ⚠️ **Ce n'est PAS une frontière d'autorisation** : la garde vit uniquement dans le contrôleur AJAX de
+  l'UI web. Un scénario Jeedom, l'API JSON-RPC (apikey) ou un autre plugin appelant `execCmd()` directement
+  **contournent** le dialog. La vraie protection repose sur la maîtrise des droits Jeedom (scénarios, clé API).
 
 ## 5. Auth AJAX (core 4.4+)
 

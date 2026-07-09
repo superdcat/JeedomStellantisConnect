@@ -95,6 +95,14 @@ Biologic}` — `energy` absent sur Electric).
 - `doors_state.opening[n].identifier` (`Driver`/`Passenger`/`RearLeft`/`RearRight`/`Trunk`/`RearWindow`/`RoofWindow`)
   + `.state` (`Open`/`Closed`) → `door_<id>` (`OPENING`) (UC44).
 
+> ⚠️ **Commande MQTT verrouillage (vérifié UC16, 2026-07-09, `psa_car_controller/psa/RemoteClient.py`
+> `lock_door`)** : service `/Doors` (topic `psa/RemoteServices/from/cid/{CID}/Doors`, même enveloppe
+> `MQTTRequest` que wakeup/charge/précond). Payload `req_parameters` = `{"action": "lock"|"unlock"}`
+> (littéral, aucune donnée dynamique). **Aucun `failure_cause` dédié** côté REST `/status` : une
+> indisponibilité (thermique/équipement) ou un refus se traduit seulement par `doors_locked` inchangé
+> après l'ack (pas de signal serveur explicite à remonter → retour d'état fin renvoyé à UC18). Le
+> déverrouillage porte une **confirmation core** (`actionConfirm=1`, cf. `jeedom-widgets-commandes.md` § 4).
+
 ### 2.5 Préconditionnement (`preconditionning.airConditioning` — **double n**)
 - `.status` (`Enabled`/`Disabled`/`Finished`/`Failure`), `.failure_cause`
   (`Defect`/`DoorOpened`/`LowBattery`/`LowFuelLevel`/`TooManyUnusedProg`/`WindowsRoofOpened`).

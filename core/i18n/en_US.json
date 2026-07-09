@@ -155,7 +155,10 @@
         "Préconditionnement": "Preconditioning",
         "Activer le préconditionnement": "Enable preconditioning",
         "Désactiver le préconditionnement": "Disable preconditioning",
-        "Commande de préconditionnement déjà envoyée à l'instant ; patientez %d s": "Preconditioning command already sent just now; wait %d s"
+        "Commande de préconditionnement déjà envoyée à l'instant ; patientez %d s": "Preconditioning command already sent just now; wait %d s",
+        "Verrouiller": "Lock",
+        "Déverrouiller": "Unlock",
+        "Commande de verrouillage déjà envoyée à l'instant ; patientez %d s": "Lock command already sent just now; wait %d s"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Unauthorized access",

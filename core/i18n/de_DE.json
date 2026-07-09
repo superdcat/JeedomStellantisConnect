@@ -155,7 +155,10 @@
         "Préconditionnement": "Vorklimatisierung",
         "Activer le préconditionnement": "Vorklimatisierung aktivieren",
         "Désactiver le préconditionnement": "Vorklimatisierung deaktivieren",
-        "Commande de préconditionnement déjà envoyée à l'instant ; patientez %d s": "Vorklimatisierungsbefehl wurde soeben gesendet; warten Sie %d s"
+        "Commande de préconditionnement déjà envoyée à l'instant ; patientez %d s": "Vorklimatisierungsbefehl wurde soeben gesendet; warten Sie %d s",
+        "Verrouiller": "Verriegeln",
+        "Déverrouiller": "Entriegeln",
+        "Commande de verrouillage déjà envoyée à l'instant ; patientez %d s": "Verriegelungsbefehl wurde soeben gesendet; warten Sie %d s"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert",

@@ -571,12 +571,18 @@ class stellantis extends eqLogic {
     // UC15 : commandes de préconditionnement, UNIVERSELLES (chauffage habitacle pertinent aussi sur thermique).
     $this->ensureActionCommand('precond_on');
     $this->ensureActionCommand('precond_off');
+    // UC16 : verrouillage/déverrouillage, UNIVERSELS (les portes existent sur tout véhicule). « unlock »
+    // porte actionConfirm=1 (confirmation core anti-fausse-manip) via definitionsActions.
+    $this->ensureActionCommand('lock');
+    $this->ensureActionCommand('unlock');
   }
 
   // Table des commandes ACTION (source de vérité, miroir de definitionsCommandes) : logicalId =>
-  // [nom FR littéral __(), subType, generic_type]. ⚠️ Nom enveloppé en __() avec chaîne LITTÉRALE pour
-  // l'extracteur i18n. generic_type vide = pas de métadonnée widget (on ne devine pas de constante core
-  // non vérifiée) ; la liaison widget on/off charge → info charging_status (string) est différée.
+  // [nom FR littéral __(), subType, generic_type, confirmRequis?]. ⚠️ Nom enveloppé en __() avec chaîne
+  // LITTÉRALE pour l'extracteur i18n. generic_type vide = pas de métadonnée widget (on ne devine pas de
+  // constante core non vérifiée) ; la liaison widget on/off charge → info charging_status (string) est
+  // différée. 4e élément OPTIONNEL (lu via isset, défaut false) : true => confirmation core avant
+  // exécution (config actionConfirm=1, UC16 unlock) — dialog natif géré par le core, cf. ensureActionCommand.
   private static function definitionsActions(): array {
     return array(
       'wakeup'       => array(__('Réveiller', __FILE__), 'other', ''),
@@ -584,6 +590,8 @@ class stellantis extends eqLogic {
       'charge_stop'  => array(__('Arrêter la charge', __FILE__), 'other', ''),
       'precond_on'   => array(__('Activer le préconditionnement', __FILE__), 'other', ''),
       'precond_off'  => array(__('Désactiver le préconditionnement', __FILE__), 'other', ''),
+      'lock'         => array(__('Verrouiller', __FILE__), 'other', '', false),
+      'unlock'       => array(__('Déverrouiller', __FILE__), 'other', '', true),
     );
   }
 
@@ -623,6 +631,13 @@ class stellantis extends eqLogic {
     $genericType = isset($definitions[$logicalId][2]) ? (string) $definitions[$logicalId][2] : '';
     if ($genericType != '') {
       $cmd->setGeneric_type($genericType);
+    }
+    // Confirmation avant exécution (UC16 unlock) : le core intercepte toute action portant
+    // actionConfirm=1 et affiche un dialog natif (code -32006 → jeeDialog.confirm), rejouant l'appel avec
+    // confirmAction=1 si l'utilisateur accepte. Posé AVANT l'unique save() (pas de second write), à la
+    // création seulement (branche getId()=='') → n'écrase pas un réglage manuel sur une cmd existante.
+    if (!empty($definitions[$logicalId][3])) {
+      $cmd->setConfiguration('actionConfirm', 1);
     }
     $cmd->save();
     return $cmd;
@@ -1990,6 +2005,53 @@ class stellantis extends eqLogic {
     );
   }
 
+  /* * ******************* UC16 — Verrouillage / déverrouillage des portes ******************* */
+
+  const DOOR_SERVICE = '/Doors';                                 // segment de service du topic MQTT (contrat RemoteClient.lock_door)
+  const DOOR_DEBOUNCE = 10;                                       // anti-boucle per-véhicule (s) : autorise un vrai toggle lock→unlock, bloque un scénario en boucle
+  const DOOR_DEBOUNCE_KEY = 'stellantis::door_debounce::';       // + eqId (cache) : dernière commande de verrouillage de CE véhicule
+
+  /**
+   * Verrouille (action=lock) ou déverrouille (action=unlock) les portes de CE véhicule via une commande
+   * MQTT. Action DÉLIBÉRÉE (bouton) ; le déverrouillage porte une confirmation core (actionConfirm=1,
+   * posée à la création par ensureActionCommand). ⚠️ Cette confirmation est un garde-fou ANTI-FAUSSE-MANIP
+   * de l'UI web (dialog vérifié par core/ajax/cmd.ajax.php AVANT execute()), PAS une frontière
+   * d'autorisation : un scénario Jeedom, l'API JSON-RPC (apikey) ou un autre plugin appelant execCmd()
+   * directement déverrouillent SANS dialog. La vraie protection contre un déverrouillage non désiré repose
+   * sur la maîtrise des droits Jeedom (création de scénarios, clé API) — comportement générique du core,
+   * non spécifique à ce plugin. Anti-boucle per-véhicule court
+   * (comme chargeControl/precondControl) ; garde-fou anti-ban = quota GLOBAL compte dans publishRemoteCommand().
+   * ⚠️ Aucune garde motorisation/équipement proactive côté plugin, ET l'API MQTT /Doors n'expose AUCUN
+   * failure_cause dédié (≠ précond UC15) : un refus véhicule (thermique/équipement non compatible) se
+   * traduit seulement par l'info doors_locked qui ne change pas après l'ack, sans message explicite. Le
+   * retour d'état fin (statut/timeout d'ack) est renvoyé à UC18. L'ack asynchrone (topic to/cid) programme
+   * un refresh REST au prochain cron (doors_locked reflétera alors l'état réel).
+   * @throws stellantisException 'rate_limited' (debounce/quota), 'otp_required' (OTP non activé), sinon api_error
+   */
+  public function doorControl(bool $_verrouiller): void {
+    // 1) Anti-boucle per-véhicule : refus net si une commande de verrouillage est trop récente sur CE véhicule.
+    $cleDebounce = self::DOOR_DEBOUNCE_KEY . $this->getId();
+    $dernier = (int) cache::byKey($cleDebounce)->getValue(0);
+    if ($dernier > 0) {
+      $reste = self::DOOR_DEBOUNCE - (time() - $dernier);
+      if ($reste > 0) {
+        throw new stellantisException(sprintf(__('Commande de verrouillage déjà envoyée à l\'instant ; patientez %d s', __FILE__), $reste), 429, 'rate_limited');
+      }
+    }
+    // 2) Pré-requis OTP : sans remote token, pas de canal MQTT. Alerte cohérente avec les autres call sites.
+    if (!stellantisApi::hasRemoteToken()) {
+      self::alerterOtpRequired();
+      throw new stellantisException(__('Pilotage à distance non activé : activez l\'OTP dans la configuration du plugin', __FILE__), 0, 'otp_required');
+    }
+    // 3) Pose le debounce AVANT tout appel réseau (publish MQTT) : borne les tentatives répétées quel qu'en soit le résultat.
+    cache::set($cleDebounce, time(), self::DOOR_DEBOUNCE);
+    // 4) Publication (gère quota global compte + CID + démon + alignement token). Retourne le correlation_id.
+    $correlationId = $this->publishRemoteCommand(self::DOOR_SERVICE, array('action' => $_verrouiller ? 'lock' : 'unlock'));
+    // 5) Mapping ack→véhicule (refresh d'état au prochain cron). Le debounce a déjà été posé en 3).
+    cache::set(self::CMD_CORR_KEY . $correlationId, $this->getId(), self::CMD_CORR_TTL);
+    log::add('stellantis', 'info', ($_verrouiller ? 'Verrouillage' : 'Déverrouillage') . ' demandé pour l\'équipement #' . $this->getId());
+  }
+
   /**
    * Hook cron Jeedom (chaque minute) : rafraîchit la télémétrie des véhicules dus. On utilise cron()
    * (pas cron5) car isDue() teste une correspondance EXACTE à la minute ; sous cron5 (multiples de 5),
@@ -2243,6 +2305,14 @@ class stellantisCmd extends cmd {
       case 'precond_off':
         // UC15 : désactive le préconditionnement climatique (immédiat).
         $eqLogic->precondControl(false);
+        break;
+      case 'lock':
+        // UC16 : verrouille les portes. Garde-fous debounce/quota + pré-requis OTP dans doorControl().
+        $eqLogic->doorControl(true);
+        break;
+      case 'unlock':
+        // UC16 : déverrouille les portes (confirmation core actionConfirm=1 avant d'arriver ici).
+        $eqLogic->doorControl(false);
         break;
       default:
         log::add('stellantis', 'warning', 'Commande action inconnue : ' . $this->getLogicalId());
