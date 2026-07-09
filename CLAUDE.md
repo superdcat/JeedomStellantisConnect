@@ -128,18 +128,26 @@ Configuration & secrets :
 Support :
 - **`plugin_info/info.json`** — manifeste (id, version, `require`, OS, `category`, dépendances, langues, compat).
 - **`plugin_info/install.php`** — `stellantis_install/update/remove()` ; `pre_install.php` → `stellantis_pre_update()`.
-- **`plugin_info/packages.json`** — dépendances (uniquement `pip3`). **Post-MVP commandes** : `pip3
-  paho-mqtt` **épinglé `==1.6.1`** (dernière 1.x ; la 2.0 casse le client MQTT de référence ; Debian 12 →
-  virtualenv / `--break-system-packages`) + `requests`. ⚠️ **Piège shell** : Jeedom colle la clé du
-  package **non quotée** → pas de `<`/`>` dans un spec de version (redirection shell → package jamais
-  installé) ; utiliser `==`/`~=`. **UC61 (extraction APK)** n'a **aucune dépendance PHP** : la
+- **`plugin_info/packages.json`** — dépendances (uniquement `pip3`). **Post-MVP commandes** : `pip3`
+  `paho-mqtt` **épinglé en 1.6.1** (dernière 1.x ; la 2.0 casse le client MQTT de référence ; Debian 12 →
+  virtualenv / `--break-system-packages`) + `requests`. ⚠️⚠️ **La version se met dans la VALEUR, pas dans
+  la clé** : `"paho-mqtt": {"version": "1.6.1"}`, **jamais** `"paho-mqtt==1.6.1": {}`. Le core compare la
+  **clé** (nom seul) à `pip list` (clé = nom nu, ex. `paho-mqtt`) via
+  `isset($installPackage[strtolower($clé)])` (`system::checkAndInstall`). Une clé contenant `==x.y.z` ne
+  matche **jamais** le nom installé → le paquet est vu « à installer » en **permanence** → indicateur
+  **bloqué NOK** + réinstallation forcée à chaque passe (bug observé UC11). Avec `{"version":"1.6.1"}`,
+  `installPackage` construit `pip install … paho-mqtt==1.6.1` via sa branche `==` (sans `<`/`>`), donc
+  **shell-safe** ET correctement matché. ⚠️ **Piège shell (distinct)** : ne jamais mettre `<`/`>` dans le
+  champ `version` (ex. `"<2.0.0"`) → `installPackage` bascule sur `$package .= $version` collé non quoté →
+  redirection shell (`2.0.0: No such file or directory`, paquet jamais installé). Toujours une version
+  exacte sans opérateur. **Ne PAS définir `stellantis::dependancy_info()`** : dès que `packages.json`
+  existe, le core calcule l'état **uniquement** depuis `checkAndInstall(packages.json)` et n'appelle
+  **jamais** cette méthode statique (elle serait du code mort). Pour un contrôle *supplémentaire*
+  (post-`packages.json`), le hook officiel est `additionnalDependancyCheck()` (appelé seulement si l'état
+  `packages.json` est déjà `ok`). **UC61 (extraction APK)** n'a **aucune dépendance PHP** : la
   décompression bz2 + lecture zip passe par `resources/extract_credentials.py` (stdlib Python `bz2` +
   `zipfile`, réutilise l'interpréteur déjà présent pour le démon) → pas d'extension PHP, pas de
   redémarrage d'Apache. (cf. `.memory/specs/post-mvp/80-livraison/82-packaging-doc.md`).
-  ⚠️ **Piège shell** : Jeedom colle la **clé** du package **non quotée** dans un script shell → un
-  `<`/`>` dans un spec de version (ex. `paho-mqtt<2.0.0`) est interprété comme une **redirection**
-  (`2.0.0: No such file or directory`, package jamais installé). N'utiliser que des specs sans `<`/`>` :
-  pin exact `==x.y.z` (ou `~=`, `!=`).
 
 ## Workflows / CI
 

@@ -1,6 +1,6 @@
 {
   "pip3": {
-    "paho-mqtt==1.6.1": {},
+    "paho-mqtt": { "version": "1.6.1" },
     "requests": {}
   }
 }

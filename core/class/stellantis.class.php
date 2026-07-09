@@ -992,35 +992,6 @@ class stellantis extends eqLogic {
   }
 
   /**
-   * Contrat core (plugin.class.php) : état des dépendances du plugin. Obligatoire dès hasDependency:true,
-   * sinon le core ne peut jamais confirmer l'installation et laisse l'indicateur sur « NOK ». On vérifie
-   * la SEULE dépendance dure : les modules Python du démon MQTT (paho + requests), via l'interpréteur
-   * résolu par le core (respecte virtualenv / Debian 12). L'install elle-même reste déléguée à
-   * packages.json (script auto-généré par le core). Les extensions php-zip/php-bz2 ne conditionnent PAS
-   * cet état : elles ne servent qu'à l'extraction APK (UC61, optionnelle) et exigent un redémarrage
-   * d'Apache pour être chargées — les inclure ici bloquerait l'état sur NOK alors que le plugin marche.
-   */
-  public static function dependancy_info(): array {
-    $return = array('log' => 'stellantis_dep', 'progress_file' => '/tmp/jeedom_install_in_progress_stellantis');
-    if (file_exists($return['progress_file'])) {
-      $return['state'] = 'in_progress';
-      return $return;
-    }
-    $return['state'] = 'ok';
-    try {
-      $output = array();
-      $code = 0;
-      exec(system::getCmdPython3('stellantis') . ' -c ' . escapeshellarg('import paho.mqtt.client, requests') . ' 2>&1', $output, $code);
-      if ($code !== 0) {
-        $return['state'] = 'nok';
-      }
-    } catch (\Throwable $e) {
-      $return['state'] = 'nok';
-    }
-    return $return;
-  }
-
-  /**
    * Contrat core (plugin.class.php) : retourne l'état du démon. Clés : state ('ok'|'nok'), launchable
    * ('ok'|'nok'), launchable_message, log. Le démon n'est lançable que si le plugin est configuré ET
    * authentifié (sinon le client MQTT n'aurait pas de mot de passe = access_token OAuth2).
