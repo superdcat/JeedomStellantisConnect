@@ -1078,6 +1078,12 @@ class stellantis extends eqLogic {
   }
 
   // Topics de réponse à souscrire (les deux du contrat). Vide si CID inconnu (abonnement différé).
+  // - Réponses aux commandes : `.../to/cid/{CID}/#` (wildcard multi-niveaux, tous services). Porte les
+  //   acks corrélés (correlation_id) consommés par programmerRefreshApresAck.
+  // - Événements poussés (états charge/précond…) : `.../events/MPHRTServices/#`. ⚠️ Le code de référence
+  //   s'abonne PAR VIN (`.../MPHRTServices/{vin}`) ; on utilise le wildcard `#` qui couvre tous les
+  //   véhicules du compte sans dépendre de la liste des VIN. Un préfixe NU (`.../MPHRTServices/`, sans
+  //   `#` ni VIN) ne matcherait AUCUNE publication (bug corrigé lors de l'audit UC11-16, 2026-07-10).
   public static function subscribeTopics(): array {
     $cid = self::getCustomerId();
     if ($cid == '') {
@@ -1085,7 +1091,7 @@ class stellantis extends eqLogic {
     }
     return array(
       'psa/RemoteServices/to/cid/' . $cid . '/#',
-      'psa/RemoteServices/events/MPHRTServices/',
+      'psa/RemoteServices/events/MPHRTServices/#',
     );
   }
 
@@ -1374,10 +1380,19 @@ class stellantis extends eqLogic {
     if ($eqId <= 0) {
       return; // pas un ack d'une de nos commandes
     }
-    $processCode = isset($payload['process_code']) ? (string) $payload['process_code'] : '';
+    // Le code de résultat PSA arrive sous 'return_code' OU 'process_code' selon le type de message (cf.
+    // code de référence : `data.get("return_code") or data.get("process_code")`) → lire les DEUX, sinon un
+    // 901 (véhicule en veille) reçu sous return_code échapperait à la garde ci-dessous et déclencherait un
+    // refresh REST inutile (léger coût anti-ban). Corrigé lors de l'audit UC11-16, 2026-07-10.
+    $code = '';
+    if (isset($payload['return_code']) && is_scalar($payload['return_code']) && (string) $payload['return_code'] !== '') {
+      $code = (string) $payload['return_code'];
+    } elseif (isset($payload['process_code']) && is_scalar($payload['process_code'])) {
+      $code = (string) $payload['process_code'];
+    }
     // 901 = véhicule en veille : la commande n'a pas abouti à une remontée fraîche → on n'efface pas le
     // mapping (un état ultérieur — Success/903 — peut encore arriver pour ce même correlation_id).
-    if ($processCode === '901') {
+    if ($code === '901') {
       log::add('stellantis', 'info', 'Commande MQTT : véhicule en veille (équipement #' . $eqId . '), pas de rafraîchissement programmé');
       return;
     }

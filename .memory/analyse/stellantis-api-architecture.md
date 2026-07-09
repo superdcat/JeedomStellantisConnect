@@ -114,10 +114,23 @@ C'est **le** piège conceptuel. Il y a deux systèmes de tokens **indépendants*
   > marque reste l'alternative documentée si une marque le nécessite. TLS via `tls_set_context()`
   > (vérif certif/hostname par défaut), MQTTv311, `clean_session`.
 - Topics : publish `psa/RemoteServices/from/cid/{CID}/{ServiceType}/state` ; subscribe
-  `psa/RemoteServices/to/cid/{CID}/#` + `psa/RemoteServices/events/MPHRTServices/`. `CID` = format
+  `psa/RemoteServices/to/cid/{CID}/#` + `psa/RemoteServices/events/MPHRTServices/{vin}`. `CID` = format
   `AP-ACNT…` (Peugeot/Citroën/DS) ou `OV-ACNT…` (Opel/Vauxhall).
-- **Codes d'acquittement** (payload `{process_date,vin,correlation_id,process_code,process_message}`) :
-  **900** = requête acceptée, **901** = véhicule en veille, **903** = transmise au véhicule.
+  > ⚠️ **Correction audit UC11-16 (2026-07-10)** : le topic d'événements est
+  > `.../events/MPHRTServices/{vin}` (le code de référence s'abonne **par VIN**). Un préfixe NU
+  > `.../events/MPHRTServices/` (tel que noté à tort ici auparavant, et recopié dans le code UC11)
+  > **ne matche AUCUNE publication** (typo-level). Côté plugin, `subscribeTopics()` utilise le wildcard
+  > `.../events/MPHRTServices/#` (couvre tous les VIN du compte sans dépendre de leur liste).
+- **Codes de résultat de l'ack** — ⚠️ lus sous **`return_code` OU `process_code`** selon le type/version
+  de message (le code de référence maintenu — intégration HA — fait
+  `data.get("return_code") or data.get("process_code")`, `return_code` prioritaire). Sémantique connue :
+  `return_code` **0** = succès, **400** = token expiré **ou** service non supporté (selon `reason`
+  `[authorization.denied.cvs…no.matching.service.key]`) ; `process_code` (payload
+  `{process_date,vin,correlation_id,process_code,process_message}`) **900** = requête acceptée,
+  **901** = véhicule en veille, **903** = transmise au véhicule ; autres (**113/300/500**) = échec.
+  Côté plugin (`programmerRefreshApresAck`, corrigé audit UC11-16 2026-07-10) : lecture des DEUX champs,
+  **901** ⇒ pas de refresh (veille, mapping conservé), sinon refresh REST au prochain cron. Le mapping
+  fin code→sens (erreurs remontées à l'utilisateur) est le périmètre d'**UC18**.
 - Auth MQTT : `username = "IMA_OAUTH_ACCESS_TOKEN"`, `password = ` **le REMOTE token OTP** (couche 2),
   le token étant **aussi** réinjecté dans le payload. Réponse `return_code='400'` ⇒ token expiré →
   refresh + re-publish.
