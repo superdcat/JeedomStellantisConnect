@@ -11,10 +11,13 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-09 (UC12 : corrections de contrat dans `stellantis-api-architecture.md`
-> §§ 1.1/1.3 et `stellantis-psacc-vs-natif.md` §6 — endpoint remote token = `applications/cvs/v4/mobile/token`
-> (pas `virtualkey/...`) ; mot de passe MQTT = **remote token OTP**, pas l'access_token OAuth2 ; crypto OTP
-> vendorisée depuis psa_car_controller). Précédemment 2026-07-06 (ajout `stellantis-psacc-vs-natif.md`).
+> **Dernière synchro** : 2026-07-09 (UC13 : `stellantis-api-architecture.md` §1.3 — enveloppe MQTTRequest
+> réelle du message publié `{access_token,customer_id,correlation_id,req_date,vin,req_parameters}`, service
+> wakeup `/VehCharge/state`, formats de date PSA ; point unique de publication PHP `buildMqttRequest`/
+> `publishRemoteCommand`). Précédemment 2026-07-09 (UC12 : corrections de contrat dans
+> `stellantis-api-architecture.md` §§ 1.1/1.3 et `stellantis-psacc-vs-natif.md` §6 — endpoint remote token
+> = `applications/cvs/v4/mobile/token` (pas `virtualkey/...`) ; mot de passe MQTT = **remote token OTP**,
+> pas l'access_token OAuth2 ; crypto OTP vendorisée depuis psa_car_controller).
 > Création initiale : 2026-06-25 (transposition depuis un plugin caméra vers le domaine véhicule
 > connecté Stellantis ; recherche web de fondation consignée dans `stellantis-api-architecture.md`).
 

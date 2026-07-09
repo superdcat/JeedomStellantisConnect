@@ -140,7 +140,14 @@
         "Quota de génération de codes OTP atteint (%d / 24 h). Réessayez plus tard.": "OTP code generation quota reached (%d / 24 h). Try again later.",
         "Dépendances Python manquantes : installez les dépendances du plugin, puis réessayez.": "Missing Python dependencies: install the plugin dependencies, then try again.",
         "Code SMS ou code PIN manquant ou invalide.": "SMS code or PIN code missing or invalid.",
-        "Activation refusée : vérifiez le code SMS et le code PIN, puis réessayez. Attention au quota (6 codes / 24 h).": "Activation refused: check the SMS code and the PIN code, then try again. Watch out for the quota (6 codes / 24 h)."
+        "Activation refusée : vérifiez le code SMS et le code PIN, puis réessayez. Attention au quota (6 codes / 24 h).": "Activation refused: check the SMS code and the PIN code, then try again. Watch out for the quota (6 codes / 24 h).",
+        "Réveiller": "Wake up",
+        "Réveil déjà demandé récemment ; patientez %d s (protection anti-ban / batterie 12 V)": "Wake-up already requested recently; wait %d s (anti-ban / 12 V battery protection)",
+        "Trop de réveils récents sur le compte ; patientez %d s (protection anti-ban)": "Too many recent wake-ups on the account; wait %d s (anti-ban protection)",
+        "Pilotage à distance non activé : activez l'OTP dans la configuration du plugin": "Remote control not activated: activate OTP in the plugin configuration",
+        "Identifiant client (CID) inconnu : refaites l'activation OTP": "Customer ID (CID) unknown: redo the OTP activation",
+        "Démon MQTT non démarré : impossible d'envoyer la commande de réveil": "MQTT daemon not started: unable to send the wake-up command",
+        "Envoi de la commande au démon MQTT échoué (démon indisponible ?)": "Failed to send the command to the MQTT daemon (daemon unavailable?)"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Unauthorized access",

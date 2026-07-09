@@ -140,7 +140,14 @@
         "Quota de génération de codes OTP atteint (%d / 24 h). Réessayez plus tard.": "Kontingent für die Generierung von OTP-Codes erreicht (%d / 24 Std.). Versuchen Sie es später erneut.",
         "Dépendances Python manquantes : installez les dépendances du plugin, puis réessayez.": "Fehlende Python-Abhängigkeiten: Installieren Sie die Plugin-Abhängigkeiten und versuchen Sie es dann erneut.",
         "Code SMS ou code PIN manquant ou invalide.": "SMS-Code oder PIN-Code fehlt oder ist ungültig.",
-        "Activation refusée : vérifiez le code SMS et le code PIN, puis réessayez. Attention au quota (6 codes / 24 h).": "Aktivierung abgelehnt: Überprüfen Sie den SMS-Code und den PIN-Code und versuchen Sie es dann erneut. Achten Sie auf das Kontingent (6 Codes / 24 Std.)."
+        "Activation refusée : vérifiez le code SMS et le code PIN, puis réessayez. Attention au quota (6 codes / 24 h).": "Aktivierung abgelehnt: Überprüfen Sie den SMS-Code und den PIN-Code und versuchen Sie es dann erneut. Achten Sie auf das Kontingent (6 Codes / 24 Std.).",
+        "Réveiller": "Aufwecken",
+        "Réveil déjà demandé récemment ; patientez %d s (protection anti-ban / batterie 12 V)": "Aufwecken vor Kurzem bereits angefordert; warten Sie %d s (Schutz gegen Sperrung / 12-V-Batterie)",
+        "Trop de réveils récents sur le compte ; patientez %d s (protection anti-ban)": "Zu viele kürzliche Aufweckvorgänge für das Konto; warten Sie %d s (Schutz gegen Sperrung)",
+        "Pilotage à distance non activé : activez l'OTP dans la configuration du plugin": "Fernsteuerung nicht aktiviert: Aktivieren Sie OTP in der Plugin-Konfiguration",
+        "Identifiant client (CID) inconnu : refaites l'activation OTP": "Kundennummer (CID) unbekannt: Führen Sie die OTP-Aktivierung erneut durch",
+        "Démon MQTT non démarré : impossible d'envoyer la commande de réveil": "MQTT-Daemon nicht gestartet: Aufweckbefehl kann nicht gesendet werden",
+        "Envoi de la commande au démon MQTT échoué (démon indisponible ?)": "Senden des Befehls an den MQTT-Daemon fehlgeschlagen (Daemon nicht verfügbar?)"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert",

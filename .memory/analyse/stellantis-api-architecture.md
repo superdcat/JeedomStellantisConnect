@@ -131,8 +131,16 @@ C'est **le** piège conceptuel. Il y a deux systèmes de tokens **indépendants*
 - Payloads (classe `RemoteClient`) : wakeup `{"action":"state"}` ; charge `{"program":{hour,minute},"type":…}` ;
   précond `{"asap":…,"programs":[…]}` ; portes `{"action":"lock|unlock"}` ; klaxon
   `{"nb_horn":n,"action":"activate"}` ; feux `{"action":"activate","duration":s}`.
-- **wakeup limité à 6 / 20 min**. psa_car_controller envoie un wakeup auto toutes les 24 h pour garder
-  la session vivante.
+  > ⚠️ **Précision UC13 (2026-07-09, confirmée vs `psa/mqtt_request.MQTTRequest`)** : ces payloads sont les
+  > **`req_parameters`**, pas le message publié brut. Le message MQTT réellement publié est **enveloppé** :
+  > `{access_token, customer_id, correlation_id, req_date, vin, req_parameters:{…}}`. `access_token` = **remote
+  > token OTP réinjecté** ; `req_date` = UTC `%Y-%m-%dT%H:%M:%SZ` ; `correlation_id` = `uuid4().hex` +
+  > `%Y%m%d%H%M%S%f`[:-3] (repris tel quel dans l'ack pour corréler). **Topic** = `psa/RemoteServices/from/
+  > cid/{CID}` + **segment de service** : le wakeup passe par **`/VehCharge/state`** (pas un « /state »
+  > générique). Implémenté côté PHP par `stellantis::buildMqttRequest()` + `publishRemoteCommand()` (point
+  > unique de publication, réutilisable UC14-17). Cf. `13-tech.md`.
+- **wakeup limité à 6 / 20 min** (niveau **compte**). psa_car_controller envoie un wakeup auto toutes les
+  24 h pour garder la session vivante.
 
 ### 1.4 Limites & pièges à connaître (valent quelle que soit l'option Jeedom)
 

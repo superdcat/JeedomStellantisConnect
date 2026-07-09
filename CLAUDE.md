@@ -59,8 +59,19 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > vie en config) sans retry, alerte `otp_required` throttlée (page Santé + `message::add`) ;
 > résolution best-effort du `customer_id` (CID) via `GET /user`. **UC12 a basculé le mot de passe MQTT
 > du démon** vers le remote token (le socle UC11 poussait à tort l'access_token OAuth2 — corrigé dans
-> `pushDaemonConnect/syncDaemonToken/handleDaemonMessage`). Suite = post-MVP (commandes métier UC13-17,
-> retour d'état UC18, énergie/charge, localisation, entretien…). Cette note est
+> `pushDaemonConnect/syncDaemonToken/handleDaemonMessage`). **Post-MVP : UC13** — **première commande
+> MQTT : wakeup / rafraîchissement à la demande** : commande action `wakeup` (créée par `createCommands`
+> via `definitionsActions`/`ensureActionCommand`), `stellantisCmd::execute()` → `stellantis->wakeup()`.
+> Publication via le **point unique réutilisable** `publishRemoteCommand()`/`buildMqttRequest()` :
+> message MQTTRequest complet `{access_token(remote token),customer_id,correlation_id,req_date,vin,
+> req_parameters}` publié sur `psa/RemoteServices/from/cid/{CID}/VehCharge/state` (payload `{"action":
+> "state"}`). **Garde-fous stricts anti-ban / batterie 12 V** : cooldown per-véhicule (5 min) + **quota
+> global compte** (`consommerQuotaWakeup`, 5/20 min, marge sous le ban serveur ~6/20 min) ; **jamais** de
+> wakeup au cron. MAJ des infos après l'ack : `handleDaemonMessage` (cas `message`) pose un flag
+> `wakeup_pending` (corrélation via `correlation_id`, jamais d'appel REST dans le callback) consommé au
+> **prochain `cron()`** (refresh forcé, garde-fous 429 réutilisés). `sendToDaemon()` renvoie désormais un
+> bool (échec d'envoi → `stellantisException` transport, pas de cooldown fantôme). Suite = post-MVP
+> (commandes métier UC14-17, retour d'état UC18, énergie/charge, localisation, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
 
@@ -84,8 +95,10 @@ Disposition Jeedom fixe (type MVC). Pièces principales, toutes nommées d'aprè
   - `stellantis extends eqLogic` — **une instance par véhicule** (clé `logicalId = VIN`). Hooks de cycle
     de vie (`preSave/postSave`, `preRemove/postRemove`…) ; hook `cron()` (chaque minute) → **polling REST**
     de la télémétrie (cadence par défaut 5 min + `autorefresh` par véhicule) ; `$_encryptConfigKey` chiffre les champs sensibles.
-  - `stellantisCmd extends cmd` — commande (info ou action). `execute($_options)` exécute les actions
-    (réveil, charge, préconditionnement, verrouillage…) — **post-MVP**, en passant par le démon MQTT.
+  - `stellantisCmd extends cmd` — commande (info ou action). `execute($_options)` aiguille les actions
+    (`switch` sur `logicalId`) vers la méthode métier du véhicule, en passant par le démon MQTT. **Wakeup
+    implémenté (UC13)** → `stellantis->wakeup()` ; charge/préconditionnement/verrouillage… = post-MVP
+    (UC14-17). Publication MQTT centralisée par `stellantis::publishRemoteCommand()`/`buildMqttRequest()`.
 - **Client API `stellantisApi`** (définie dans `core/class/stellantis.class.php`, cf. `MVP/02`,`03`) —
   **brique unique** par laquelle passent **tous** les appels HTTP REST : OAuth2 PKCE (URL d'autorisation,
   échange du `code`, refresh), enveloppe Bearer + header `x-introspect-realm`, base

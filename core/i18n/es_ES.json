@@ -140,7 +140,14 @@
         "Quota de génération de codes OTP atteint (%d / 24 h). Réessayez plus tard.": "Cuota de generación de códigos OTP alcanzada (%d / 24 h). Vuelva a intentarlo más tarde.",
         "Dépendances Python manquantes : installez les dépendances du plugin, puis réessayez.": "Faltan dependencias de Python: instale las dependencias del plugin y vuelva a intentarlo.",
         "Code SMS ou code PIN manquant ou invalide.": "Código SMS o código PIN ausente o no válido.",
-        "Activation refusée : vérifiez le code SMS et le code PIN, puis réessayez. Attention au quota (6 codes / 24 h).": "Activación rechazada: compruebe el código SMS y el código PIN, y vuelva a intentarlo. Cuidado con la cuota (6 códigos / 24 h)."
+        "Activation refusée : vérifiez le code SMS et le code PIN, puis réessayez. Attention au quota (6 codes / 24 h).": "Activación rechazada: compruebe el código SMS y el código PIN, y vuelva a intentarlo. Cuidado con la cuota (6 códigos / 24 h).",
+        "Réveiller": "Despertar",
+        "Réveil déjà demandé récemment ; patientez %d s (protection anti-ban / batterie 12 V)": "Despertar ya solicitado recientemente; espere %d s (protección anti-bloqueo / batería de 12 V)",
+        "Trop de réveils récents sur le compte ; patientez %d s (protection anti-ban)": "Demasiados despertares recientes en la cuenta; espere %d s (protección anti-bloqueo)",
+        "Pilotage à distance non activé : activez l'OTP dans la configuration du plugin": "Control remoto no activado: active el OTP en la configuración del plugin",
+        "Identifiant client (CID) inconnu : refaites l'activation OTP": "Identificador de cliente (CID) desconocido: repita la activación OTP",
+        "Démon MQTT non démarré : impossible d'envoyer la commande de réveil": "Demonio MQTT no iniciado: no se puede enviar el comando de despertar",
+        "Envoi de la commande au démon MQTT échoué (démon indisponible ?)": "Error al enviar el comando al demonio MQTT (¿demonio no disponible?)"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Acceso no autorizado",

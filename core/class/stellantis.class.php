@@ -559,6 +559,17 @@ class stellantis extends eqLogic {
     foreach ($aCreer as $logicalId) {
       $this->ensureCommand($logicalId);
     }
+    // UC13 : commande action « Réveiller » (première commande MQTT). Universelle (tout véhicule), mais son
+    // exécution vérifie à chaud les pré-requis (OTP activé, CID, démon lancé) — cf. wakeup().
+    $this->ensureActionCommand('wakeup');
+  }
+
+  // Table des commandes ACTION (source de vérité, miroir de definitionsCommandes) : logicalId =>
+  // [nom FR littéral __(), subType]. ⚠️ Nom enveloppé en __() avec chaîne LITTÉRALE pour l'extracteur i18n.
+  private static function definitionsActions(): array {
+    return array(
+      'wakeup' => array(__('Réveiller', __FILE__), 'other'),
+    );
   }
 
   /**
@@ -566,31 +577,58 @@ class stellantis extends eqLogic {
    * @throws stellantisException si $logicalId n'est pas une commande connue (ne devrait pas arriver)
    */
   private function ensureCommand(string $logicalId): stellantisCmd {
-    $cmd = $this->getCmd('info', $logicalId);
-    if (is_object($cmd)) {
-      return $cmd;
-    }
     $definitions = self::definitionsCommandes();
-    if (!isset($definitions[$logicalId])) {
-      throw new stellantisException('Commande info inconnue : ' . $logicalId);
+    $cmd = $this->trouverOuInstancierCmd('info', $logicalId, $definitions);
+    if ($cmd->getId() != '') {
+      return $cmd; // déjà existante : rien à (re)configurer
     }
     // $nom est déjà traduit par __() dans definitionsCommandes() (chaîne littérale extractible)
-    list($nom, $subType, $genericType, $unite, $historiser) = $definitions[$logicalId];
-    $cmd = new stellantisCmd();
-    $cmd->setEqLogic_id($this->getId());
-    $cmd->setLogicalId($logicalId);
-    $cmd->setName($nom);
-    $cmd->setType('info');
-    $cmd->setSubType($subType);
+    list(, , $genericType, $unite, $historiser) = $definitions[$logicalId];
     if ($genericType != '') {
       $cmd->setGeneric_type($genericType);
     }
     if ($unite != '') {
       $cmd->setUnite($unite);
     }
-    $cmd->setIsVisible(1);
     $cmd->setIsHistorized($historiser ? 1 : 0);
     $cmd->save();
+    return $cmd;
+  }
+
+  /**
+   * Retourne la commande action $logicalId de ce véhicule, la créant si absente (idempotent).
+   * @throws stellantisException si $logicalId n'est pas une action connue (ne devrait pas arriver)
+   */
+  private function ensureActionCommand(string $logicalId): stellantisCmd {
+    $cmd = $this->trouverOuInstancierCmd('action', $logicalId, self::definitionsActions());
+    if ($cmd->getId() == '') {
+      $cmd->save();
+    }
+    return $cmd;
+  }
+
+  /**
+   * Mutualise la plomberie commune de création de commande : retourne la commande $type/$logicalId
+   * EXISTANTE (getId() != '') si présente, sinon une NOUVELLE instance non sauvegardée avec ses attributs
+   * communs (nom/subType/visible). Le caller distingue les deux via getId() et renseigne les champs
+   * spécifiques avant save(). @throws stellantisException si $logicalId est absent des définitions.
+   */
+  private function trouverOuInstancierCmd(string $type, string $logicalId, array $definitions): stellantisCmd {
+    $cmd = $this->getCmd($type, $logicalId);
+    if (is_object($cmd)) {
+      return $cmd;
+    }
+    if (!isset($definitions[$logicalId])) {
+      throw new stellantisException('Commande ' . $type . ' inconnue : ' . $logicalId);
+    }
+    list($nom, $subType) = array($definitions[$logicalId][0], $definitions[$logicalId][1]);
+    $cmd = new stellantisCmd();
+    $cmd->setEqLogic_id($this->getId());
+    $cmd->setLogicalId($logicalId);
+    $cmd->setName($nom);
+    $cmd->setType($type);
+    $cmd->setSubType($subType);
+    $cmd->setIsVisible(1);
     return $cmd;
   }
 
@@ -1184,8 +1222,9 @@ class stellantis extends eqLogic {
   /**
    * Envoie une action au démon via le socket TCP local (protocole {apikey, action, ...params}).
    * Best-effort : toute erreur est logguée en warning, jamais propagée (le démon peut être arrêté).
+   * @return bool true si le message a été écrit sur le socket, false sinon (démon injoignable / écriture KO).
    */
-  public static function sendToDaemon(string $_action, array $_params = array()): void {
+  public static function sendToDaemon(string $_action, array $_params = array()): bool {
     $params = $_params;
     $params['action'] = $_action;
     $params['apikey'] = jeedom::getApiKey('stellantis');
@@ -1193,14 +1232,14 @@ class stellantis extends eqLogic {
     $socket = @socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
     if ($socket === false) {
       log::add('stellantis', 'warning', 'Démon : création du socket impossible pour l\'action ' . $_action);
-      return;
+      return false;
     }
     try {
       if (@socket_connect($socket, '127.0.0.1', self::socketPort()) === false) {
         log::add('stellantis', 'warning', 'Démon : connexion au socket impossible (démon arrêté ?) pour l\'action ' . $_action);
-        return;
+        return false;
       }
-      @socket_write($socket, $payload, strlen($payload));
+      return @socket_write($socket, $payload, strlen($payload)) !== false;
     } finally {
       @socket_close($socket);
     }
@@ -1243,14 +1282,51 @@ class stellantis extends eqLogic {
         log::add('stellantis', 'info', 'Démon : déconnecté du broker MQTT');
         break;
       case 'message':
-        // Socle : on trace la réception ; le décodage métier des acks/états arrive en UC18.
+        // On trace la réception ; le décodage métier COMPLET des acks/états arrive en UC18.
+        // Le topic vient du broker (donnée externe) → aseptiser avant log (anti log-injection) : retrait des
+        // caractères de contrôle + troncature.
         $topic = isset($_data['topic']) ? (string) $_data['topic'] : '?';
-        log::add('stellantis', 'debug', 'Démon : message MQTT reçu sur ' . $topic);
+        $topicLog = mb_substr(preg_replace('/[[:cntrl:]]/', '', $topic), 0, 200);
+        log::add('stellantis', 'debug', 'Démon : message MQTT reçu sur ' . $topicLog);
+        // UC13 : si le message est l'ack d'un wakeup qu'on a émis, programmer un refresh REST (sans appel
+        // réseau ici — le callback doit répondre 200 vite ; le refresh est fait au prochain cron).
+        self::programmerRefreshApresAck($_data);
         break;
       default:
         // Type inconnu (futurs UC) : ignoré sans erreur.
         break;
     }
+  }
+
+  /**
+   * UC13 : à réception d'un message MQTT, si c'est l'ack d'un wakeup qu'on a émis (correlation_id connu),
+   * programmer une remontée d'état fraîche du véhicule concerné. On ne fait AUCUN appel REST ici (ce
+   * callback doit répondre 200 vite) : on pose un flag consommé au prochain cron(). On ignore le code 901
+   * (véhicule en veille : rien de frais à lire) et on retire le mapping (ack traité une seule fois).
+   * Best-effort, jamais de levée (appelé depuis un point d'entrée externe).
+   */
+  private static function programmerRefreshApresAck(array $_data): void {
+    $payload = isset($_data['payload']) ? $_data['payload'] : null;
+    if (!is_array($payload) || !isset($payload['correlation_id']) || !is_scalar($payload['correlation_id'])) {
+      return;
+    }
+    $cle = self::WAKEUP_CORR_KEY . (string) $payload['correlation_id'];
+    $eqId = (int) cache::byKey($cle)->getValue(0);
+    if ($eqId <= 0) {
+      return; // pas un ack de notre wakeup
+    }
+    $processCode = isset($payload['process_code']) ? (string) $payload['process_code'] : '';
+    // 901 = véhicule en veille : la commande n'a pas abouti à une remontée fraîche → on n'efface pas le
+    // mapping (un état ultérieur — Success/903 — peut encore arriver pour ce même correlation_id).
+    if ($processCode === '901') {
+      log::add('stellantis', 'info', 'Wakeup : véhicule en veille (équipement #' . $eqId . '), pas de rafraîchissement programmé');
+      return;
+    }
+    // TTL généreux (> backoff 429) : si le cron sort tôt (cooldown anti rate-limit actif), le flag survit
+    // jusqu'à la reprise de la boucle véhicule — le refresh post-ack n'est pas perdu silencieusement.
+    cache::set(self::WAKEUP_PENDING_KEY . $eqId, '1', self::WAKEUP_PENDING_TTL);
+    cache::delete($cle);
+    log::add('stellantis', 'info', 'Wakeup : ack reçu (équipement #' . $eqId . '), rafraîchissement programmé au prochain cron');
   }
 
   /* * ******************* UC12 — Activation OTP & remote token ******************* */
@@ -1564,6 +1640,130 @@ class stellantis extends eqLogic {
     message::removeAll('stellantis', 'otp_required');
   }
 
+  /* * ******************* UC13 — Wakeup / rafraîchissement à la demande ******************* */
+
+  const WAKEUP_SERVICE = '/VehCharge/state';                     // segment de service du topic MQTT (contrat RemoteClient.wakeup)
+  const WAKEUP_ACTION = 'state';                                  // valeur de req_parameters.action
+  const WAKEUP_COOLDOWN = 300;                                    // cooldown per-véhicule (s) : ~5 min mini entre deux réveils
+  const WAKEUP_COOLDOWN_KEY = 'stellantis::wakeup_cooldown::';   // + eqId (cache) : dernier réveil de CE véhicule
+  const WAKEUP_PENDING_KEY = 'stellantis::wakeup_pending::';     // + eqId (cache) : refresh REST dû après l'ack
+  const WAKEUP_PENDING_TTL = 1200;                               // TTL du flag pending : > backoff 429 (RATELIMIT_COOLDOWN) pour ne pas perdre le refresh si le cron sort tôt
+  const WAKEUP_CORR_KEY = 'stellantis::wakeup_corr::';           // + correlation_id (cache) => eqId : corrélation ack→véhicule
+  const WAKEUP_QUOTA_KEY = 'stellantis::wakeup_quota';           // quota GLOBAL compte (fenêtre glissante JSON)
+  const WAKEUP_QUOTA_MAX = 5;                                     // marge sous le ban serveur (~6 wakeups / 20 min, niveau COMPTE)
+  const WAKEUP_QUOTA_FENETRE = 1200;                             // fenêtre du quota global (s) = 20 min
+
+  /**
+   * Force une remontée d'état fraîche de CE véhicule (batterie/charge/position…) via une commande MQTT
+   * wakeup — ce que le polling REST seul ne peut pas faire. Action DÉLIBÉRÉE (bouton), jamais déclenchée
+   * par le cron. Garde-fous stricts anti-ban / batterie 12 V : cooldown per-véhicule + quota global compte.
+   * L'ack asynchrone (topic to/cid) programmera un refresh REST au prochain cron (handleDaemonMessage).
+   * @throws stellantisException 'rate_limited' (cooldown/quota), 'otp_required' (OTP non activé), sinon api_error
+   */
+  public function wakeup(): void {
+    // Note : cooldown et quota reposent sur un cycle lecture→écriture cache non atomique (pas de primitive
+    // atomique dans le core). Une race entre deux déclenchements quasi simultanés pourrait franchir la garde
+    // d'un ou deux réveils — acceptable (action bouton, concurrence improbable ; marge WAKEUP_QUOTA_MAX<6).
+    // 1) Cooldown per-véhicule : refus net (pas de retry) si un réveil est trop récent sur CE véhicule.
+    $cleCooldown = self::WAKEUP_COOLDOWN_KEY . $this->getId();
+    $dernier = (int) cache::byKey($cleCooldown)->getValue(0);
+    if ($dernier > 0) {
+      $reste = self::WAKEUP_COOLDOWN - (time() - $dernier);
+      if ($reste > 0) {
+        throw new stellantisException(sprintf(__('Réveil déjà demandé récemment ; patientez %d s (protection anti-ban / batterie 12 V)', __FILE__), $reste), 429, 'rate_limited');
+      }
+    }
+    // 2) Pré-requis OTP : sans remote token, pas de canal MQTT. Alerte cohérente avec les autres call sites.
+    if (!stellantisApi::hasRemoteToken()) {
+      self::alerterOtpRequired();
+      throw new stellantisException(__('Pilotage à distance non activé : activez l\'OTP dans la configuration du plugin', __FILE__), 0, 'otp_required');
+    }
+    // 3) Publication (gère quota global compte + CID + démon + alignement token). Retourne le correlation_id.
+    $correlationId = $this->publishRemoteCommand(self::WAKEUP_SERVICE, array('action' => self::WAKEUP_ACTION));
+    // 4) Pose le cooldown et le mapping ack→véhicule (la remontée d'état sera programmée à réception de l'ack).
+    cache::set($cleCooldown, time(), self::WAKEUP_COOLDOWN);
+    cache::set(self::WAKEUP_CORR_KEY . $correlationId, $this->getId(), self::WAKEUP_COOLDOWN);
+    log::add('stellantis', 'info', 'Wakeup demandé pour l\'équipement #' . $this->getId());
+  }
+
+  /**
+   * Point UNIQUE de publication d'une commande MQTT de CE véhicule (réutilisable UC14-17). Applique le quota
+   * GLOBAL compte (anti-ban serveur), vérifie CID + démon lancé, aligne le token de session MQTT, construit
+   * le message complet et le publie via le démon. Retourne le correlation_id (corrélation de l'ack).
+   * @throws stellantisException 'rate_limited' (quota), 'not_configured' (CID/démon), sinon selon buildMqttRequest
+   */
+  public function publishRemoteCommand(string $_service, array $_reqParameters): string {
+    // Pré-requis d'abord : un échec (CID/démon) ne doit PAS consommer le quota anti-ban (compté seulement
+    // pour une publication réellement émise).
+    if (self::getCustomerId() == '') {
+      throw new stellantisException(__('Identifiant client (CID) inconnu : refaites l\'activation OTP', __FILE__), 0, 'not_configured');
+    }
+    if (self::deamon_info()['state'] != 'ok') {
+      throw new stellantisException(__('Démon MQTT non démarré : impossible d\'envoyer la commande de réveil', __FILE__), 0, 'not_configured');
+    }
+    // Quota global au niveau COMPTE : le ban serveur (~6/20 min) frappe le compte, pas le véhicule → un
+    // cooldown par véhicule ne suffit pas sur un compte multi-véhicules. Fenêtre glissante, sans appel réseau.
+    self::consommerQuotaWakeup();
+    // Aligne le mot de passe MQTT de la session (démon) sur le remote token courant AVANT de publier : le
+    // getRemoteToken() de buildMqttRequest peut déclencher un refresh proactif, le payload et la session
+    // doivent porter le même token. Idempotent (no-op si inchangé).
+    self::syncDaemonToken();
+    $requete = $this->buildMqttRequest($_service, $_reqParameters);
+    // sendToDaemon est best-effort : s'il échoue (démon crashé après le check state==ok), la commande n'a
+    // pas été transmise → on lève 'transport' pour NE PAS poser le cooldown/mapping d'une commande fantôme.
+    if (!self::sendToDaemon('publish', array('topic' => $requete['topic'], 'payload' => $requete['payload']))) {
+      throw new stellantisException(__('Envoi de la commande au démon MQTT échoué (démon indisponible ?)', __FILE__), 0, 'transport');
+    }
+    return $requete['correlation_id'];
+  }
+
+  /**
+   * Construit une requête MQTT PSA complète pour CE véhicule (contrat MQTTRequest du code de référence) :
+   * topic psa/RemoteServices/from/cid/{CID}{service} + message {access_token, customer_id, correlation_id,
+   * req_date, vin, req_parameters}. Le remote token est RÉINJECTÉ dans le payload (en plus d'être le mot de
+   * passe MQTT de la session). @throws stellantisException si le remote token est indisponible.
+   */
+  public function buildMqttRequest(string $_service, array $_reqParameters): array {
+    $cid = self::getCustomerId();
+    $token = stellantisApi::getRemoteToken(); // remote token OTP (refresh proactif si proche expiration)
+    $correlationId = self::genererCorrelationId();
+    return array(
+      'topic' => 'psa/RemoteServices/from/cid/' . $cid . $_service,
+      'correlation_id' => $correlationId,
+      'payload' => array(
+        'access_token' => $token,
+        'customer_id' => $cid,
+        'correlation_id' => $correlationId,
+        'req_date' => gmdate('Y-m-d\TH:i:s\Z'),
+        'vin' => $this->getLogicalId(),
+        'req_parameters' => $_reqParameters,
+      ),
+    );
+  }
+
+  // Identifiant de corrélation opaque, unique par requête (repris dans l'ack). Reproduit le format du code
+  // de référence : uuid4().hex (sans tirets) + horodatage UTC à la milliseconde. Seule l'unicité compte.
+  private static function genererCorrelationId(): string {
+    $ms = (int) (explode(' ', microtime())[0] * 1000); // fraction de seconde → millisecondes (0..999)
+    return bin2hex(random_bytes(16)) . gmdate('YmdHis') . sprintf('%03d', $ms);
+  }
+
+  // Quota global anti-ban des commandes MQTT (fenêtre glissante fixe) : dépassement → rate_limited SANS
+  // appel réseau. Gabarit identique à consommerQuotaRefresh (niveau COMPTE, partagé par tous les véhicules).
+  private static function consommerQuotaWakeup(): void {
+    $quota = json_decode((string) cache::byKey(self::WAKEUP_QUOTA_KEY)->getValue(''), true);
+    $maintenant = time();
+    if (!is_array($quota) || !isset($quota['windowStart']) || $maintenant - $quota['windowStart'] > self::WAKEUP_QUOTA_FENETRE) {
+      $quota = array('windowStart' => $maintenant, 'count' => 0);
+    }
+    if ($quota['count'] >= self::WAKEUP_QUOTA_MAX) {
+      $reste = (int) $quota['windowStart'] + self::WAKEUP_QUOTA_FENETRE - $maintenant;
+      throw new stellantisException(sprintf(__('Trop de réveils récents sur le compte ; patientez %d s (protection anti-ban)', __FILE__), max(1, $reste)), 429, 'rate_limited');
+    }
+    $quota['count']++;
+    cache::set(self::WAKEUP_QUOTA_KEY, json_encode($quota), self::WAKEUP_QUOTA_FENETRE);
+  }
+
   /**
    * Hook cron Jeedom (chaque minute) : rafraîchit la télémétrie des véhicules dus. On utilise cron()
    * (pas cron5) car isDue() teste une correspondance EXACTE à la minute ; sous cron5 (multiples de 5),
@@ -1624,6 +1824,19 @@ class stellantis extends eqLogic {
       return;
     }
     foreach ($vehicules as $eqLogic) {
+      // UC13 : un wakeup a été acquitté depuis la dernière passe (flag posé par programmerRefreshApresAck)
+      // → remontée d'état FORCÉE (hors cadence autorefresh), avec les garde-fous 429 de refreshTelemetry().
+      // Consommé une seule fois. Le backoff rate-limit ci-dessus a déjà court-circuité la passe si besoin.
+      $clePending = self::WAKEUP_PENDING_KEY . $eqLogic->getId();
+      if (cache::byKey($clePending)->getValue('') != '') {
+        cache::delete($clePending);
+        try {
+          $eqLogic->refreshTelemetry();
+        } catch (\Throwable $e) {
+          log::add('stellantis', 'warning', 'Cron : rafraîchissement post-wakeup en erreur pour l\'équipement #' . $eqLogic->getId() . ' : ' . $e->getMessage());
+        }
+        continue;
+      }
       $autorefresh = trim((string) $eqLogic->getConfiguration('autorefresh', ''));
       $expression = ($autorefresh != '') ? $autorefresh : self::CRON_DEFAUT;
       try {
@@ -1776,8 +1989,22 @@ class stellantisCmd extends cmd {
   }
   */
 
-  // Exécution d'une commande
+  // Exécution d'une commande action. Le core enveloppe l'appel dans un try/catch et remonte le message
+  // d'exception à l'UI (toast du bouton) → on laisse remonter les stellantisException (cooldown, OTP…).
   public function execute($_options = array()) {
+    $eqLogic = $this->getEqLogic();
+    if (!is_object($eqLogic)) {
+      return;
+    }
+    switch ($this->getLogicalId()) {
+      case 'wakeup':
+        // UC13 : force une remontée d'état fraîche via MQTT (garde-fous cooldown/quota dans wakeup()).
+        $eqLogic->wakeup();
+        break;
+      default:
+        log::add('stellantis', 'warning', 'Commande action inconnue : ' . $this->getLogicalId());
+        break;
+    }
   }
 
   /*     * **********************Getteur Setteur*************************** */
