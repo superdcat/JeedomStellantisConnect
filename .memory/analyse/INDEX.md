@@ -11,7 +11,12 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-09 (UC14 : `stellantis-data-model.md` — `next_delayed_time` **format
+> **Dernière synchro** : 2026-07-09 (UC15 : `stellantis-data-model.md` § 2.5 — commande MQTT
+> préconditionnement confirmée contre `psa_car_controller` : service `/ThermalPrecond`, payload
+> `{"asap":"activate"|"deactivate","programs":<4 créneaux>}` ; le code de réf. n'envoie les programmes
+> réels que s'il les a appris par events MQTT, sinon littéral figé `on:0` — comportement repris à
+> l'identique côté plugin, le suivi des events étant hors scope UC15). Précédemment 2026-07-09
+> (UC14 : `stellantis-data-model.md` — `next_delayed_time` **format
 > ambigu** RFC3339 vs durée `PT..` confirmé contre `psa_car_controller` ; commande de charge MQTT service
 > `/VehCharge`, payload `{"program":{hour,minute},"type":"immediate"|"delayed"}`, seul `type` opérant pour
 > start/stop). Précédemment 2026-07-09 (UC13 : `stellantis-api-architecture.md` §1.3 — enveloppe MQTTRequest

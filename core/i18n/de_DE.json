@@ -151,7 +151,11 @@
         "Démarrer la charge": "Ladevorgang starten",
         "Arrêter la charge": "Ladevorgang stoppen",
         "Commande de charge déjà envoyée à l'instant ; patientez %d s": "Ladebefehl wurde soeben gesendet; warten Sie %d s",
-        "Commande de charge indisponible : véhicule non rechargeable": "Ladebefehl nicht verfügbar: Fahrzeug nicht aufladbar"
+        "Commande de charge indisponible : véhicule non rechargeable": "Ladebefehl nicht verfügbar: Fahrzeug nicht aufladbar",
+        "Préconditionnement": "Vorklimatisierung",
+        "Activer le préconditionnement": "Vorklimatisierung aktivieren",
+        "Désactiver le préconditionnement": "Vorklimatisierung deaktivieren",
+        "Commande de préconditionnement déjà envoyée à l'instant ; patientez %d s": "Vorklimatisierungsbefehl wurde soeben gesendet; warten Sie %d s"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert",

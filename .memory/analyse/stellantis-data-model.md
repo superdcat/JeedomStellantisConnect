@@ -99,6 +99,17 @@ Biologic}` — `energy` absent sur Electric).
 - `.status` (`Enabled`/`Disabled`/`Finished`/`Failure`), `.failure_cause`
   (`Defect`/`DoorOpened`/`LowBattery`/`LowFuelLevel`/`TooManyUnusedProg`/`WindowsRoofOpened`).
 - `.programs[n]` : `slot` (1-4), `enabled` (bool), `start` (ISO 8601), `occurence.day` (array 7 int [Lun..Dim]).
+
+> ⚠️ **Commande MQTT précond (vérifié UC15, 2026-07-09, `psa_car_controller/psa/RemoteClient.py` +
+> `constants.py`)** : service `/ThermalPrecond` (topic `psa/RemoteServices/from/cid/{CID}/ThermalPrecond`,
+> même enveloppe `MQTTRequest` que wakeup/charge). Payload `req_parameters` = `{"asap":
+> "activate"|"deactivate", "programs": <objet 4 créneaux>}`. Le code de référence n'envoie les
+> **programmes réels** que s'il les a appris depuis les events MQTT (`psa/RemoteServices/events/...`) ;
+> à défaut il retombe sur un littéral figé `DEFAULT_PRECONDITIONING_PROGRAM` (4 créneaux `on:0`,
+> `hour:34`/`minute:7` sans effet). Le plugin (UC15) **ne suit pas** les events programs (hors scope,
+> variante différée) et envoie donc **toujours** ce même littéral figé — comportement identique au
+> défaut du code de référence, pas une improvisation (cf. `.memory/specs/post-mvp/10-commandes-distance/15-tech.md`
+> § risque documenté).
 - → `precond_status`, `precond_program`.
 
 ### 2.6 Environnement, sécurité, confidentialité, 12 V

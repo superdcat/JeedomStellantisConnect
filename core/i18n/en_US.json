@@ -151,7 +151,11 @@
         "Démarrer la charge": "Start charging",
         "Arrêter la charge": "Stop charging",
         "Commande de charge déjà envoyée à l'instant ; patientez %d s": "Charge command already sent just now; wait %d s",
-        "Commande de charge indisponible : véhicule non rechargeable": "Charge command unavailable: non-rechargeable vehicle"
+        "Commande de charge indisponible : véhicule non rechargeable": "Charge command unavailable: non-rechargeable vehicle",
+        "Préconditionnement": "Preconditioning",
+        "Activer le préconditionnement": "Enable preconditioning",
+        "Désactiver le préconditionnement": "Disable preconditioning",
+        "Commande de préconditionnement déjà envoyée à l'instant ; patientez %d s": "Preconditioning command already sent just now; wait %d s"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Unauthorized access",

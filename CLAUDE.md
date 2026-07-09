@@ -82,8 +82,21 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > motorisation serveur + **debounce per-véhicule court (10 s) posé AVANT tout appel réseau** (borne les
 > tentatives en échec, anti-ban) + quota global compte réutilisé de `publishRemoteCommand`. Le **pipeline
 > d'ack UC13 est généralisé** (constantes renommées `WAKEUP_CORR/PENDING_KEY` → `CMD_CORR/PENDING_KEY`
-> + `CMD_CORR_TTL` ; refresh d'état au prochain `cron()` après l'ack). Suite = post-MVP (préconditionnement
-> UC15, verrouillage UC16, klaxon/feux UC17, retour d'état UC18, localisation, entretien…). Cette note est
+> + `CMD_CORR_TTL` ; refresh d'état au prochain `cron()` après l'ack). **Post-MVP : UC15** — **commande de
+> préconditionnement climatique (activer/désactiver, immédiat)** : commandes action `precond_on`/
+> `precond_off` créées **universellement** (tout véhicule, y compris thermique — chauffage habitacle),
+> `execute()` → `stellantis->precondControl(bool)`. Publiées via `publishRemoteCommand()` sur le service
+> `/ThermalPrecond` (payload `{"asap":"activate"|"deactivate","programs":<4 créneaux>}`) — contrat
+> `RemoteClient.preconditioning` de `psa_car_controller`. Les `programs` envoyés sont **toujours** le
+> littéral figé par défaut (`precondProgramDefaut()`, 4 créneaux `on:0`) : le suivi des programmes réels
+> (events MQTT) est hors scope UC15, et ce littéral reproduit le **même repli par défaut** que le code de
+> référence applique tant qu'il n'a rien appris — cf. `stellantis-data-model.md` § 2.5 pour le détail du
+> risque documenté. Nouvelle info `precond_status` (mapping `preconditionning.airConditioning.status`,
+> **double n**) ; un refus véhicule (`Failure`) est loggué avec `failure_cause` (validation stricte
+> batterie/branchement = UC18). Garde-fous : **aucune** garde motorisation (universel) ni batterie
+> proactive côté plugin ; debounce per-véhicule court (10 s, réutilise le pipeline d'ack générique
+> UC13/14 sans modification) + quota global compte réutilisé de `publishRemoteCommand`. Suite = post-MVP
+> (verrouillage UC16, klaxon/feux UC17, retour d'état UC18, localisation, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
 

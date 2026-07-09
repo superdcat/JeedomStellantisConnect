@@ -151,7 +151,11 @@
         "Démarrer la charge": "Iniciar la carga",
         "Arrêter la charge": "Detener la carga",
         "Commande de charge déjà envoyée à l'instant ; patientez %d s": "Comando de carga ya enviado hace un momento; espere %d s",
-        "Commande de charge indisponible : véhicule non rechargeable": "Comando de carga no disponible: vehículo no recargable"
+        "Commande de charge indisponible : véhicule non rechargeable": "Comando de carga no disponible: vehículo no recargable",
+        "Préconditionnement": "Preacondicionamiento",
+        "Activer le préconditionnement": "Activar el preacondicionamiento",
+        "Désactiver le préconditionnement": "Desactivar el preacondicionamiento",
+        "Commande de préconditionnement déjà envoyée à l'instant ; patientez %d s": "Comando de preacondicionamiento ya enviado hace un momento; espere %d s"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Acceso no autorizado",

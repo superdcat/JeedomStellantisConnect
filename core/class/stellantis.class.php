@@ -536,6 +536,7 @@ class stellantis extends eqLogic {
       'doors_locked'     => array(__('Verrouillage', __FILE__), 'binary', '', '', false),
       'position'         => array(__('Position', __FILE__), 'string', 'GEOLOC', '', false),
       'last_update'      => array(__('Dernière MAJ', __FILE__), 'string', '', '', false),
+      'precond_status'   => array(__('Préconditionnement', __FILE__), 'string', '', '', false),
     );
   }
 
@@ -546,7 +547,7 @@ class stellantis extends eqLogic {
    */
   public function createCommands(): void {
     $motorisation = trim((string) $this->getConfiguration('energy', ''));
-    $aCreer = array('mileage', 'doors_locked', 'position', 'last_update');
+    $aCreer = array('mileage', 'doors_locked', 'position', 'last_update', 'precond_status');
     if ($motorisation == 'Electric' || $motorisation == 'Hybrid') {
       $aCreer = array_merge($aCreer, array('battery_soc', 'autonomy', 'charging_status', 'charging_plugged'));
     }
@@ -567,6 +568,9 @@ class stellantis extends eqLogic {
       $this->ensureActionCommand('charge_start');
       $this->ensureActionCommand('charge_stop');
     }
+    // UC15 : commandes de préconditionnement, UNIVERSELLES (chauffage habitacle pertinent aussi sur thermique).
+    $this->ensureActionCommand('precond_on');
+    $this->ensureActionCommand('precond_off');
   }
 
   // Table des commandes ACTION (source de vérité, miroir de definitionsCommandes) : logicalId =>
@@ -578,6 +582,8 @@ class stellantis extends eqLogic {
       'wakeup'       => array(__('Réveiller', __FILE__), 'other', ''),
       'charge_start' => array(__('Démarrer la charge', __FILE__), 'other', ''),
       'charge_stop'  => array(__('Arrêter la charge', __FILE__), 'other', ''),
+      'precond_on'   => array(__('Activer le préconditionnement', __FILE__), 'other', ''),
+      'precond_off'  => array(__('Désactiver le préconditionnement', __FILE__), 'other', ''),
     );
   }
 
@@ -800,6 +806,18 @@ class stellantis extends eqLogic {
     $verrouillage = self::extraireVerrouillage($_status);
     if ($verrouillage !== null) {
       $valeurs['doors_locked'] = $verrouillage;
+    }
+    // Préconditionnement (UC15) : orthographe API réelle « preconditionning » (double n, data-model piège 3).
+    if (isset($_status['preconditionning']['airConditioning']['status']) && is_scalar($_status['preconditionning']['airConditioning']['status'])) {
+      $statutPrecond = preg_replace('/[^A-Za-z]/', '', (string) $_status['preconditionning']['airConditioning']['status']);
+      $valeurs['precond_status'] = $statutPrecond;
+      if (strcasecmp($statutPrecond, 'Failure') == 0) {
+        $causeBrute = isset($_status['preconditionning']['airConditioning']['failure_cause']) && is_scalar($_status['preconditionning']['airConditioning']['failure_cause'])
+          ? (string) $_status['preconditionning']['airConditioning']['failure_cause'] : 'inconnue';
+        // Aseptisation avant log (même traitement que $topicLog dans handleDaemonMessage) : donnée API externe, jamais réinjectée brute dans les logs.
+        $cause = mb_substr(preg_replace('/[[:cntrl:]]/', '', $causeBrute), 0, 200);
+        log::add('stellantis', 'warning', 'Préconditionnement refusé par le véhicule (cause : ' . $cause . ')');
+      }
     }
     // Position : GeoJSON coordinates = [lon, lat, alt] → "lat,lon" (PAS [lat,lon] !)
     if ($_position !== null) {
@@ -1314,7 +1332,7 @@ class stellantis extends eqLogic {
         $topic = isset($_data['topic']) ? (string) $_data['topic'] : '?';
         $topicLog = mb_substr(preg_replace('/[[:cntrl:]]/', '', $topic), 0, 200);
         log::add('stellantis', 'debug', 'Démon : message MQTT reçu sur ' . $topicLog);
-        // UC13/UC14 : si le message est l'ack d'une commande qu'on a émise (wakeup, charge…), programmer un
+        // UC13/UC14/UC15 : si le message est l'ack d'une commande qu'on a émise (wakeup, charge, précond…), programmer un
         // refresh REST (sans appel réseau ici — le callback doit répondre 200 vite ; refresh au prochain cron).
         self::programmerRefreshApresAck($_data);
         break;
@@ -1911,6 +1929,67 @@ class stellantis extends eqLogic {
     return '';
   }
 
+  /* * ******************* UC15 — Préconditionnement climatique (immédiat) ******************* */
+
+  const PRECOND_SERVICE = '/ThermalPrecond';                     // segment de service du topic MQTT (contrat RemoteClient.preconditioning)
+  const PRECOND_DEBOUNCE = 10;                                    // anti-boucle per-véhicule (s) : autorise un vrai toggle on→off, bloque un scénario en boucle
+  const PRECOND_DEBOUNCE_KEY = 'stellantis::precond_debounce::'; // + eqId (cache) : dernière commande de préconditionnement de CE véhicule
+
+  /**
+   * Active (asap=activate) ou désactive (asap=deactivate) le préconditionnement climatique de CE
+   * véhicule via une commande MQTT. Action DÉLIBÉRÉE (bouton). Anti-boucle per-véhicule court (comme
+   * chargeControl) ; le garde-fou anti-ban est le quota GLOBAL compte dans publishRemoteCommand().
+   * ⚠️ Aucune garde motorisation/batterie proactive côté plugin : un refus véhicule (batterie/non
+   * branché) remonte via l'info precond_status (Failure/failure_cause) au prochain cron, cf. UC18 pour
+   * une validation stricte. L'ack asynchrone (topic to/cid) programmera un refresh REST au prochain cron.
+   * @throws stellantisException 'rate_limited' (debounce/quota), 'otp_required' (OTP non activé), sinon api_error
+   */
+  public function precondControl(bool $_activer): void {
+    // 1) Anti-boucle per-véhicule : refus net si une commande de préconditionnement est trop récente sur CE véhicule.
+    $cleDebounce = self::PRECOND_DEBOUNCE_KEY . $this->getId();
+    $dernier = (int) cache::byKey($cleDebounce)->getValue(0);
+    if ($dernier > 0) {
+      $reste = self::PRECOND_DEBOUNCE - (time() - $dernier);
+      if ($reste > 0) {
+        throw new stellantisException(sprintf(__('Commande de préconditionnement déjà envoyée à l\'instant ; patientez %d s', __FILE__), $reste), 429, 'rate_limited');
+      }
+    }
+    // 2) Pré-requis OTP : sans remote token, pas de canal MQTT. Alerte cohérente avec les autres call sites.
+    if (!stellantisApi::hasRemoteToken()) {
+      self::alerterOtpRequired();
+      throw new stellantisException(__('Pilotage à distance non activé : activez l\'OTP dans la configuration du plugin', __FILE__), 0, 'otp_required');
+    }
+    // 3) Pose le debounce AVANT tout appel réseau (publish MQTT) : borne les tentatives répétées quel qu'en soit le résultat.
+    cache::set($cleDebounce, time(), self::PRECOND_DEBOUNCE);
+    // 4) Publication (gère quota global compte + CID + démon + alignement token). Retourne le correlation_id.
+    $correlationId = $this->publishRemoteCommand(self::PRECOND_SERVICE, array(
+      'asap' => $_activer ? 'activate' : 'deactivate',
+      'programs' => self::precondProgramDefaut(),
+    ));
+    // 5) Mapping ack→véhicule (refresh d'état au prochain cron). Le debounce a déjà été posé en 3).
+    cache::set(self::CMD_CORR_KEY . $correlationId, $this->getId(), self::CMD_CORR_TTL);
+    log::add('stellantis', 'info', 'Préconditionnement ' . ($_activer ? 'activé' : 'désactivé') . ' (demande) pour l\'équipement #' . $this->getId());
+  }
+
+  /**
+   * Programmes de préconditionnement par défaut (littéral du code de référence RemoteClient), envoyés
+   * quand le plugin n'a appris AUCUN programme réel du véhicule (events MQTT programs) — ce qui est
+   * TOUJOURS notre cas, le suivi des programmes étant hors scope UC15 (variante avancée future). Les 4
+   * créneaux sont désactivés (on=0) : c'est le même comportement par défaut que le code de référence
+   * applique tant qu'il n'a rien appris (usage réel multi-années, aucun signalement de programmation
+   * écrasée) — cf. 15-tech.md § risque documenté. hour=34/minute=7 = valeurs littérales du code de
+   * référence, sans effet puisque on=0.
+   */
+  private static function precondProgramDefaut(): array {
+    $creneauInactif = array('day' => array(0, 0, 0, 0, 0, 0, 0), 'hour' => 34, 'minute' => 7, 'on' => 0);
+    return array(
+      'program1' => $creneauInactif,
+      'program2' => $creneauInactif,
+      'program3' => $creneauInactif,
+      'program4' => $creneauInactif,
+    );
+  }
+
   /**
    * Hook cron Jeedom (chaque minute) : rafraîchit la télémétrie des véhicules dus. On utilise cron()
    * (pas cron5) car isDue() teste une correspondance EXACTE à la minute ; sous cron5 (multiples de 5),
@@ -2156,6 +2235,14 @@ class stellantisCmd extends cmd {
       case 'charge_stop':
         // UC14 : arrête la charge (delayed). Rafraîchit d'abord l'état réel pour ne pas reprogrammer la charge différée.
         $eqLogic->chargeControl(false);
+        break;
+      case 'precond_on':
+        // UC15 : active le préconditionnement climatique (immédiat). Garde-fous debounce/quota + pré-requis OTP dans precondControl().
+        $eqLogic->precondControl(true);
+        break;
+      case 'precond_off':
+        // UC15 : désactive le préconditionnement climatique (immédiat).
+        $eqLogic->precondControl(false);
         break;
       default:
         log::add('stellantis', 'warning', 'Commande action inconnue : ' . $this->getLogicalId());
