@@ -562,13 +562,22 @@ class stellantis extends eqLogic {
     // UC13 : commande action « Réveiller » (première commande MQTT). Universelle (tout véhicule), mais son
     // exécution vérifie à chaud les pré-requis (OTP activé, CID, démon lancé) — cf. wakeup().
     $this->ensureActionCommand('wakeup');
+    // UC14 : commandes de charge (start/stop), UNIQUEMENT sur véhicule rechargeable (jamais sur thermique).
+    if ($motorisation == 'Electric' || $motorisation == 'Hybrid') {
+      $this->ensureActionCommand('charge_start');
+      $this->ensureActionCommand('charge_stop');
+    }
   }
 
   // Table des commandes ACTION (source de vérité, miroir de definitionsCommandes) : logicalId =>
-  // [nom FR littéral __(), subType]. ⚠️ Nom enveloppé en __() avec chaîne LITTÉRALE pour l'extracteur i18n.
+  // [nom FR littéral __(), subType, generic_type]. ⚠️ Nom enveloppé en __() avec chaîne LITTÉRALE pour
+  // l'extracteur i18n. generic_type vide = pas de métadonnée widget (on ne devine pas de constante core
+  // non vérifiée) ; la liaison widget on/off charge → info charging_status (string) est différée.
   private static function definitionsActions(): array {
     return array(
-      'wakeup' => array(__('Réveiller', __FILE__), 'other'),
+      'wakeup'       => array(__('Réveiller', __FILE__), 'other', ''),
+      'charge_start' => array(__('Démarrer la charge', __FILE__), 'other', ''),
+      'charge_stop'  => array(__('Arrêter la charge', __FILE__), 'other', ''),
     );
   }
 
@@ -600,10 +609,16 @@ class stellantis extends eqLogic {
    * @throws stellantisException si $logicalId n'est pas une action connue (ne devrait pas arriver)
    */
   private function ensureActionCommand(string $logicalId): stellantisCmd {
-    $cmd = $this->trouverOuInstancierCmd('action', $logicalId, self::definitionsActions());
-    if ($cmd->getId() == '') {
-      $cmd->save();
+    $definitions = self::definitionsActions();
+    $cmd = $this->trouverOuInstancierCmd('action', $logicalId, $definitions);
+    if ($cmd->getId() != '') {
+      return $cmd; // déjà existante : rien à (re)configurer
     }
+    $genericType = isset($definitions[$logicalId][2]) ? (string) $definitions[$logicalId][2] : '';
+    if ($genericType != '') {
+      $cmd->setGeneric_type($genericType);
+    }
+    $cmd->save();
     return $cmd;
   }
 
@@ -674,6 +689,17 @@ class stellantis extends eqLogic {
     foreach ($valeurs as $logicalId => $valeur) {
       $cmd = $this->ensureCommand($logicalId);
       $this->checkAndUpdateCmd($cmd, $valeur);
+    }
+    // UC14 : mémoriser l'heure de charge différée brute (hors parseStatus, qui est pur et ne renvoie que
+    // des valeurs de commandes) pour la réutiliser lors d'un « Arrêter la charge » (type delayed) sans
+    // reprogrammer le véhicule. En cache (pattern privacy) — jamais en config (effaçable au Sauvegarder).
+    $heureDifferee = self::extraireHeureChargeDifferee($status);
+    if ($heureDifferee != '') {
+      cache::set(self::CHARGE_NEXT_TIME_KEY . $this->getId(), $heureDifferee, self::CHARGE_NEXT_TIME_TTL);
+    } else {
+      // Champ absent du /status frais (programmation de charge différée annulée depuis l'app mobile…) :
+      // purger le cache pour que heureChargeDifferee() retombe sur [0,0] et ne republie PAS une heure périmée.
+      cache::delete(self::CHARGE_NEXT_TIME_KEY . $this->getId());
     }
   }
 
@@ -1288,8 +1314,8 @@ class stellantis extends eqLogic {
         $topic = isset($_data['topic']) ? (string) $_data['topic'] : '?';
         $topicLog = mb_substr(preg_replace('/[[:cntrl:]]/', '', $topic), 0, 200);
         log::add('stellantis', 'debug', 'Démon : message MQTT reçu sur ' . $topicLog);
-        // UC13 : si le message est l'ack d'un wakeup qu'on a émis, programmer un refresh REST (sans appel
-        // réseau ici — le callback doit répondre 200 vite ; le refresh est fait au prochain cron).
+        // UC13/UC14 : si le message est l'ack d'une commande qu'on a émise (wakeup, charge…), programmer un
+        // refresh REST (sans appel réseau ici — le callback doit répondre 200 vite ; refresh au prochain cron).
         self::programmerRefreshApresAck($_data);
         break;
       default:
@@ -1299,34 +1325,34 @@ class stellantis extends eqLogic {
   }
 
   /**
-   * UC13 : à réception d'un message MQTT, si c'est l'ack d'un wakeup qu'on a émis (correlation_id connu),
-   * programmer une remontée d'état fraîche du véhicule concerné. On ne fait AUCUN appel REST ici (ce
-   * callback doit répondre 200 vite) : on pose un flag consommé au prochain cron(). On ignore le code 901
-   * (véhicule en veille : rien de frais à lire) et on retire le mapping (ack traité une seule fois).
-   * Best-effort, jamais de levée (appelé depuis un point d'entrée externe).
+   * UC13/UC14 : à réception d'un message MQTT, si c'est l'ack d'une commande qu'on a émise (wakeup, charge…
+   * — correlation_id connu), programmer une remontée d'état fraîche du véhicule concerné. On ne fait AUCUN
+   * appel REST ici (ce callback doit répondre 200 vite) : on pose un flag consommé au prochain cron(). On
+   * ignore le code 901 (véhicule en veille : rien de frais à lire) et on retire le mapping (ack traité une
+   * seule fois). Best-effort, jamais de levée (appelé depuis un point d'entrée externe).
    */
   private static function programmerRefreshApresAck(array $_data): void {
     $payload = isset($_data['payload']) ? $_data['payload'] : null;
     if (!is_array($payload) || !isset($payload['correlation_id']) || !is_scalar($payload['correlation_id'])) {
       return;
     }
-    $cle = self::WAKEUP_CORR_KEY . (string) $payload['correlation_id'];
+    $cle = self::CMD_CORR_KEY . (string) $payload['correlation_id'];
     $eqId = (int) cache::byKey($cle)->getValue(0);
     if ($eqId <= 0) {
-      return; // pas un ack de notre wakeup
+      return; // pas un ack d'une de nos commandes
     }
     $processCode = isset($payload['process_code']) ? (string) $payload['process_code'] : '';
     // 901 = véhicule en veille : la commande n'a pas abouti à une remontée fraîche → on n'efface pas le
     // mapping (un état ultérieur — Success/903 — peut encore arriver pour ce même correlation_id).
     if ($processCode === '901') {
-      log::add('stellantis', 'info', 'Wakeup : véhicule en veille (équipement #' . $eqId . '), pas de rafraîchissement programmé');
+      log::add('stellantis', 'info', 'Commande MQTT : véhicule en veille (équipement #' . $eqId . '), pas de rafraîchissement programmé');
       return;
     }
     // TTL généreux (> backoff 429) : si le cron sort tôt (cooldown anti rate-limit actif), le flag survit
     // jusqu'à la reprise de la boucle véhicule — le refresh post-ack n'est pas perdu silencieusement.
-    cache::set(self::WAKEUP_PENDING_KEY . $eqId, '1', self::WAKEUP_PENDING_TTL);
+    cache::set(self::CMD_PENDING_KEY . $eqId, '1', self::CMD_PENDING_TTL);
     cache::delete($cle);
-    log::add('stellantis', 'info', 'Wakeup : ack reçu (équipement #' . $eqId . '), rafraîchissement programmé au prochain cron');
+    log::add('stellantis', 'info', 'Commande MQTT : ack reçu (équipement #' . $eqId . '), rafraîchissement programmé au prochain cron');
   }
 
   /* * ******************* UC12 — Activation OTP & remote token ******************* */
@@ -1646,9 +1672,10 @@ class stellantis extends eqLogic {
   const WAKEUP_ACTION = 'state';                                  // valeur de req_parameters.action
   const WAKEUP_COOLDOWN = 300;                                    // cooldown per-véhicule (s) : ~5 min mini entre deux réveils
   const WAKEUP_COOLDOWN_KEY = 'stellantis::wakeup_cooldown::';   // + eqId (cache) : dernier réveil de CE véhicule
-  const WAKEUP_PENDING_KEY = 'stellantis::wakeup_pending::';     // + eqId (cache) : refresh REST dû après l'ack
-  const WAKEUP_PENDING_TTL = 1200;                               // TTL du flag pending : > backoff 429 (RATELIMIT_COOLDOWN) pour ne pas perdre le refresh si le cron sort tôt
-  const WAKEUP_CORR_KEY = 'stellantis::wakeup_corr::';           // + correlation_id (cache) => eqId : corrélation ack→véhicule
+  const CMD_PENDING_KEY = 'stellantis::cmd_pending::';           // + eqId (cache) : refresh REST dû après l'ack d'UNE commande MQTT (wakeup/charge/…)
+  const CMD_PENDING_TTL = 1200;                                  // TTL du flag pending : > backoff 429 (RATELIMIT_COOLDOWN) pour ne pas perdre le refresh si le cron sort tôt
+  const CMD_CORR_KEY = 'stellantis::cmd_corr::';                 // + correlation_id (cache) => eqId : corrélation ack→véhicule (toute commande MQTT)
+  const CMD_CORR_TTL = 300;                                      // TTL du mapping corrélation→eqId (s) : fenêtre d'attente de l'ack d'une commande (wakeup/charge/…)
   const WAKEUP_QUOTA_KEY = 'stellantis::wakeup_quota';           // quota GLOBAL compte (fenêtre glissante JSON)
   const WAKEUP_QUOTA_MAX = 5;                                     // marge sous le ban serveur (~6 wakeups / 20 min, niveau COMPTE)
   const WAKEUP_QUOTA_FENETRE = 1200;                             // fenêtre du quota global (s) = 20 min
@@ -1682,7 +1709,7 @@ class stellantis extends eqLogic {
     $correlationId = $this->publishRemoteCommand(self::WAKEUP_SERVICE, array('action' => self::WAKEUP_ACTION));
     // 4) Pose le cooldown et le mapping ack→véhicule (la remontée d'état sera programmée à réception de l'ack).
     cache::set($cleCooldown, time(), self::WAKEUP_COOLDOWN);
-    cache::set(self::WAKEUP_CORR_KEY . $correlationId, $this->getId(), self::WAKEUP_COOLDOWN);
+    cache::set(self::CMD_CORR_KEY . $correlationId, $this->getId(), self::CMD_CORR_TTL);
     log::add('stellantis', 'info', 'Wakeup demandé pour l\'équipement #' . $this->getId());
   }
 
@@ -1699,7 +1726,7 @@ class stellantis extends eqLogic {
       throw new stellantisException(__('Identifiant client (CID) inconnu : refaites l\'activation OTP', __FILE__), 0, 'not_configured');
     }
     if (self::deamon_info()['state'] != 'ok') {
-      throw new stellantisException(__('Démon MQTT non démarré : impossible d\'envoyer la commande de réveil', __FILE__), 0, 'not_configured');
+      throw new stellantisException(__('Démon MQTT non démarré : impossible d\'envoyer la commande', __FILE__), 0, 'not_configured');
     }
     // Quota global au niveau COMPTE : le ban serveur (~6/20 min) frappe le compte, pas le véhicule → un
     // cooldown par véhicule ne suffit pas sur un compte multi-véhicules. Fenêtre glissante, sans appel réseau.
@@ -1764,6 +1791,126 @@ class stellantis extends eqLogic {
     cache::set(self::WAKEUP_QUOTA_KEY, json_encode($quota), self::WAKEUP_QUOTA_FENETRE);
   }
 
+  /* * ******************* UC14 — Commande de charge (démarrer / arrêter) ******************* */
+
+  const CHARGE_SERVICE = '/VehCharge';                           // segment de service du topic MQTT (⚠️ distinct du wakeup /VehCharge/state)
+  const CHARGE_TYPE_IMMEDIATE = 'immediate';                     // type req_parameters : démarrer la charge maintenant (constante IMMEDIATE_CHARGE du code de réf.)
+  const CHARGE_TYPE_DELAYED = 'delayed';                         // type req_parameters : repasser en charge différée (= « arrêter » ; constante DELAYED_CHARGE)
+  const CHARGE_NEXT_TIME_KEY = 'stellantis::charge_next_time::'; // + eqId (cache) : next_delayed_time brut du dernier /status (repli si refresh-avant-stop échoue)
+  const CHARGE_NEXT_TIME_TTL = 172800;                           // TTL du cache d'heure différée (2 j, pattern privacy) — jamais en config (effaçable au Sauvegarder)
+  const CHARGE_DEBOUNCE = 10;                                    // anti-boucle per-véhicule (s) : autorise un vrai toggle start→stop, bloque un scénario en boucle
+  const CHARGE_DEBOUNCE_KEY = 'stellantis::charge_debounce::';   // + eqId (cache) : dernière commande de charge de CE véhicule
+
+  /**
+   * Démarre (immediate) ou arrête (delayed) la charge de CE véhicule via une commande MQTT. Action
+   * DÉLIBÉRÉE (bouton). Anti-boucle per-véhicule court (pas de cooldown long : un vrai toggle start→stop
+   * doit passer) ; le garde-fou anti-ban est le quota GLOBAL compte dans publishRemoteCommand().
+   * ⚠️ « Arrêter » (delayed) rafraîchit d'abord l'état RÉEL du véhicule (l'heure de charge différée peut
+   * avoir changé depuis l'app mobile) pour ne PAS reprogrammer la charge différée en envoyant une valeur
+   * périmée. L'ack asynchrone (topic to/cid) programmera un refresh REST au prochain cron.
+   * @throws stellantisException 'rate_limited' (debounce/quota), 'otp_required' (OTP non activé), sinon api_error
+   */
+  public function chargeControl(bool $_demarrer): void {
+    // 0) Garde métier : commande non pertinente sur un véhicule non rechargeable (les commandes ne sont
+    //    créées que pour Electric/Hybrid, mais on revérifie côté serveur — une cmd peut subsister après une
+    //    requalification de motorisation, ou être appelée par scénario). Aucun appel réseau vers le véhicule.
+    $motorisation = trim((string) $this->getConfiguration('energy', ''));
+    if ($motorisation != 'Electric' && $motorisation != 'Hybrid') {
+      throw new stellantisException(__('Commande de charge indisponible : véhicule non rechargeable', __FILE__), 0, 'not_configured');
+    }
+    // 1) Anti-boucle per-véhicule : refus net si une commande de charge est trop récente sur CE véhicule.
+    $cleDebounce = self::CHARGE_DEBOUNCE_KEY . $this->getId();
+    $dernier = (int) cache::byKey($cleDebounce)->getValue(0);
+    if ($dernier > 0) {
+      $reste = self::CHARGE_DEBOUNCE - (time() - $dernier);
+      if ($reste > 0) {
+        throw new stellantisException(sprintf(__('Commande de charge déjà envoyée à l\'instant ; patientez %d s', __FILE__), $reste), 429, 'rate_limited');
+      }
+    }
+    // 2) Pré-requis OTP : sans remote token, pas de canal MQTT. Alerte cohérente avec les autres call sites.
+    if (!stellantisApi::hasRemoteToken()) {
+      self::alerterOtpRequired();
+      throw new stellantisException(__('Pilotage à distance non activé : activez l\'OTP dans la configuration du plugin', __FILE__), 0, 'otp_required');
+    }
+    // 3) Pose le debounce AVANT tout appel réseau (GET /status de pré-arrêt + publish MQTT) : borne les
+    //    tentatives répétées quel qu'en soit le résultat. Sans ça, un charge_stop rejoué en échec (démon
+    //    down, quota MQTT…) enchaînerait des GET /status non bornées → risque de 429/ban compte (anti-ban).
+    cache::set($cleDebounce, time(), self::CHARGE_DEBOUNCE);
+    // 4) « Arrêter » (delayed) : rafraîchir l'état RÉEL avant de publier, dans tous les cas — l'heure de
+    //    charge différée peut avoir été modifiée depuis l'app mobile ; on ne se fie jamais au seul cache.
+    //    Best-effort : un échec (429/auth/hors-ligne) ne bloque pas le stop (repli cache/0:0 dans heureChargeDifferee).
+    if (!$_demarrer) {
+      try {
+        $this->refreshTelemetry();
+      } catch (\Throwable $e) {
+        log::add('stellantis', 'warning', 'Charge : rafraîchissement pré-arrêt en erreur pour l\'équipement #' . $this->getId() . ' (' . $e->getMessage() . ') — poursuite avec la dernière heure connue');
+      }
+    }
+    // 5) Heure de charge différée : pour « démarrer » (immediate) l'heure est ignorée par le véhicule → 0:0
+    //    direct (ni refresh ni lecture) ; pour « arrêter » (delayed), valeur fraîche préservant la programmation.
+    list($heure, $minute) = $_demarrer ? array(0, 0) : $this->heureChargeDifferee();
+    $type = $_demarrer ? self::CHARGE_TYPE_IMMEDIATE : self::CHARGE_TYPE_DELAYED;
+    // 6) Publication (gère quota global compte + CID + démon + alignement token). Retourne le correlation_id.
+    $correlationId = $this->publishRemoteCommand(self::CHARGE_SERVICE, array(
+      'program' => array('hour' => $heure, 'minute' => $minute),
+      'type' => $type,
+    ));
+    // 7) Mapping ack→véhicule (refresh d'état au prochain cron). Le debounce a déjà été posé en 3).
+    cache::set(self::CMD_CORR_KEY . $correlationId, $this->getId(), self::CMD_CORR_TTL);
+    log::add('stellantis', 'info', 'Charge ' . ($_demarrer ? 'démarrée' : 'arrêtée') . ' (demande) pour l\'équipement #' . $this->getId());
+  }
+
+  /**
+   * Heure de charge différée [heure, minute] de CE véhicule d'après le dernier /status (cache alimenté par
+   * refreshTelemetry). Sert à préserver la programmation lors d'un « Arrêter la charge » (delayed). Cache
+   * vide → repli [0,0] avec warning (effet de bord potentiel : reprogrammation à minuit — mais donnée
+   * fraîche via le refresh-avant-stop de chargeControl() ⇒ en pratique rien à écraser).
+   */
+  public function heureChargeDifferee(): array {
+    $brut = trim((string) cache::byKey(self::CHARGE_NEXT_TIME_KEY . $this->getId())->getValue(''));
+    if ($brut == '') {
+      log::add('stellantis', 'warning', 'Charge : heure de charge différée inconnue pour l\'équipement #' . $this->getId() . ' — repli à 00:00');
+      return array(0, 0);
+    }
+    return self::parseHeureIso($brut);
+  }
+
+  /**
+   * Parse une heure de charge différée en [heure, minute], TOLÉRANT aux deux formats attestés du champ
+   * next_delayed_time selon la version d'API/véhicule : durée ISO8601 « PTxxHxxMxxS » (miroir de parse_hour
+   * du code de référence) OU timestamp RFC3339 « ...THH:MM... » (déclaré par le modèle swagger). Aucun
+   * match → [0,0]. Clamp défensif (heure 0..23, minute 0..59).
+   */
+  public static function parseHeureIso(string $_iso): array {
+    $iso = trim($_iso);
+    $heure = 0;
+    $minute = 0;
+    if (preg_match('/^PT(?:(\d+)H)?(?:(\d+)M)?/', $iso, $m)) {
+      $heure = isset($m[1]) ? (int) $m[1] : 0;
+      $minute = isset($m[2]) ? (int) $m[2] : 0;
+    } elseif (preg_match('/T(\d{2}):(\d{2})/', $iso, $m)) {
+      // RFC3339 : on extrait HH:MM tel quel (best-effort, comme le code de référence qui ne convertit pas
+      // le fuseau) — sans impact pour immediate ; pour delayed c'est la préservation au mieux.
+      $heure = (int) $m[1];
+      $minute = (int) $m[2];
+    }
+    return array(max(0, min(23, $heure)), max(0, min(59, $minute)));
+  }
+
+  // Extrait l'heure de charge différée brute (charging.next_delayed_time) de l'énergie électrique du
+  // /status, ou '' si absente. SEUL endroit avec ce chemin de champ (data-model), hors parseStatus (pur).
+  private static function extraireHeureChargeDifferee(array $_status): string {
+    foreach (self::energiesDepuisStatus($_status) as $energie) {
+      if (!is_array($energie) || !isset($energie['type']) || strtolower((string) $energie['type']) != 'electric') {
+        continue;
+      }
+      if (isset($energie['charging']['next_delayed_time']) && is_scalar($energie['charging']['next_delayed_time'])) {
+        return (string) $energie['charging']['next_delayed_time'];
+      }
+    }
+    return '';
+  }
+
   /**
    * Hook cron Jeedom (chaque minute) : rafraîchit la télémétrie des véhicules dus. On utilise cron()
    * (pas cron5) car isDue() teste une correspondance EXACTE à la minute ; sous cron5 (multiples de 5),
@@ -1824,16 +1971,17 @@ class stellantis extends eqLogic {
       return;
     }
     foreach ($vehicules as $eqLogic) {
-      // UC13 : un wakeup a été acquitté depuis la dernière passe (flag posé par programmerRefreshApresAck)
-      // → remontée d'état FORCÉE (hors cadence autorefresh), avec les garde-fous 429 de refreshTelemetry().
-      // Consommé une seule fois. Le backoff rate-limit ci-dessus a déjà court-circuité la passe si besoin.
-      $clePending = self::WAKEUP_PENDING_KEY . $eqLogic->getId();
+      // UC13/UC14 : une commande MQTT (wakeup, charge…) a été acquittée depuis la dernière passe (flag posé
+      // par programmerRefreshApresAck) → remontée d'état FORCÉE (hors cadence autorefresh), avec les
+      // garde-fous 429 de refreshTelemetry(). Consommé une seule fois. Le backoff rate-limit ci-dessus a
+      // déjà court-circuité la passe si besoin.
+      $clePending = self::CMD_PENDING_KEY . $eqLogic->getId();
       if (cache::byKey($clePending)->getValue('') != '') {
         cache::delete($clePending);
         try {
           $eqLogic->refreshTelemetry();
         } catch (\Throwable $e) {
-          log::add('stellantis', 'warning', 'Cron : rafraîchissement post-wakeup en erreur pour l\'équipement #' . $eqLogic->getId() . ' : ' . $e->getMessage());
+          log::add('stellantis', 'warning', 'Cron : rafraîchissement post-commande en erreur pour l\'équipement #' . $eqLogic->getId() . ' : ' . $e->getMessage());
         }
         continue;
       }
@@ -2000,6 +2148,14 @@ class stellantisCmd extends cmd {
       case 'wakeup':
         // UC13 : force une remontée d'état fraîche via MQTT (garde-fous cooldown/quota dans wakeup()).
         $eqLogic->wakeup();
+        break;
+      case 'charge_start':
+        // UC14 : démarre la charge (immediate). Garde-fous debounce/quota + pré-requis OTP dans chargeControl().
+        $eqLogic->chargeControl(true);
+        break;
+      case 'charge_stop':
+        // UC14 : arrête la charge (delayed). Rafraîchit d'abord l'état réel pour ne pas reprogrammer la charge différée.
+        $eqLogic->chargeControl(false);
         break;
       default:
         log::add('stellantis', 'warning', 'Commande action inconnue : ' . $this->getLogicalId());

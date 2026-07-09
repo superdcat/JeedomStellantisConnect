@@ -146,8 +146,12 @@
         "Trop de réveils récents sur le compte ; patientez %d s (protection anti-ban)": "Too many recent wake-ups on the account; wait %d s (anti-ban protection)",
         "Pilotage à distance non activé : activez l'OTP dans la configuration du plugin": "Remote control not activated: activate OTP in the plugin configuration",
         "Identifiant client (CID) inconnu : refaites l'activation OTP": "Customer ID (CID) unknown: redo the OTP activation",
-        "Démon MQTT non démarré : impossible d'envoyer la commande de réveil": "MQTT daemon not started: unable to send the wake-up command",
-        "Envoi de la commande au démon MQTT échoué (démon indisponible ?)": "Failed to send the command to the MQTT daemon (daemon unavailable?)"
+        "Démon MQTT non démarré : impossible d'envoyer la commande": "MQTT daemon not started: unable to send the command",
+        "Envoi de la commande au démon MQTT échoué (démon indisponible ?)": "Failed to send the command to the MQTT daemon (daemon unavailable?)",
+        "Démarrer la charge": "Start charging",
+        "Arrêter la charge": "Stop charging",
+        "Commande de charge déjà envoyée à l'instant ; patientez %d s": "Charge command already sent just now; wait %d s",
+        "Commande de charge indisponible : véhicule non rechargeable": "Charge command unavailable: non-rechargeable vehicle"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Unauthorized access",

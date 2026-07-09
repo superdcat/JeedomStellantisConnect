@@ -11,7 +11,10 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-09 (UC13 : `stellantis-api-architecture.md` §1.3 — enveloppe MQTTRequest
+> **Dernière synchro** : 2026-07-09 (UC14 : `stellantis-data-model.md` — `next_delayed_time` **format
+> ambigu** RFC3339 vs durée `PT..` confirmé contre `psa_car_controller` ; commande de charge MQTT service
+> `/VehCharge`, payload `{"program":{hour,minute},"type":"immediate"|"delayed"}`, seul `type` opérant pour
+> start/stop). Précédemment 2026-07-09 (UC13 : `stellantis-api-architecture.md` §1.3 — enveloppe MQTTRequest
 > réelle du message publié `{access_token,customer_id,correlation_id,req_date,vin,req_parameters}`, service
 > wakeup `/VehCharge/state`, formats de date PSA ; point unique de publication PHP `buildMqttRequest`/
 > `publishRemoteCommand`). Précédemment 2026-07-09 (UC12 : corrections de contrat dans

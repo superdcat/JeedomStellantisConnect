@@ -58,10 +58,21 @@ Biologic}` — `energy` absent sur Electric).
 | `energy[0].charging.charging_mode` | mode | `No`/`Slow`/`Quick` | `charging_mode` | — |
 | `energy[0].charging.charging_rate` | vitesse | int km/h (0-500) | `charging_rate` | — |
 | `energy[0].charging.remaining_time` | temps restant | ISO 8601 `PT1H30M` | `charging_remaining` | — |
-| `energy[0].charging.next_delayed_time` | charge différée programmée | RFC3339 | `charge_next_time` | — |
+| `energy[0].charging.next_delayed_time` | charge différée programmée | RFC3339 **ou** durée `PT..H..M..S` ⚠️ | `charge_next_time` | — |
 | `energy[0].battery.capacity` | capacité nominale | float Wh | `battery_capacity` | — |
 | `energy[0].battery.health.capacity` / `.resistance` | **SOH** (santé) | float % | `battery_soh` | — |
 | `energies[0].extension.electric.battery.load.capacity` / `.residual` | capacité / énergie restante (v4.15+) | int Wh | `battery_residual` | — |
+
+> ⚠️ **`next_delayed_time` — format ambigu (vérifié UC14, 2026-07-09)** : le modèle swagger de
+> `psa_car_controller` (`connected_car_api/models/energy_charging.py`) le **déclare RFC3339**, mais son
+> propre `common/utils.parse_hour` fait `s[2:]` (strip `PT`) → attend une **durée ISO8601 `PTxxHxxMxxS`**.
+> Sur un véhicule renvoyant du RFC3339, `parse_hour` **échoue et renvoie `None`** (try/except), et
+> `RemoteClient.charge_now` publie alors `{"program":{"hour":null,"minute":null},"type":…}` — **et la
+> commande de charge fonctionne quand même** : dans le payload MQTT `/VehCharge`, seul `type`
+> (`immediate`/`delayed`) est opérant ; `program` n'est pas strictement requis pour un simple start/stop
+> (il ne l'est que pour **reprogrammer** l'heure → UC22). Le plugin (UC14) parse donc les **deux** formats
+> (`stellantis::parseHeureIso`) et ne s'appuie sur l'heure que pour *préserver* la programmation lors d'un
+> « arrêter » (delayed). Détail : `.memory/specs/post-mvp/10-commandes-distance/14-tech.md`.
 
 > ⚠️ **SOH (`battery.health.*`) n'est renseigné QUE pendant/juste après une charge** (null sinon) →
 > le mettre en cache avec horodatage (cf. UC21/24). Exemple réel e-C4 : `extension.electric.battery.load`

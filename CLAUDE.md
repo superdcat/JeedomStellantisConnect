@@ -70,8 +70,20 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > wakeup au cron. MAJ des infos après l'ack : `handleDaemonMessage` (cas `message`) pose un flag
 > `wakeup_pending` (corrélation via `correlation_id`, jamais d'appel REST dans le callback) consommé au
 > **prochain `cron()`** (refresh forcé, garde-fous 429 réutilisés). `sendToDaemon()` renvoie désormais un
-> bool (échec d'envoi → `stellantisException` transport, pas de cooldown fantôme). Suite = post-MVP
-> (commandes métier UC14-17, retour d'état UC18, énergie/charge, localisation, entretien…). Cette note est
+> bool (échec d'envoi → `stellantisException` transport, pas de cooldown fantôme). **Post-MVP : UC14** —
+> **commande de charge (démarrer / arrêter)** : commandes action `charge_start`/`charge_stop` créées
+> **uniquement sur véhicule rechargeable** (`Electric`/`Hybrid`, via `createCommands`), `execute()` →
+> `stellantis->chargeControl(bool)`. Publiées via `publishRemoteCommand()` sur le service `/VehCharge`
+> (payload `{"program":{"hour","minute"},"type":"immediate"|"delayed"}` ; start=`immediate`,
+> stop=`delayed`) — contrat `RemoteClient.charge_now` de `psa_car_controller`. ⚠️ « Arrêter » (delayed)
+> **rafraîchit d'abord le `/status` REST** (best-effort) pour ne pas reprogrammer la charge différée avec
+> une heure périmée (`next_delayed_time` peut avoir changé depuis l'app mobile ; **format ambigu RFC3339 /
+> durée `PT..`** → `parseHeureIso` tolérant ; cf. `stellantis-data-model.md`). Garde-fous : garde
+> motorisation serveur + **debounce per-véhicule court (10 s) posé AVANT tout appel réseau** (borne les
+> tentatives en échec, anti-ban) + quota global compte réutilisé de `publishRemoteCommand`. Le **pipeline
+> d'ack UC13 est généralisé** (constantes renommées `WAKEUP_CORR/PENDING_KEY` → `CMD_CORR/PENDING_KEY`
+> + `CMD_CORR_TTL` ; refresh d'état au prochain `cron()` après l'ack). Suite = post-MVP (préconditionnement
+> UC15, verrouillage UC16, klaxon/feux UC17, retour d'état UC18, localisation, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
 
@@ -97,8 +109,9 @@ Disposition Jeedom fixe (type MVC). Pièces principales, toutes nommées d'aprè
     de la télémétrie (cadence par défaut 5 min + `autorefresh` par véhicule) ; `$_encryptConfigKey` chiffre les champs sensibles.
   - `stellantisCmd extends cmd` — commande (info ou action). `execute($_options)` aiguille les actions
     (`switch` sur `logicalId`) vers la méthode métier du véhicule, en passant par le démon MQTT. **Wakeup
-    implémenté (UC13)** → `stellantis->wakeup()` ; charge/préconditionnement/verrouillage… = post-MVP
-    (UC14-17). Publication MQTT centralisée par `stellantis::publishRemoteCommand()`/`buildMqttRequest()`.
+    (UC13)** → `stellantis->wakeup()` et **charge start/stop (UC14)** → `stellantis->chargeControl(bool)`
+    implémentés ; préconditionnement/verrouillage/klaxon-feux… = post-MVP (UC15-17). Publication MQTT
+    centralisée par `stellantis::publishRemoteCommand()`/`buildMqttRequest()`.
 - **Client API `stellantisApi`** (définie dans `core/class/stellantis.class.php`, cf. `MVP/02`,`03`) —
   **brique unique** par laquelle passent **tous** les appels HTTP REST : OAuth2 PKCE (URL d'autorisation,
   échange du `code`, refresh), enveloppe Bearer + header `x-introspect-realm`, base
