@@ -62,6 +62,20 @@ try {
         ajax::success(__('Authentification réussie : le plugin est connecté à votre compte', __FILE__));
     }
 
+    // UC12 — Activation OTP (pilotage à distance). Structures uniformes {ok, message} (erreurs mappées
+    // en interne, comme testConnection/syncVehicles). Admin-only via le garde global ci-dessus.
+    if (init('action') == 'requestOtpSms') {
+        ajax::success(stellantis::requestOtpSms());
+    }
+
+    if (init('action') == 'activateOtp') {
+        ajax::success(stellantis::activateOtp((string) init('sms'), (string) init('pin')));
+    }
+
+    if (init('action') == 'renewRemoteToken') {
+        ajax::success(stellantis::renewRemoteToken());
+    }
+
     // syncVehicles répond en structure uniforme {ok, created, updated, disabled, reactivables, message}
     // (mappe stellantisException en interne, comme testConnection)
     if (init('action') == 'sync') {

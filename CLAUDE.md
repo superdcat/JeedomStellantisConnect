@@ -21,14 +21,14 @@ verrouillage, klaxon, feux).
     **polling** dans le cron Jeedom (l'API n'a **pas de push** accessible). C'est l'essentiel de la valeur.
   - **Commandes à distance = post-MVP, via démon Python MQTT** (`resources/demond`, `paho-mqtt`) : le
     canal MQTT persistant + OTP justifie un démon (contrairement à une API purement REST). Le **socle
-    démon est en place depuis UC11** (`resources/demond` réactivé, `hasOwnDeamon:true`) ; les commandes
-    métier et l'OTP suivent (UC12-18).
+    démon est en place depuis UC11** (`resources/demond` réactivé, `hasOwnDeamon:true`) et l'**OTP/remote
+    token est fait (UC12)** ; les commandes métier suivent (UC13-18).
 
 Un plugin Jeedom **n'est pas autonome** : il s'installe sous `<jeedom>/plugins/stellantis/`, et tout le
 PHP dépend du core Jeedom, atteint via `require_once __DIR__ . '/../../../../core/php/core.inc.php';`.
 Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 
-> **État d'avancement (2026-07-08)** : l'id a été renommé `template` → `stellantis` (classes
+> **État d'avancement (2026-07-09)** : l'id a été renommé `template` → `stellantis` (classes
 > `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP lecture seule COMPLET** : UC01 à
 > UC10 sont implémentées (configuration du plugin, client HTTP REST, authentification OAuth2 PKCE/token,
 > test de connexion, découverte des véhicules, création/synchronisation des équipements, commandes info
@@ -45,11 +45,22 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > (`hasOwnDeamon:true`, `hasDependency:true`, `paho-mqtt==1.6.1`) : transport MQTT générique
 > (`resources/demond/demond.py`), pont PHP↔démon (`stellantis::sendToDaemon()`, hooks
 > `deamon_info/start/stop`), callback démon→Jeedom (`core/php/jeeStellantis.php` +
-> `stellantis::handleDaemonMessage()`), propagation du token OAuth2 au démon (`syncDaemonToken()`).
+> `stellantis::handleDaemonMessage()`), propagation du token au démon (`syncDaemonToken()`).
 > **Post-MVP : UC83** — icône du plugin (`plugin_info/stellantis_icon.png`, PNG 309×348 « véhicule
 > connecté » générique remplaçant le placeholder du template ; script de génération Pillow versionné
-> dans la spec technique). Suite = post-MVP (OTP/remote token UC12, commandes métier UC13-17, retour
-> d'état UC18, énergie/charge, localisation, entretien…). Cette note est
+> dans la spec technique). **Post-MVP : UC12** — activation OTP & **remote token** (mot de passe MQTT,
+> distinct du token OAuth2 REST) : REST `applications/cvs/v4/mobile/{smsCode,token}` via `stellantisApi`
+> (`requestSmsOtp`/`requestRemoteToken`/`refreshRemoteToken`/`getRemoteToken`, cache chiffré séparé),
+> crypto OTP (device inWebo contre `otp.mpsa.com`, RSA/AES/SHA256) **vendorisée** de `psa_car_controller`
+> (GPL-3) dans `resources/otp_vendor/`, pilotée par le **helper one-shot `resources/otp_helper.py`**
+> (protocole stdin↔stdout JSON, jamais argv) via `stellantis::runOtpHelper()` (`proc_open`) ;
+> orchestration `stellantis::requestOtpSms/activateOtp/renewRemoteToken` + UI 2 étapes (SMS puis
+> code+PIN) sur la page de config ; garde-fous des quotas durs (6 codes/24 h en cache, 20 SMS/compte à
+> vie en config) sans retry, alerte `otp_required` throttlée (page Santé + `message::add`) ;
+> résolution best-effort du `customer_id` (CID) via `GET /user`. **UC12 a basculé le mot de passe MQTT
+> du démon** vers le remote token (le socle UC11 poussait à tort l'access_token OAuth2 — corrigé dans
+> `pushDaemonConnect/syncDaemonToken/handleDaemonMessage`). Suite = post-MVP (commandes métier UC13-17,
+> retour d'état UC18, énergie/charge, localisation, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
 
@@ -119,18 +130,24 @@ Configuration & secrets :
   realm `clientsB2C…`), `client_id`, `client_secret` (extraits de l'APK — manuellement via un outil
   externe, ou automatiquement via **UC61** `Extraire automatiquement`), `redirect_uri`, `apk_url`
   (optionnel : override de l'URL de l'APK pour UC61), `broker_host`/`socketport` (optionnels : démon MQTT
-  UC11 ; défauts `mwa.mpsa.com`/`55009`), `customer_id` (CID MQTT, alimenté en UC12). `client_secret`
-  **chiffré**, jamais loggué.
+  UC11 ; défauts `mwa.mpsa.com`/`55009`), `customer_id` (CID MQTT, résolu auto en UC12 via `GET /user`,
+  repli saisie manuelle). **UC12 (OTP)** ajoute : `otp_device` (device OTP provisionné, **chiffré
+  `utils::encrypt`**, en config pour survivre à `cache::flush`), `otp_sms_count` (compteur d'activations
+  SMS **à vie** 0..20, jamais remis à 0 auto), `otp_sms_pending` (flag « SMS envoyé, activation en
+  attente »). `client_secret` **chiffré**, jamais loggué.
 - **Par véhicule** (`configuration` de l'eqLogic) : `id` API, `vin`, `brand`, motorisation, capacités.
-- **Tokens** OAuth2 (access/refresh) + (post-MVP) remote token OTP : en cache **chiffré** (classe `cache`).
-  ⚠️ `access_token` à durée courte (~15 min) → refresh proactif/réactif.
+- **Tokens** OAuth2 (access/refresh) + **remote token OTP** (UC12, clé cache `stellantis::remote_token`,
+  **distinct** du token OAuth2 — c'est le mot de passe MQTT, TTL ~890 s) : en cache **chiffré** (classe
+  `cache`). ⚠️ `access_token` OAuth2 à durée courte (~15 min) → refresh proactif/réactif.
 
 Support :
 - **`plugin_info/info.json`** — manifeste (id, version, `require`, OS, `category`, dépendances, langues, compat).
 - **`plugin_info/install.php`** — `stellantis_install/update/remove()` ; `pre_install.php` → `stellantis_pre_update()`.
 - **`plugin_info/packages.json`** — dépendances (uniquement `pip3`). **Post-MVP commandes** : `pip3`
   `paho-mqtt` **épinglé en 1.6.1** (dernière 1.x ; la 2.0 casse le client MQTT de référence ; Debian 12 →
-  virtualenv / `--break-system-packages`) + `requests`. ⚠️⚠️ **La version se met dans la VALEUR, pas dans
+  virtualenv / `--break-system-packages`) + `requests` (épinglé) + **`pycryptodomex`** (épinglé ; importé
+  `Cryptodome` par le module OTP vendorisé `resources/otp_vendor`, UC12 — RSA-OAEP/AES/SHA256).
+  ⚠️⚠️ **La version se met dans la VALEUR, pas dans
   la clé** : `"paho-mqtt": {"version": "1.6.1"}`, **jamais** `"paho-mqtt==1.6.1": {}`. Le core compare la
   **clé** (nom seul) à `pip list` (clé = nom nu, ex. `paho-mqtt`) via
   `isset($installPackage[strtolower($clé)])` (`system::checkAndInstall`). Une clé contenant `==x.y.z` ne

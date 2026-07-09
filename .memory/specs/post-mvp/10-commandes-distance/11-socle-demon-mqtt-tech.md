@@ -10,8 +10,13 @@
   `mwa.mpsa.com` « aussi cité (dépannage) ». Le code de référence actuel utilise `mwa.mpsa.com` → **on
   prend `mwa.mpsa.com` en défaut** (contrat réel), **host configurable** (`broker_host`) pour retomber
   sur la forme par marque si besoin. (La spec fonctionnelle est annotée de cet écart, 2026-07-08.)
-- **Auth MQTT** : `username_pw_set("IMA_OAUTH_ACCESS_TOKEN", <access_token OAuth2>)` — le token OAuth2
-  déjà géré au MVP, **pas** le remote token OTP (UC12).
+- **Auth MQTT** : `username_pw_set("IMA_OAUTH_ACCESS_TOKEN", <token>)`.
+  > ⚠️ **Corrigé en UC12 (2026-07-09)** : le socle UC11 poussait ici l'**access_token OAuth2 REST**, mais
+  > le code de référence (`RemoteClient.username_pw_set`) utilise en réalité le **remote token OTP**
+  > (couche 2, obtenu via `applications/cvs/v4/mobile/token`). UC12 a donc **basculé** le mot de passe MQTT
+  > sur le remote token (`stellantis::pushDaemonConnect/syncDaemonToken/handleDaemonMessage` →
+  > `stellantisApi::getRemoteToken()`). Sans activation OTP → pas de connexion MQTT. Ne pas repartir du
+  > postulat « OAuth2 = mot de passe MQTT » en UC13. Cf. `12-tech.md` et `[[stellantis-api-architecture]]` §1.3.
 - **Topics** : subscribe `psa/RemoteServices/to/cid/{CID}/#` **ET** `psa/RemoteServices/events/MPHRTServices/` ;
   publish `psa/RemoteServices/from/cid/{CID}/{Service}/state`.
 - **CID** (`AP-ACNT…` PSA / `OV-ACNT…` Opel-Vauxhall) : source API **non figée** (`get_mqtt_customer_id()`

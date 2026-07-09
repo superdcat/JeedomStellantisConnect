@@ -26,6 +26,8 @@ if (!isConnect('admin')) {
 // stellantis:: appelé en premier → charge stellantis.class.php avant tout stellantisApi:: (autoload)
 $stellantisConfigure = stellantis::isConfigured();
 $infoToken = $stellantisConfigure ? stellantisApi::getTokenInfo() : array('authenticated' => false, 'expiresIn' => null);
+$otpState = $stellantisConfigure ? stellantis::otpState() : 'inactive';
+$otpSmsCount = stellantis::otpSmsCount();
 ?>
 <form class="form-horizontal">
   <fieldset>
@@ -148,6 +150,63 @@ $infoToken = $stellantisConfigure ? stellantisApi::getTokenInfo() : array('authe
       </div>
     </div>
   </fieldset>
+  <fieldset>
+    <legend><i class="fas fa-satellite-dish"></i> {{Pilotage à distance (activation OTP)}}</legend>
+    <div class="alert alert-warning">{{Le pilotage à distance (réveil, charge, verrouillage…) nécessite une activation unique par SMS + le code PIN de votre application mobile. Attention : les quotas sont stricts et définitifs côté Stellantis (6 codes par 24 h, 20 activations SMS par compte à vie). N'activez que lorsque vous êtes prêt.}}</div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{État du pilotage à distance}}</label>
+      <div class="col-md-6">
+        <?php if ($otpState == 'active') { ?>
+        <span class="label label-success">{{Activé}}</span>
+        <?php } elseif ($otpState == 'expired') { ?>
+        <span class="label label-warning">{{Expiré — renouvellement nécessaire}}</span>
+        <?php } elseif ($otpState == 'pending') { ?>
+        <span class="label label-info">{{SMS envoyé — en attente d'activation}}</span>
+        <?php } else { ?>
+        <span class="label label-default">{{Non activé}}</span>
+        <?php } ?>
+        <div class="help-block"><?php echo sprintf(__('Activations SMS utilisées : %1$s / %2$s', __FILE__), $otpSmsCount, stellantis::OTP_SMS_MAX); ?></div>
+      </div>
+    </div>
+    <?php if ($otpState == 'expired') { ?>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{Renouveler sans SMS}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{Réutilise l'appareil OTP déjà enregistré pour obtenir un nouveau jeton distant, sans consommer d'activation SMS. À privilégier tant que possible.}}"></i></sup>
+      </label>
+      <div class="col-md-6">
+        <a class="btn btn-default" id="stellantis_btRenewRemote"><i class="fas fa-sync"></i> {{Renouveler le jeton distant}}</a>
+        <div class="help-block">{{Sans nouveau SMS. Si le renouvellement échoue, refaites l'activation complète ci-dessous.}}</div>
+      </div>
+    </div>
+    <?php } ?>
+    <?php if ($otpState == 'active') { ?>
+    <div class="alert alert-info">{{Le pilotage à distance est déjà activé. Une nouvelle activation par SMS n'est nécessaire qu'après expiration (utilisez alors « Renouveler ») : elle consommerait une activation du quota définitif (20 par compte).}}</div>
+    <?php } ?>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{1. Recevoir le SMS}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{Déclenche l'envoi d'un SMS contenant un code au numéro de téléphone associé à votre compte de marque.}}"></i></sup>
+      </label>
+      <div class="col-md-6">
+        <a class="btn btn-default" id="stellantis_btOtpSms"><i class="fas fa-sms"></i> {{Envoyer le SMS d'activation}}</a>
+        <div class="help-block">{{Connectez d'abord le compte (ci-dessus). Un SMS sera envoyé au numéro associé à votre compte.}}</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{2. Code reçu par SMS}}</label>
+      <div class="col-md-4">
+        <input class="form-control" id="stellantis_otpSms" placeholder="{{Code reçu par SMS}}"/>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{3. Code PIN de l'application}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{Le code PIN à 4 chiffres que vous utilisez dans l'application mobile de votre marque.}}"></i></sup>
+      </label>
+      <div class="col-md-4">
+        <input type="password" autocomplete="off" class="form-control" id="stellantis_otpPin" placeholder="{{Code PIN à 4 chiffres}}"/>
+        <a class="btn btn-success" id="stellantis_btOtpActivate" style="margin-top:5px;"><i class="fas fa-check"></i> {{Activer le pilotage à distance}}</a>
+      </div>
+    </div>
+  </fieldset>
 </form>
 <script>
   $('body').off('click', '#stellantis_btExtraireApk').on('click', '#stellantis_btExtraireApk', function () {
@@ -231,6 +290,83 @@ $infoToken = $stellantisConfigure ? stellantisApi::getTokenInfo() : array('authe
         }
         $('#stellantis_codeAuth').val('');
         $('#div_alert').showAlert({ message: data.result, level: 'success' });
+      }
+    });
+  });
+  // UC12 — Envoi du SMS d'activation OTP (confirmation : le SMS consomme un quota définitif du compte).
+  $('body').off('click', '#stellantis_btOtpSms').on('click', '#stellantis_btOtpSms', function () {
+    bootbox.confirm(
+      "{{Un SMS d'activation va être envoyé au numéro de votre compte. Ce quota est limité (20 par compte à vie) et définitif côté Stellantis. Continuer ?}}",
+      function (resultat) {
+        if (!resultat) {
+          return;
+        }
+        $.ajax({
+          type: 'POST',
+          url: 'plugins/stellantis/core/ajax/stellantis.ajax.php',
+          data: { action: 'requestOtpSms' },
+          dataType: 'json',
+          error: function (request, status, error) {
+            handleAjaxError(request, status, error);
+          },
+          success: function (data) {
+            if (data.state != 'ok') {
+              $('#div_alert').showAlert({ message: data.result, level: 'danger' });
+              return;
+            }
+            $('#div_alert').showAlert({ message: data.result.message, level: data.result.ok ? 'success' : 'danger' });
+          }
+        });
+      }
+    );
+  });
+  // UC12 — Activation (code SMS + code PIN).
+  $('body').off('click', '#stellantis_btOtpActivate').on('click', '#stellantis_btOtpActivate', function () {
+    var sms = $('#stellantis_otpSms').val().trim();
+    var pin = $('#stellantis_otpPin').val().trim();
+    if (sms == '' || pin == '') {
+      $('#div_alert').showAlert({ message: "{{Renseignez le code reçu par SMS et le code PIN de votre application mobile}}", level: 'warning' });
+      return;
+    }
+    $('#div_alert').showAlert({ message: "{{Activation en cours, veuillez patienter…}}", level: 'info' });
+    $.ajax({
+      type: 'POST',
+      url: 'plugins/stellantis/core/ajax/stellantis.ajax.php',
+      data: { action: 'activateOtp', sms: sms, pin: pin },
+      dataType: 'json',
+      error: function (request, status, error) {
+        handleAjaxError(request, status, error);
+      },
+      success: function (data) {
+        if (data.state != 'ok') {
+          $('#div_alert').showAlert({ message: data.result, level: 'danger' });
+          return;
+        }
+        if (data.result.ok) {
+          $('#stellantis_otpSms').val('');
+          $('#stellantis_otpPin').val('');
+        }
+        $('#div_alert').showAlert({ message: data.result.message, level: data.result.ok ? 'success' : 'danger' });
+      }
+    });
+  });
+  // UC12 — Renouvellement sans SMS (réutilise l'appareil OTP enregistré).
+  $('body').off('click', '#stellantis_btRenewRemote').on('click', '#stellantis_btRenewRemote', function () {
+    $('#div_alert').showAlert({ message: "{{Renouvellement en cours, veuillez patienter…}}", level: 'info' });
+    $.ajax({
+      type: 'POST',
+      url: 'plugins/stellantis/core/ajax/stellantis.ajax.php',
+      data: { action: 'renewRemoteToken' },
+      dataType: 'json',
+      error: function (request, status, error) {
+        handleAjaxError(request, status, error);
+      },
+      success: function (data) {
+        if (data.state != 'ok') {
+          $('#div_alert').showAlert({ message: data.result, level: 'danger' });
+          return;
+        }
+        $('#div_alert').showAlert({ message: data.result.message, level: data.result.ok ? 'success' : 'danger' });
       }
     });
   });

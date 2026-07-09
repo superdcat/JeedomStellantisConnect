@@ -39,4 +39,10 @@ function stellantis_remove() {
   } catch (\Throwable $e) {
     log::add('stellantis', 'warning', 'Suppression : arrêt du démon ignoré (' . $e->getMessage() . ')');
   }
+  // UC12 : hygiène — ne pas laisser survivre le remote token / device OTP (équivalents mot de passe).
+  try {
+    stellantis::purgeOtp();
+  } catch (\Throwable $e) {
+    log::add('stellantis', 'warning', 'Suppression : purge OTP ignorée (' . $e->getMessage() . ')');
+  }
 }

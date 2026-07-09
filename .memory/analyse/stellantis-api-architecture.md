@@ -81,10 +81,16 @@ C'est **le** piège conceptuel. Il y a deux systèmes de tokens **indépendants*
 **Couche 2 — Remote token OTP (commandes MQTT, POST-MVP uniquement) :**
 - **Distinct** du token OAuth2. Obtenu par **activation OTP** : SMS + **PIN 4 chiffres de l'app mobile**.
 - Produit `remote_token` + `remote_refresh_token` (stockés à part).
-- Serveur OTP `https://otp.mpsa.com`, codes base36 4 chiffres. **Limite dure : 6 codes / 24 h**
-  (et **20 activations SMS / compte** au total → un compte peut se **bloquer** définitivement).
+- Serveur OTP `https://otp.mpsa.com` (device inWebo, RSA-OAEP/AES/SHA256), codes base36 4 chiffres.
+  **Limite dure : 6 codes / 24 h** (générés côté serveur → chaque `get_otp_code()` est un appel réseau)
+  et **20 activations SMS / compte** au total → un compte peut se **bloquer** définitivement.
 - À l'expiration : « redo otp procedure » (impossible à automatiser → **alerter l'utilisateur**, ne pas
   re-tenter en boucle).
+- **Endpoints confirmés (UC12, 2026-07-09, vs `RemoteClient`/`psa_client`)** : SMS = `POST
+  api.groupe-psa.com/applications/cvs/v4/mobile/smsCode?client_id=…` ; remote token = `POST
+  …/applications/cvs/v4/mobile/token?client_id=…` (grant `password`=code OTP, puis `refresh_token`) — les
+  deux avec Bearer OAuth2 + `x-introspect-realm`. **PAS** `virtualkey/remoteaccess/token`. Réponse
+  `{access_token, refresh_token}`, TTL ~890 s. Crypto OTP vendorisée (`resources/otp_vendor`).
 
 ### 1.2 API REST (lecture) — base `connected_car v4`
 
@@ -112,8 +118,14 @@ C'est **le** piège conceptuel. Il y a deux systèmes de tokens **indépendants*
   `AP-ACNT…` (Peugeot/Citroën/DS) ou `OV-ACNT…` (Opel/Vauxhall).
 - **Codes d'acquittement** (payload `{process_date,vin,correlation_id,process_code,process_message}`) :
   **900** = requête acceptée, **901** = véhicule en veille, **903** = transmise au véhicule.
-- Auth MQTT : `username = "IMA_OAUTH_ACCESS_TOKEN"`, `password = access_token` courant ; le token est
-  **aussi** réinjecté dans le payload. Réponse `return_code='400'` ⇒ token expiré → refresh + re-publish.
+- Auth MQTT : `username = "IMA_OAUTH_ACCESS_TOKEN"`, `password = ` **le REMOTE token OTP** (couche 2),
+  le token étant **aussi** réinjecté dans le payload. Réponse `return_code='400'` ⇒ token expiré →
+  refresh + re-publish.
+  > ⚠️ **Correction 2026-07-09 (UC12, vs `RemoteClient.username_pw_set`)** : le mot de passe MQTT est le
+  > **remote token OTP**, **PAS** l'access_token OAuth2 REST (ce que le socle UC11 poussait à tort). La
+  > bascule a été faite en UC12 : `stellantis::pushDaemonConnect/syncDaemonToken/handleDaemonMessage`
+  > utilisent désormais `stellantisApi::getRemoteToken()`. Sans remote token (OTP non activé) → pas de
+  > connexion MQTT. Cf. `11-socle-demon-mqtt-tech.md` et `12-tech.md`.
 - Modèle **asynchrone** : publish → exécution véhicule → notification `to/cid` (`return_code`). États
   intermédiaires Accepted → Waking-Up → Send → Success/Failure.
 - Payloads (classe `RemoteClient`) : wakeup `{"action":"state"}` ; charge `{"program":{hour,minute},"type":…}` ;

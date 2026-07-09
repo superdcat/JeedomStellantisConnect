@@ -5,7 +5,7 @@
 	"description": {
 		"fr_FR": "Connecte les véhicules Stellantis / Groupe PSA (Peugeot, Citroën, DS, Opel, Vauxhall) à Jeedom : télémétrie (batterie, charge, autonomie, carburant, position, kilométrage, portes) et, à terme, pilotage à distance."
 	},
-	"licence": "AGPL",
+	"licence": "GPL-3.0",
 	"author": "edecastro-mass",
 	"require": "4.2",
 	"os" : {

@@ -116,6 +116,8 @@ class stellantis extends eqLogic {
   public static function preConfig_client_id($_value) {
     if ((string) $_value !== (string) config::byKey('client_id', 'stellantis')) {
       stellantisApi::purgeTokenCache();
+      // UC12 : le device OTP + remote token sont liés au compte/credentials → devenus incohérents.
+      self::purgeOtp();
     }
     return $_value;
   }
@@ -123,6 +125,7 @@ class stellantis extends eqLogic {
   public static function preConfig_brand($_value) {
     if ((string) $_value !== (string) config::byKey('brand', 'stellantis')) {
       stellantisApi::purgeTokenCache();
+      self::purgeOtp();
     }
     return $_value;
   }
@@ -890,6 +893,17 @@ class stellantis extends eqLogic {
       'advice' => ($etat['state'] == 'ok') ? '' : __('Reconnectez-vous depuis la configuration du plugin', __FILE__),
       'state' => ($etat['state'] == 'ok'),
     );
+    // Pilotage à distance (UC12) : état du remote token OTP. « Non activé » n'est PAS une erreur (le
+    // pilotage à distance est optionnel) → state=true dans ce cas ; « expiré » invite à renouveler.
+    $otp = self::otpState();
+    $lignes[] = array(
+      'test' => __('Pilotage à distance (OTP)', __FILE__),
+      'result' => ($otp == 'active')
+        ? __('Activé', __FILE__)
+        : (($otp == 'expired') ? __('Expiré — renouvellement nécessaire', __FILE__) : __('Non activé (optionnel)', __FILE__)),
+      'advice' => ($otp == 'expired') ? __('Renouvelez le jeton distant depuis la configuration du plugin (sans SMS si possible)', __FILE__) : '',
+      'state' => ($otp != 'expired'),
+    );
     foreach (eqLogic::byType('stellantis', true) as $eqLogic) {
       $nom = $eqLogic->getName();
       // Privacy connu du dernier /status (cf. refreshTelemetry) : signalé sans être une erreur dure.
@@ -994,7 +1008,8 @@ class stellantis extends eqLogic {
   /**
    * Contrat core (plugin.class.php) : retourne l'état du démon. Clés : state ('ok'|'nok'), launchable
    * ('ok'|'nok'), launchable_message, log. Le démon n'est lançable que si le plugin est configuré ET
-   * authentifié (sinon le client MQTT n'aurait pas de mot de passe = access_token OAuth2).
+   * authentifié : l'OAuth2 est le pré-requis pour obtenir/rafraîchir le remote token OTP, qui est le
+   * mot de passe MQTT réel (UC12) — sans OAuth2, pas de remote token, donc pas de connexion MQTT.
    */
   public static function deamon_info(): array {
     $return = array('log' => 'stellantis', 'state' => 'nok', 'launchable' => 'ok');
@@ -1075,15 +1090,27 @@ class stellantis extends eqLogic {
   }
 
   /**
-   * Pousse au démon la connexion au broker (avec le token OAuth2 courant comme mot de passe MQTT) puis
-   * l'abonnement aux topics de réponse. Best-effort : toute erreur (token indisponible, socket) est
-   * logguée sans interrompre. Le CID inconnu → pas d'abonnement (le broker reste connecté).
+   * Pousse au démon la connexion au broker (avec le REMOTE token OTP comme mot de passe MQTT — décision
+   * UC12, alignée sur le code de référence RemoteClient ; ce n'est PAS le token OAuth2 REST) puis
+   * l'abonnement aux topics de réponse. Best-effort. Sans remote token (pilotage non activé) → connexion
+   * différée sans erreur. Le CID inconnu → pas d'abonnement (le broker reste connecté).
    */
   private static function pushDaemonConnect(): void {
     try {
-      $token = stellantisApi::getToken();
+      if (!stellantisApi::hasRemoteToken()) {
+        log::add('stellantis', 'info', 'Démon : connexion MQTT différée (pilotage à distance non activé — activation OTP requise)');
+        return;
+      }
+      $token = stellantisApi::getRemoteToken();
+    } catch (stellantisException $e) {
+      if ($e->getApiType() == 'otp_required') {
+        log::add('stellantis', 'info', 'Démon : connexion MQTT différée (activation OTP requise)');
+      } else {
+        log::add('stellantis', 'warning', 'Démon : remote token indisponible pour la connexion MQTT (' . $e->getMessage() . ')');
+      }
+      return;
     } catch (\Throwable $e) {
-      log::add('stellantis', 'warning', 'Démon : token indisponible pour la connexion MQTT (' . $e->getMessage() . ')');
+      log::add('stellantis', 'warning', 'Démon : remote token indisponible pour la connexion MQTT (' . $e->getMessage() . ')');
       return;
     }
     self::sendToDaemon('connect', array(
@@ -1097,30 +1124,50 @@ class stellantis extends eqLogic {
     if (count($topics) > 0) {
       self::sendToDaemon('subscribe', array('topics' => $topics));
     } else {
-      log::add('stellantis', 'info', 'Démon : abonnement différé (customer id inconnu — sera défini en UC12)');
+      log::add('stellantis', 'info', 'Démon : abonnement différé (customer id inconnu)');
+    }
+  }
+
+  // (Re)connecte le démon MQTT avec le remote token courant, uniquement s'il est lancé. Utilisé après
+  // activation/renouvellement OTP pour établir la connexion sans attendre le prochain cron.
+  private static function reconnecterDemonSiLance(): void {
+    if (self::deamon_info()['state'] == 'ok') {
+      self::pushDaemonConnect();
     }
   }
 
   /**
-   * Propage le token OAuth2 courant au démon (nouveau mot de passe MQTT) SEULEMENT s'il a changé depuis
-   * le dernier envoi et si le démon tourne. Best-effort, silencieux si démon arrêté. Appelé par le cron
-   * (refresh proactif) pour éviter que le démon travaille avec un token périmé jusqu'à un rejet 400.
+   * Propage le REMOTE token OTP au démon (mot de passe MQTT) s'il a changé et si le démon tourne. Rafraîchit
+   * proactivement le remote token (TTL court ~890 s) via getRemoteToken(). Appelé par le cron. Sans
+   * activation OTP → ne fait rien (pas d'alerte proactive répétée). En cas d'expiration non
+   * rafraîchissable → alerte otp_required throttlée. Best-effort, jamais bloquant pour le polling REST.
    */
   public static function syncDaemonToken(): void {
     try {
       if (self::deamon_info()['state'] != 'ok') {
         return;
       }
-      $token = stellantisApi::getToken();
-      if ((string) cache::byKey(self::DAEMON_TOKEN_MARKER)->getValue('') === self::marqueurToken($token)) {
-        return; // token inchangé depuis le dernier push
+      if (!stellantisApi::hasRemoteToken()) {
+        return; // pilotage non activé (ou déjà purgé après otp_required) : rien à synchroniser
       }
-      self::sendToDaemon('set_token', array('password' => $token));
-      self::memoriserMarqueurToken($token);
-      log::add('stellantis', 'debug', 'Démon : token MQTT mis à jour');
+      $token = stellantisApi::getRemoteToken(); // refresh proactif si proche de l'expiration
+    } catch (stellantisException $e) {
+      if ($e->getApiType() == 'otp_required') {
+        self::alerterOtpRequired();
+      } else {
+        log::add('stellantis', 'debug', 'Démon : synchro remote token ignorée (' . $e->getMessage() . ')');
+      }
+      return;
     } catch (\Throwable $e) {
-      log::add('stellantis', 'debug', 'Démon : synchro token ignorée (' . $e->getMessage() . ')');
+      log::add('stellantis', 'debug', 'Démon : synchro remote token ignorée (' . $e->getMessage() . ')');
+      return;
     }
+    if ((string) cache::byKey(self::DAEMON_TOKEN_MARKER)->getValue('') === self::marqueurToken($token)) {
+      return; // remote token inchangé depuis le dernier push
+    }
+    self::sendToDaemon('set_token', array('password' => $token));
+    self::memoriserMarqueurToken($token);
+    log::add('stellantis', 'debug', 'Démon : remote token MQTT mis à jour');
   }
 
   // Marqueur non réversible (hash court, jamais le token en clair) servant à détecter un changement de
@@ -1170,15 +1217,23 @@ class stellantis extends eqLogic {
     $type = isset($_data['type']) ? (string) $_data['type'] : '';
     switch ($type) {
       case 'token_expired':
-        // Rafraîchissement réactif borné : un seul getToken(true) ; s'il échoue, on n'insiste pas
-        // (pas de boucle refresh→set_token→400→refresh). Le nouveau token est repoussé au démon.
+        // Rejet 400 du broker = REMOTE token expiré. Rafraîchissement réactif borné (refresh_token du
+        // remote token, PAS de régénération OTP silencieuse). Échec non rafraîchissable → alerte
+        // otp_required throttlée (pas de boucle refresh→set_token→400→refresh).
         try {
-          $token = stellantisApi::getToken(true);
+          stellantisApi::refreshRemoteToken();
+          $token = stellantisApi::getRemoteToken();
           self::sendToDaemon('set_token', array('password' => $token));
           self::memoriserMarqueurToken($token);
-          log::add('stellantis', 'info', 'Démon : token rafraîchi après rejet 400 du broker');
+          log::add('stellantis', 'info', 'Démon : remote token rafraîchi après rejet 400 du broker');
+        } catch (stellantisException $e) {
+          if ($e->getApiType() == 'otp_required') {
+            self::alerterOtpRequired();
+          } else {
+            log::add('stellantis', 'warning', 'Démon : échec du rafraîchissement du remote token après 400 (' . $e->getMessage() . ')');
+          }
         } catch (\Throwable $e) {
-          log::add('stellantis', 'warning', 'Démon : échec du rafraîchissement de token après 400 (' . $e->getMessage() . ')');
+          log::add('stellantis', 'warning', 'Démon : échec du rafraîchissement du remote token après 400 (' . $e->getMessage() . ')');
         }
         break;
       case 'connected':
@@ -1196,6 +1251,317 @@ class stellantis extends eqLogic {
         // Type inconnu (futurs UC) : ignoré sans erreur.
         break;
     }
+  }
+
+  /* * ******************* UC12 — Activation OTP & remote token ******************* */
+
+  const OTP_DEVICE_KEY = 'otp_device';           // config (chiffré utils::encrypt) : device OTP provisionné (long-lived, survit à cache::flush)
+  const OTP_SMS_COUNT_KEY = 'otp_sms_count';     // config : compteur d'activations SMS 0..20 À VIE (jamais remis à 0 auto ; survit à cache::flush)
+  const OTP_SMS_MAX = 20;                          // quota dur serveur : 20 activations SMS / compte (blocage définitif au-delà)
+  const OTP_SMS_PENDING_KEY = 'otp_sms_pending'; // config : '1' entre l'envoi du SMS et l'activation réussie
+  const OTP_CODE_QUOTA_KEY = 'stellantis::otp_code_quota'; // cache (fenêtre glissante 24 h)
+  const OTP_CODE_QUOTA_MAX = 6;                    // quota dur serveur : 6 générations de code OTP / 24 h
+  const OTP_CODE_QUOTA_FENETRE = 86400;
+  const OTP_ALERT_KEY = 'stellantis::otp_alert'; // cache : cooldown anti-spam de l'alerte otp_required
+  const OTP_ALERT_COOLDOWN = 86400;
+
+  /**
+   * Déclenche l'envoi du SMS d'activation OTP. Garde le quota « 20 / compte à vie » (config, survit à un
+   * cache::flush) AVANT l'appel : le compteur est incrémenté avant l'envoi car le SMS consomme le quota
+   * serveur même si le process meurt ensuite (conservateur : mieux vaut sur-compter que dépasser 20).
+   * Retour uniforme {ok, message}, jamais de levée.
+   */
+  public static function requestOtpSms(): array {
+    if (!stellantisApi::getTokenInfo()['authenticated']) {
+      return array('ok' => false, 'message' => __('Connectez d\'abord le plugin à votre compte (étapes 1 et 2 ci-dessus) avant d\'activer le pilotage à distance.', __FILE__));
+    }
+    $count = (int) config::byKey(self::OTP_SMS_COUNT_KEY, 'stellantis', 0);
+    if ($count >= self::OTP_SMS_MAX) {
+      return array('ok' => false, 'message' => sprintf(__('Quota d\'activations SMS atteint (%d / compte). Ce quota est définitif côté Stellantis : aucun nouveau SMS ne sera demandé pour éviter de bloquer votre compte.', __FILE__), self::OTP_SMS_MAX));
+    }
+    try {
+      config::save(self::OTP_SMS_COUNT_KEY, (string) ($count + 1), 'stellantis');
+      config::save(self::OTP_SMS_PENDING_KEY, '1', 'stellantis');
+      stellantisApi::requestSmsOtp();
+      return array('ok' => true, 'message' => __('SMS envoyé. Saisissez le code reçu et le code PIN de votre application mobile, puis activez.', __FILE__));
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'warning', 'UC12 : échec de la demande de SMS OTP (' . $e->getMessage() . ')');
+      return array('ok' => false, 'message' => __('Échec de l\'envoi du SMS d\'activation. Vérifiez la connexion du compte et réessayez.', __FILE__));
+    }
+  }
+
+  /**
+   * Réalise l'activation OTP complète : code SMS + code PIN → provisionne le device (helper Python) →
+   * obtient le remote token. Garde le quota de génération de code (6/24 h). Retour uniforme {ok, message}.
+   */
+  public static function activateOtp(string $_sms, string $_pin): array {
+    $sms = trim($_sms);
+    $pin = trim($_pin);
+    if ($sms == '' || $pin == '') {
+      return array('ok' => false, 'message' => __('Renseignez le code reçu par SMS et le code PIN de votre application mobile.', __FILE__));
+    }
+    try {
+      self::consommerQuotaCodeOtp();
+    } catch (stellantisException $e) {
+      return array('ok' => false, 'message' => $e->getMessage());
+    }
+    $res = self::runOtpHelper(array('action' => 'activate', 'sms' => $sms, 'pin' => $pin));
+    if (($res['status'] ?? '') != 'ok' || ($res['device_secret'] ?? '') == '' || ($res['otp_code'] ?? '') == '') {
+      return array('ok' => false, 'message' => self::messageStatutOtp((string) ($res['status'] ?? 'error')));
+    }
+    self::storeOtpDevice((string) $res['device_secret']);
+    try {
+      stellantisApi::requestRemoteToken((string) $res['otp_code']);
+    } catch (\Throwable $e) {
+      // L'appareil OTP est déjà provisionné et stocké (otpState() = 'expired') : le rattrapage le moins
+      // coûteux est « Renouveler » (sans nouveau SMS), pas une activation complète. On oriente vers ça.
+      log::add('stellantis', 'warning', 'UC12 : échec d\'obtention du remote token après activation (' . $e->getMessage() . ')');
+      return array('ok' => false, 'message' => __('L\'appareil OTP a été enregistré mais l\'obtention du jeton distant a échoué. Rechargez la page et utilisez « Renouveler le jeton distant » (sans nouveau SMS).', __FILE__));
+    }
+    config::save(self::OTP_SMS_PENDING_KEY, '', 'stellantis');
+    self::resolveCustomerId();
+    self::reconnecterDemonSiLance();
+    cache::delete(self::OTP_ALERT_KEY);
+    message::removeAll('stellantis', 'otp_required');
+    log::add('stellantis', 'info', 'UC12 : pilotage à distance activé (remote token obtenu)');
+    return array('ok' => true, 'message' => __('Pilotage à distance activé.', __FILE__));
+  }
+
+  /**
+   * Renouvelle le remote token à partir du device DÉJÀ provisionné, SANS nouveau SMS (génère un code OTP
+   * — garde le quota 6/24 h). Utile après expiration (état « expiré ») pour éviter de consommer un SMS.
+   * Retour uniforme {ok, message}.
+   */
+  public static function renewRemoteToken(): array {
+    if (!self::hasOtpDevice()) {
+      return array('ok' => false, 'message' => __('Aucun appareil OTP enregistré : réalisez l\'activation complète (SMS + code PIN).', __FILE__));
+    }
+    $code = self::generateOtpCode();
+    if ($code === null) {
+      return array('ok' => false, 'message' => __('Impossible de générer un code OTP (quota atteint ou appareil invalide). Refaites au besoin l\'activation complète (SMS + code PIN).', __FILE__));
+    }
+    try {
+      stellantisApi::requestRemoteToken($code);
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'warning', 'UC12 : échec du renouvellement du remote token (' . $e->getMessage() . ')');
+      return array('ok' => false, 'message' => __('Le renouvellement a échoué : refaites l\'activation complète (SMS + code PIN).', __FILE__));
+    }
+    self::reconnecterDemonSiLance();
+    cache::delete(self::OTP_ALERT_KEY);
+    message::removeAll('stellantis', 'otp_required');
+    log::add('stellantis', 'info', 'UC12 : remote token renouvelé (sans SMS)');
+    return array('ok' => true, 'message' => __('Jeton distant renouvelé.', __FILE__));
+  }
+
+  // Génère un code OTP à partir du device stocké (appel réseau via le helper → consomme 1 unité du quota
+  // 6/24 h). null si device absent, quota atteint, ou échec. Device invalide → purge (force ré-activation).
+  private static function generateOtpCode(): ?string {
+    $device = self::readOtpDevice();
+    if ($device === null) {
+      return null;
+    }
+    try {
+      self::consommerQuotaCodeOtp();
+    } catch (stellantisException $e) {
+      log::add('stellantis', 'warning', 'UC12 : génération de code OTP refusée (' . $e->getMessage() . ')');
+      return null;
+    }
+    $res = self::runOtpHelper(array('action' => 'code', 'device_secret' => $device));
+    if (($res['status'] ?? '') != 'ok' || ($res['otp_code'] ?? '') == '') {
+      if (($res['status'] ?? '') == 'device_invalid') {
+        config::save(self::OTP_DEVICE_KEY, '', 'stellantis');
+        log::add('stellantis', 'warning', 'UC12 : appareil OTP invalide → purgé (ré-activation complète nécessaire)');
+      }
+      return null;
+    }
+    // L'état du device roule côté serveur : re-stocker le device renvoyé pour la prochaine génération.
+    if (($res['device_secret'] ?? '') != '') {
+      self::storeOtpDevice((string) $res['device_secret']);
+    }
+    return (string) $res['otp_code'];
+  }
+
+  // Quota local de génération de code OTP (fenêtre glissante 24 h) — même gabarit que
+  // stellantisApi::consommerQuotaRefresh. @throws stellantisException 'rate_limited' si atteint.
+  private static function consommerQuotaCodeOtp(): void {
+    $quota = json_decode((string) cache::byKey(self::OTP_CODE_QUOTA_KEY)->getValue(''), true);
+    $maintenant = time();
+    if (!is_array($quota) || !isset($quota['windowStart']) || $maintenant - $quota['windowStart'] > self::OTP_CODE_QUOTA_FENETRE) {
+      $quota = array('windowStart' => $maintenant, 'count' => 0);
+    }
+    if ($quota['count'] >= self::OTP_CODE_QUOTA_MAX) {
+      throw new stellantisException(sprintf(__('Quota de génération de codes OTP atteint (%d / 24 h). Réessayez plus tard.', __FILE__), self::OTP_CODE_QUOTA_MAX), 429, 'rate_limited');
+    }
+    $quota['count']++;
+    cache::set(self::OTP_CODE_QUOTA_KEY, json_encode($quota), self::OTP_CODE_QUOTA_FENETRE);
+  }
+
+  /**
+   * Exécute le helper OTP Python (resources/otp_helper.py) via proc_open : requête JSON sur STDIN (jamais
+   * argv : sms/pin/device sensibles), réponse JSON sur STDOUT. Retourne le tableau décodé (au minimum
+   * {status}) ; {status:'error'} si le helper est injoignable/illisible. Jamais de secret loggué.
+   */
+  private static function runOtpHelper(array $_request): array {
+    $dossier = realpath(__DIR__ . '/../../resources');
+    if ($dossier === false) {
+      log::add('stellantis', 'warning', 'UC12 : dossier resources/ introuvable pour le helper OTP');
+      return array('status' => 'error');
+    }
+    $cmd = system::getCmdPython3('stellantis') . ' ' . escapeshellarg($dossier . '/otp_helper.py');
+    $descriptors = array(
+      0 => array('pipe', 'r'),           // STDIN : requête JSON
+      1 => array('pipe', 'w'),           // STDOUT : réponse JSON
+      2 => array('file', '/dev/null', 'w'), // STDERR : ignoré (jamais de secret ; traceback éventuel écarté)
+    );
+    $pipes = array();
+    $process = @proc_open($cmd, $descriptors, $pipes);
+    if (!is_resource($process)) {
+      log::add('stellantis', 'warning', 'UC12 : impossible de lancer le helper OTP');
+      return array('status' => 'error');
+    }
+    fwrite($pipes[0], json_encode($_request));
+    fclose($pipes[0]);
+    $sortie = stream_get_contents($pipes[1]);
+    fclose($pipes[1]);
+    proc_close($process);
+    $resultat = json_decode((string) $sortie, true);
+    if (!is_array($resultat) || !isset($resultat['status'])) {
+      log::add('stellantis', 'warning', 'UC12 : helper OTP injoignable ou sortie illisible (dépendances Python manquantes ?)');
+      return array('status' => 'error');
+    }
+    return $resultat;
+  }
+
+  // Traduit un status d'échec du helper OTP en message utilisateur i18n (jamais de détail technique brut).
+  private static function messageStatutOtp(string $_status): string {
+    switch ($_status) {
+      case 'deps_missing':
+        return __('Dépendances Python manquantes : installez les dépendances du plugin, puis réessayez.', __FILE__);
+      case 'bad_input':
+        return __('Code SMS ou code PIN manquant ou invalide.', __FILE__);
+      case 'device_invalid':
+        return __('Appareil OTP invalide : refaites l\'activation complète (SMS + code PIN).', __FILE__);
+      case 'otp_error':
+      default:
+        return __('Activation refusée : vérifiez le code SMS et le code PIN, puis réessayez. Attention au quota (6 codes / 24 h).', __FILE__);
+    }
+  }
+
+  // Stockage chiffré du device OTP en config (survit à cache::flush, contrairement au cache).
+  // ⚠️ INVARIANT DE SÉCURITÉ : ce blob est désérialisé par pickle.loads() dans otp_helper.py. Il ne doit
+  // JAMAIS provenir d'une autre source que readOtpDevice() (cache config chiffré) : ne jamais alimenter
+  // storeOtpDevice()/runOtpHelper('code') avec une donnée d'origine externe non chiffrée par ce plugin.
+  private static function storeOtpDevice(string $_blob): void {
+    config::save(self::OTP_DEVICE_KEY, utils::encrypt($_blob), 'stellantis');
+  }
+
+  private static function readOtpDevice(): ?string {
+    $brut = (string) config::byKey(self::OTP_DEVICE_KEY, 'stellantis', '');
+    if ($brut == '') {
+      return null;
+    }
+    $clair = utils::decrypt($brut);
+    return ($clair !== '' && $clair !== false) ? $clair : null;
+  }
+
+  public static function hasOtpDevice(): bool {
+    return self::readOtpDevice() !== null;
+  }
+
+  // État du pilotage à distance pour l'UI/santé : 'active' (remote token présent), 'expired' (device
+  // présent mais plus de token → renouvelable sans SMS), 'pending' (SMS envoyé, activation pas encore
+  // finalisée — l'utilisateur doit saisir code+PIN, sans re-consommer de SMS), 'inactive' (jamais activé).
+  public static function otpState(): string {
+    if (stellantisApi::hasRemoteToken()) {
+      return 'active';
+    }
+    if (self::hasOtpDevice()) {
+      return 'expired';
+    }
+    return (config::byKey(self::OTP_SMS_PENDING_KEY, 'stellantis', '') == '1') ? 'pending' : 'inactive';
+  }
+
+  // Nombre d'activations SMS déjà consommées (compteur à vie), pour l'UI.
+  public static function otpSmsCount(): int {
+    return (int) config::byKey(self::OTP_SMS_COUNT_KEY, 'stellantis', 0);
+  }
+
+  /**
+   * Résout le customer id (CID) nécessaire aux topics MQTT via GET /user (best-effort, jamais bloquant).
+   * Cherche une valeur de forme AP-ACNT…/OV-ACNT… dans la réponse (structure non figée). Ne loggue jamais
+   * le corps /user (PII) — seulement le CID trouvé. Échec → repli sur la saisie manuelle (champ config).
+   */
+  private static function resolveCustomerId(): void {
+    if (self::getCustomerId() != '') {
+      return; // déjà connu (config manuelle ou résolution antérieure)
+    }
+    try {
+      $reponse = stellantisApi::callWithToken('GET', '/user');
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'info', 'UC12 : résolution du customer id ignorée (' . $e->getMessage() . ')');
+      return;
+    }
+    $cid = self::extraireCustomerId($reponse);
+    if ($cid == '') {
+      log::add('stellantis', 'info', 'UC12 : customer id introuvable dans /user (repli : saisie manuelle dans la config)');
+      return;
+    }
+    config::save('customer_id', $cid, 'stellantis');
+    log::add('stellantis', 'info', 'UC12 : customer id résolu (' . $cid . ')');
+    // Le CID débloque l'abonnement démon (UC11) : (ré)abonner si le démon tourne.
+    if (self::deamon_info()['state'] == 'ok') {
+      $topics = self::subscribeTopics();
+      if (count($topics) > 0) {
+        self::sendToDaemon('subscribe', array('topics' => $topics));
+      }
+    }
+  }
+
+  // Motif du customer id MQTT (AP-ACNT… Peugeot/Citroën/DS, OV-ACNT… Opel/Vauxhall). Pleinement ancré :
+  // le CID est ensuite interpolé dans les topics MQTT (subscribeTopics) → jamais de valeur non conforme.
+  const OTP_CID_REGEX = '/^(AP|OV)-ACNT[A-Za-z0-9._-]*$/';
+
+  // Recherche récursive d'une valeur de forme AP-ACNT…/OV-ACNT… (customer id MQTT) dans la réponse /user.
+  private static function extraireCustomerId($_data): string {
+    if (is_string($_data)) {
+      return preg_match(self::OTP_CID_REGEX, $_data) ? $_data : '';
+    }
+    if (is_array($_data)) {
+      foreach (array('customer_id', 'customerId', 'id') as $cle) {
+        if (isset($_data[$cle]) && is_string($_data[$cle]) && preg_match(self::OTP_CID_REGEX, $_data[$cle])) {
+          return $_data[$cle];
+        }
+      }
+      foreach ($_data as $valeur) {
+        $trouve = self::extraireCustomerId($valeur);
+        if ($trouve != '') {
+          return $trouve;
+        }
+      }
+    }
+    return '';
+  }
+
+  // Alerte utilisateur « refaire l'activation OTP », THROTTLÉE (1×/24 h) : appelée depuis le cron
+  // (chaque minute) et les callbacks démon → sans garde, elle noierait notifications et logs.
+  private static function alerterOtpRequired(): void {
+    if (cache::byKey(self::OTP_ALERT_KEY)->getValue('') != '') {
+      return;
+    }
+    cache::set(self::OTP_ALERT_KEY, '1', self::OTP_ALERT_COOLDOWN);
+    message::add('stellantis', __('Le jeton de pilotage à distance a expiré. Renouvelez-le (sans SMS si un appareil OTP est encore enregistré) ou refaites l\'activation OTP depuis la configuration du plugin.', __FILE__), '', 'otp_required');
+    log::add('stellantis', 'warning', 'UC12 : remote token expiré → renouvellement/ré-activation OTP requis (alerte utilisateur)');
+  }
+
+  // Purge le remote token + le device OTP + l'état d'alerte/pending. Appelée sur changement de
+  // credentials/marque (device devenu incohérent) et à la désinstallation. NE réinitialise PAS le
+  // compteur SMS à vie (sécurité : ne jamais rouvrir un quota potentiellement épuisé côté serveur).
+  public static function purgeOtp(): void {
+    stellantisApi::purgeRemoteTokenCache();
+    config::save(self::OTP_DEVICE_KEY, '', 'stellantis');
+    config::save(self::OTP_SMS_PENDING_KEY, '', 'stellantis');
+    cache::delete(self::OTP_ALERT_KEY);
+    message::removeAll('stellantis', 'otp_required');
   }
 
   /**
@@ -1494,6 +1860,13 @@ class stellantisApi {
   // remplacée par l'en-tête Retry-After, non exposé par httpRequest aujourd'hui).
   const RATELIMIT_KEY = 'stellantis::ratelimit_until';
   const RATELIMIT_COOLDOWN = 900;
+
+  // UC12 — Remote token OTP (canal des commandes MQTT), DISTINCT du token OAuth2 REST ci-dessus.
+  // Base « mobile » (≠ connectedcar/v4) : smsCode + token (grants password/refresh_token).
+  const REMOTE_API_BASE = 'https://api.groupe-psa.com/applications/cvs/v4/mobile';
+  const REMOTE_TOKEN_CACHE_KEY = 'stellantis::remote_token';
+  const REMOTE_TOKEN_TTL = 890; // TTL constaté du remote token (code de référence : MQTT_TOKEN_TTL)
+  const REMOTE_TOKEN_MARGE = 120; // refresh proactif quand il reste moins que cette marge
 
   /**
    * Appel authentifié à l'API connectedcar v4 : client_id en query (toutes méthodes),
@@ -1939,5 +2312,139 @@ class stellantisApi {
       @unlink($_destPath);
       throw new stellantisException('Téléchargement refusé par le serveur (HTTP ' . $httpCode . ')', $httpCode, 'transport');
     }
+  }
+
+  /* * ******************* UC12 — Remote token OTP (canal des commandes MQTT) ******************* */
+
+  // Headers communs des appels « mobile » (remote) : Bearer OAuth2 courant + realm + UA de l'app.
+  // getToken() peut lever auth_required (pas d'OAuth → pas d'OTP possible) : on laisse remonter.
+  private static function remoteHeaders(bool $_withJson): array {
+    $config = stellantis::getApiConfig();
+    $headers = array(
+      'Accept: application/hal+json',
+      'x-introspect-realm: ' . $config['realm'],
+      'User-Agent: okhttp/4.8.0',
+      'Authorization: Bearer ' . self::getToken(),
+    );
+    if ($_withJson) {
+      $headers[] = 'Content-Type: application/json';
+    }
+    return $headers;
+  }
+
+  // URL « mobile » avec client_id en query (comme le code de référence RemoteClient).
+  private static function remoteUrl(string $_endpoint): string {
+    $config = stellantis::getApiConfig();
+    return self::REMOTE_API_BASE . $_endpoint . '?' . http_build_query(array('client_id' => $config['clientId']));
+  }
+
+  /**
+   * Déclenche l'envoi du SMS d'activation OTP au numéro du compte. Corps vide (comme la référence).
+   * ⚠️ Consomme une unité du quota « 20 SMS / compte à vie » côté serveur : l'appelant (stellantis)
+   * garde ce quota AVANT d'appeler. @throws stellantisException
+   */
+  public static function requestSmsOtp(): void {
+    self::httpRequest('POST', self::remoteUrl('/smsCode'), self::remoteHeaders(false), '');
+    log::add('stellantis', 'info', 'SMS d\'activation OTP demandé');
+  }
+
+  /**
+   * Échange un code OTP (grant password) contre le remote token + remote refresh token (stockés
+   * chiffrés, séparés du token OAuth2). @throws stellantisException
+   */
+  public static function requestRemoteToken(string $_otpCode): void {
+    $reponse = self::httpRequest('POST', self::remoteUrl('/token'), self::remoteHeaders(true),
+      json_encode(array('grant_type' => 'password', 'password' => $_otpCode)), true);
+    self::storeRemoteTokenResponse($reponse, null);
+    log::add('stellantis', 'info', 'Remote token OTP obtenu');
+  }
+
+  /**
+   * Rafraîchit le remote token via le remote refresh token. N'auto-régénère JAMAIS de code OTP (respect
+   * du quota) : tout échec → otp_required (ré-activation manuelle nécessaire) + purge du remote token.
+   * @throws stellantisException type 'otp_required' si le refresh échoue.
+   */
+  public static function refreshRemoteToken(): void {
+    $token = self::readRemoteTokenCache();
+    if ($token === null || !isset($token['refresh_token']) || $token['refresh_token'] == '') {
+      throw new stellantisException('Aucun remote refresh token : ré-activation OTP requise', 0, 'otp_required');
+    }
+    // Headers construits AVANT le try : getToken() peut lever auth_required si le Bearer OAuth2 est mort
+    // — c'est un problème OAuth (pas OTP), on le laisse remonter tel quel. Une fois les headers obtenus,
+    // TOUT échec de l'appel /token = remote refresh_token invalide/expiré → otp_required (le refresh
+    // distant renvoie « invalid_grant », que typeFromResponse classerait à tort en auth_required).
+    $headers = self::remoteHeaders(true);
+    try {
+      $reponse = self::httpRequest('POST', self::remoteUrl('/token'), $headers,
+        json_encode(array('grant_type' => 'refresh_token', 'refresh_token' => $token['refresh_token'])), true);
+    } catch (stellantisException $e) {
+      cache::delete(self::REMOTE_TOKEN_CACHE_KEY);
+      log::add('stellantis', 'warning', 'Échec du refresh du remote token (' . $e->getMessage() . ') : ré-activation OTP requise');
+      throw new stellantisException('Remote token expiré ou révoqué : ré-activation OTP requise', $e->getHttpCode(), 'otp_required');
+    }
+    self::storeRemoteTokenResponse($reponse, $token['refresh_token']);
+    log::add('stellantis', 'info', 'Remote token rafraîchi');
+  }
+
+  /**
+   * Rend un remote token valide (refresh proactif si proche de l'expiration). @throws stellantisException
+   * ('otp_required' si absent/non rafraîchissable).
+   */
+  public static function getRemoteToken(): string {
+    $token = self::readRemoteTokenCache();
+    if ($token === null) {
+      throw new stellantisException('Pilotage à distance non activé : réalisez l\'activation OTP', 0, 'otp_required');
+    }
+    if (time() < $token['exp'] - self::REMOTE_TOKEN_MARGE) {
+      return $token['access_token'];
+    }
+    self::refreshRemoteToken();
+    $nouveau = self::readRemoteTokenCache();
+    if ($nouveau === null) {
+      throw new stellantisException('Remote token indisponible après rafraîchissement', 0, 'otp_required');
+    }
+    return $nouveau['access_token'];
+  }
+
+  public static function hasRemoteToken(): bool {
+    return self::readRemoteTokenCache() !== null;
+  }
+
+  // Statut non sensible pour l'UI/santé (aucun token exposé).
+  public static function getRemoteTokenInfo(): array {
+    $token = self::readRemoteTokenCache();
+    if ($token === null) {
+      return array('active' => false, 'expiresIn' => null);
+    }
+    return array('active' => true, 'expiresIn' => max(0, $token['exp'] - time()));
+  }
+
+  public static function purgeRemoteTokenCache(): void {
+    cache::delete(self::REMOTE_TOKEN_CACHE_KEY);
+  }
+
+  // Persiste la réponse remote token (chiffrée) ; conserve l'ancien refresh si non renvoyé. TTL par
+  // défaut = REMOTE_TOKEN_TTL (la réponse ne fournit pas toujours expires_in). Plancher 120 s.
+  private static function storeRemoteTokenResponse(array $_reponse, ?string $_ancienRefresh): void {
+    if (!isset($_reponse['access_token']) || $_reponse['access_token'] == '') {
+      throw new stellantisException('Réponse remote token invalide (access_token absent)');
+    }
+    $refresh = (isset($_reponse['refresh_token']) && $_reponse['refresh_token'] != '') ? $_reponse['refresh_token'] : (string) $_ancienRefresh;
+    $expiresIn = (int) (isset($_reponse['expires_in']) ? $_reponse['expires_in'] : self::REMOTE_TOKEN_TTL);
+    $exp = time() + max(120, $expiresIn);
+    cache::set(self::REMOTE_TOKEN_CACHE_KEY, utils::encrypt(json_encode(array(
+      'access_token' => $_reponse['access_token'],
+      'refresh_token' => $refresh,
+      'exp' => $exp,
+    ))), 0);
+  }
+
+  private static function readRemoteTokenCache(): ?array {
+    $brut = (string) cache::byKey(self::REMOTE_TOKEN_CACHE_KEY)->getValue('');
+    if ($brut == '') {
+      return null;
+    }
+    $token = json_decode(utils::decrypt($brut), true);
+    return (is_array($token) && isset($token['access_token']) && isset($token['exp'])) ? $token : null;
   }
 }

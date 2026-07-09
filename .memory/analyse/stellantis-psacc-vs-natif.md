@@ -143,9 +143,16 @@ pour un plugin **sans** dépendance externe.
   est précisément la **procédure de secours** documentée chez PSACC → le rester, mais **documenter
   pas-à-pas la récupération via F12** (mot de passe ≤16 caractères, `code` de 36 caractères,
   `invalid_grant` si trop lent) et prévoir des messages d'erreur pédagogiques.
-- **UC12 (OTP/remote token)** : **TTL du remote token ~890 s**, refresh via
-  `POST connectedcar/v4/virtualkey/remoteaccess/token`, repli re-OTP (`otp.bin` chez PSACC) ; erreur
-  OTP `NOK:SN` vue en 2026 (#1205).
+- **UC12 (OTP/remote token)** : **TTL du remote token ~890 s** ; repli re-OTP (`otp.bin` chez PSACC) ;
+  erreur OTP `NOK:SN` vue en 2026 (#1205).
+  > ⚠️ **Correction 2026-07-09 (vérifié contre `RemoteClient`/`psa_client` de psa_car_controller)** :
+  > l'endpoint du remote token n'est **PAS** `connectedcar/v4/virtualkey/remoteaccess/token` (annoncé ici
+  > par erreur) mais **`POST https://api.groupe-psa.com/applications/cvs/v4/mobile/token?client_id=…`**
+  > (grants `password` avec le code OTP, puis `refresh_token`). Le SMS d'activation se déclenche par
+  > **`POST …/applications/cvs/v4/mobile/smsCode?client_id=…`** (Bearer OAuth2 + `x-introspect-realm`).
+  > La crypto OTP (device inWebo contre `https://otp.mpsa.com/iwws/MAC`, RSA-OAEP/AES/SHA256) est
+  > **vendorisée** de `psa_car_controller/psa/otp` (GPL-3) → `resources/otp_vendor` (dépend de
+  > `pycryptodomex`). Détail : `.memory/specs/post-mvp/10-commandes-distance/12-tech.md`.
 - **UC11/82 (packaging)** : pin `paho-mqtt >=1.5,<2.0` **confirmé** par le pyproject PSACC.
 - **Doc utilisateur (UC82)** : pointer PSACC comme outil recommandé pour **extraire les credentials**
   (`app_decoder.py` automatise APK→client_id/secret), sans en faire un prérequis d'exécution.
