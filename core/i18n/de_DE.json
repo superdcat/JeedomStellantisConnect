@@ -158,7 +158,11 @@
         "Commande de préconditionnement déjà envoyée à l'instant ; patientez %d s": "Vorklimatisierungsbefehl wurde soeben gesendet; warten Sie %d s",
         "Verrouiller": "Verriegeln",
         "Déverrouiller": "Entriegeln",
-        "Commande de verrouillage déjà envoyée à l'instant ; patientez %d s": "Verriegelungsbefehl wurde soeben gesendet; warten Sie %d s"
+        "Commande de verrouillage déjà envoyée à l'instant ; patientez %d s": "Verriegelungsbefehl wurde soeben gesendet; warten Sie %d s",
+        "Klaxonner": "Hupen",
+        "Allumer les feux": "Licht einschalten",
+        "Klaxon déjà déclenché à l'instant ; patientez %d s": "Hupe wurde soeben ausgelöst; warten Sie %d s",
+        "Feux déjà déclenchés à l'instant ; patientez %d s": "Licht wurde soeben eingeschaltet; warten Sie %d s"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert",

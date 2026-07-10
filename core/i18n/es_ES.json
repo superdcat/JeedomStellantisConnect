@@ -158,7 +158,11 @@
         "Commande de préconditionnement déjà envoyée à l'instant ; patientez %d s": "Comando de preacondicionamiento ya enviado hace un momento; espere %d s",
         "Verrouiller": "Bloquear",
         "Déverrouiller": "Desbloquear",
-        "Commande de verrouillage déjà envoyée à l'instant ; patientez %d s": "Comando de bloqueo ya enviado hace un momento; espere %d s"
+        "Commande de verrouillage déjà envoyée à l'instant ; patientez %d s": "Comando de bloqueo ya enviado hace un momento; espere %d s",
+        "Klaxonner": "Tocar el claxon",
+        "Allumer les feux": "Encender las luces",
+        "Klaxon déjà déclenché à l'instant ; patientez %d s": "Claxon ya activado hace un momento; espere %d s",
+        "Feux déjà déclenchés à l'instant ; patientez %d s": "Luces ya activadas hace un momento; espere %d s"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Acceso no autorizado",

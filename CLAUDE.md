@@ -28,7 +28,7 @@ Un plugin Jeedom **n'est pas autonome** : il s'installe sous `<jeedom>/plugins/s
 PHP dépend du core Jeedom, atteint via `require_once __DIR__ . '/../../../../core/php/core.inc.php';`.
 Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 
-> **État d'avancement (2026-07-09)** : l'id a été renommé `template` → `stellantis` (classes
+> **État d'avancement (2026-07-10)** : l'id a été renommé `template` → `stellantis` (classes
 > `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP lecture seule COMPLET** : UC01 à
 > UC10 sont implémentées (configuration du plugin, client HTTP REST, authentification OAuth2 PKCE/token,
 > test de connexion, découverte des véhicules, création/synchronisation des équipements, commandes info
@@ -109,7 +109,20 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > L'info `doors_locked` (MVP07) reflète l'état après l'ack ; l'API `/Doors` n'expose **aucun `failure_cause`**
 > dédié (indisponibilité thermique/équipement ⇒ `doors_locked` inchangé, retour d'état fin renvoyé à UC18).
 > Garde-fous : debounce per-véhicule court (10 s) + quota global compte réutilisé de `publishRemoteCommand`.
-> Suite = post-MVP (klaxon/feux UC17, retour d'état UC18, localisation, entretien…). Cette note est
+> **Post-MVP : UC17** — **commandes klaxon & feux (retrouver le véhicule)** : commandes action `horn`/`lights`
+> créées **universellement** (tout véhicule a klaxon + feux), `execute()` → `stellantis->horn()` /
+> `stellantis->lights()`. Publiées via `publishRemoteCommand()` sur les services `/Horn` (payload
+> `{"nb_horn":count,"action":"activate"}`) et `/Lights` (payload `{"action":"activate","duration":s}`) —
+> contrats `RemoteClient.horn`/`lights` de `psa_car_controller`, confirmés **inchangés** en master (le
+> contrat « évolutif » signalé par l'issue #1199 dans la spec 17 ne l'était pas). Paramètres nb-coups/durée =
+> **constantes à défaut raisonnable** (`HORN_COUNT=2`, `LIGHTS_DURATION=10 s` ; configurabilité par commande
+> différée). Les deux méthodes délèguent à un **helper privé partagé** `declencherSignal()` (debounce → OTP
+> → pose debounce avant réseau → publish). ⚠️ **Différence assumée vs UC13-16** : commandes **« sans état »**
+> (aucune télémétrie klaxon/feux à relire) → UC17 ne pose **PAS** de mapping `CMD_CORR_KEY` (le seul
+> consommateur actuel — refresh REST au prochain cron — serait inutile et gaspillerait un slot de quota
+> anti-ban) ; la corrélation ack→véhicule pour un retour d'état relève d'**UC18**. Garde-fous : debounce
+> per-véhicule court (10 s, clés séparées klaxon/feux) + quota global compte réutilisé de
+> `publishRemoteCommand`. Suite = post-MVP (retour d'état async UC18, localisation, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
 
@@ -136,8 +149,9 @@ Disposition Jeedom fixe (type MVC). Pièces principales, toutes nommées d'aprè
   - `stellantisCmd extends cmd` — commande (info ou action). `execute($_options)` aiguille les actions
     (`switch` sur `logicalId`) vers la méthode métier du véhicule, en passant par le démon MQTT. **Wakeup
     (UC13)** → `stellantis->wakeup()`, **charge start/stop (UC14)** → `stellantis->chargeControl(bool)`,
-    **préconditionnement (UC15)** → `stellantis->precondControl(bool)` et **verrouillage/déverrouillage
-    (UC16)** → `stellantis->doorControl(bool)` implémentés ; klaxon/feux… = post-MVP (UC17). Publication MQTT
+    **préconditionnement (UC15)** → `stellantis->precondControl(bool)`, **verrouillage/déverrouillage
+    (UC16)** → `stellantis->doorControl(bool)` et **klaxon/feux (UC17)** → `stellantis->horn()` /
+    `stellantis->lights()` implémentés ; retour d'état async… = post-MVP (UC18). Publication MQTT
     centralisée par `stellantis::publishRemoteCommand()`/`buildMqttRequest()`.
 - **Client API `stellantisApi`** (définie dans `core/class/stellantis.class.php`, cf. `MVP/02`,`03`) —
   **brique unique** par laquelle passent **tous** les appels HTTP REST : OAuth2 PKCE (URL d'autorisation,

@@ -158,7 +158,11 @@
         "Commande de préconditionnement déjà envoyée à l'instant ; patientez %d s": "Preconditioning command already sent just now; wait %d s",
         "Verrouiller": "Lock",
         "Déverrouiller": "Unlock",
-        "Commande de verrouillage déjà envoyée à l'instant ; patientez %d s": "Lock command already sent just now; wait %d s"
+        "Commande de verrouillage déjà envoyée à l'instant ; patientez %d s": "Lock command already sent just now; wait %d s",
+        "Klaxonner": "Sound horn",
+        "Allumer les feux": "Turn on lights",
+        "Klaxon déjà déclenché à l'instant ; patientez %d s": "Horn already triggered just now; wait %d s",
+        "Feux déjà déclenchés à l'instant ; patientez %d s": "Lights already triggered just now; wait %d s"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Unauthorized access",

@@ -575,6 +575,9 @@ class stellantis extends eqLogic {
     // porte actionConfirm=1 (confirmation core anti-fausse-manip) via definitionsActions.
     $this->ensureActionCommand('lock');
     $this->ensureActionCommand('unlock');
+    // UC17 : klaxon / feux (retrouver le véhicule), UNIVERSELS (tout véhicule a klaxon + feux).
+    $this->ensureActionCommand('horn');
+    $this->ensureActionCommand('lights');
   }
 
   // Table des commandes ACTION (source de vérité, miroir de definitionsCommandes) : logicalId =>
@@ -592,6 +595,8 @@ class stellantis extends eqLogic {
       'precond_off'  => array(__('Désactiver le préconditionnement', __FILE__), 'other', ''),
       'lock'         => array(__('Verrouiller', __FILE__), 'other', '', false),
       'unlock'       => array(__('Déverrouiller', __FILE__), 'other', '', true),
+      'horn'         => array(__('Klaxonner', __FILE__), 'other', ''),
+      'lights'       => array(__('Allumer les feux', __FILE__), 'other', ''),
     );
   }
 
@@ -2067,6 +2072,84 @@ class stellantis extends eqLogic {
     log::add('stellantis', 'info', ($_verrouiller ? 'Verrouillage' : 'Déverrouillage') . ' demandé pour l\'équipement #' . $this->getId());
   }
 
+  /* * ******************* UC17 — Klaxon & feux (retrouver le véhicule) ******************* */
+
+  const HORN_SERVICE = '/Horn';                                  // segment de service du topic MQTT (contrat RemoteClient.horn)
+  const HORN_COUNT = 2;                                          // nombre de coups de klaxon par défaut (paramètre nb_horn) — configurabilité par commande différée
+  const HORN_DEBOUNCE = 10;                                      // anti-boucle per-véhicule (s) : autorise un enchaînement klaxon→feux, bloque un scénario en boucle
+  const HORN_DEBOUNCE_KEY = 'stellantis::horn_debounce::';       // + eqId (cache) : dernier klaxon de CE véhicule
+  const LIGHTS_SERVICE = '/Lights';                              // segment de service du topic MQTT (contrat RemoteClient.lights)
+  const LIGHTS_DURATION = 10;                                    // durée d'allumage des feux par défaut (s, paramètre duration) — configurabilité par commande différée
+  const LIGHTS_DEBOUNCE = 10;                                    // anti-boucle per-véhicule (s) : constante séparée du klaxon (convention « une par domaine »)
+  const LIGHTS_DEBOUNCE_KEY = 'stellantis::lights_debounce::';   // + eqId (cache) : dernier allumage des feux de CE véhicule
+
+  /**
+   * Déclenche le KLAXON de CE véhicule via une commande MQTT (nb_horn coups) pour le retrouver/signaler.
+   * Action DÉLIBÉRÉE (bouton) « sans état » : aucune télémétrie klaxon à relire. Anti-boucle per-véhicule
+   * court ; le garde-fou anti-ban est le quota GLOBAL compte dans publishRemoteCommand().
+   * @throws stellantisException 'rate_limited' (debounce/quota), 'otp_required' (OTP non activé), sinon api_error
+   */
+  public function horn(): void {
+    $this->declencherSignal(
+      self::HORN_SERVICE,
+      array('nb_horn' => self::HORN_COUNT, 'action' => 'activate'),
+      self::HORN_DEBOUNCE_KEY . $this->getId(),
+      self::HORN_DEBOUNCE,
+      __('Klaxon déjà déclenché à l\'instant ; patientez %d s', __FILE__)
+    );
+    log::add('stellantis', 'info', 'Klaxon demandé pour l\'équipement #' . $this->getId());
+  }
+
+  /**
+   * Allume les FEUX de CE véhicule via une commande MQTT (pendant `duration` s) pour le retrouver/signaler.
+   * Action DÉLIBÉRÉE (bouton) « sans état » : aucune télémétrie feux à relire. Anti-boucle per-véhicule
+   * court ; le garde-fou anti-ban est le quota GLOBAL compte dans publishRemoteCommand().
+   * @throws stellantisException 'rate_limited' (debounce/quota), 'otp_required' (OTP non activé), sinon api_error
+   */
+  public function lights(): void {
+    $this->declencherSignal(
+      self::LIGHTS_SERVICE,
+      array('action' => 'activate', 'duration' => self::LIGHTS_DURATION),
+      self::LIGHTS_DEBOUNCE_KEY . $this->getId(),
+      self::LIGHTS_DEBOUNCE,
+      __('Feux déjà déclenchés à l\'instant ; patientez %d s', __FILE__)
+    );
+    log::add('stellantis', 'info', 'Feux demandés pour l\'équipement #' . $this->getId());
+  }
+
+  /**
+   * Point commun des commandes de SIGNALEMENT « sans état » (klaxon/feux, UC17) : debounce per-véhicule →
+   * pré-requis OTP → pose du debounce AVANT réseau → publication MQTT. Volontairement PLUS SIMPLE que le
+   * gabarit UC13-16 : commandes stateless, donc AUCUN mapping CMD_CORR_KEY posé.
+   * ⚠️ Dette assumée (validée) : aujourd'hui CMD_CORR_KEY sert UNIQUEMENT à programmer un refresh REST au
+   * prochain cron (programmerRefreshApresAck) — inutile ici (rien de frais à relire pour klaxon/feux) et
+   * gaspilleur d'un slot de quota anti-ban. La corrélation ack→véhicule pour un retour d'état
+   * (last_command_result) relève d'UC18, transverse à UC13-17, qui réécrira ce pipeline.
+   * ⚠️ i18n : $_refusMsg DOIT être une chaîne déjà traduite (produite par un __() LITTÉRAL au point
+   * d'appel — horn()/lights()), jamais reconstruite ici : l'extracteur i18n est un scan statique (piège UC07).
+   * @throws stellantisException 'rate_limited' (debounce/quota), 'otp_required' (OTP non activé), sinon api_error
+   */
+  private function declencherSignal(string $_service, array $_reqParameters, string $_cleDebounce, int $_debounce, string $_refusMsg): void {
+    // 1) Anti-boucle per-véhicule : refus net si une commande de même type est trop récente sur CE véhicule.
+    $dernier = (int) cache::byKey($_cleDebounce)->getValue(0);
+    if ($dernier > 0) {
+      $reste = $_debounce - (time() - $dernier);
+      if ($reste > 0) {
+        throw new stellantisException(sprintf($_refusMsg, $reste), 429, 'rate_limited');
+      }
+    }
+    // 2) Pré-requis OTP : sans remote token, pas de canal MQTT. Alerte cohérente avec les autres call sites.
+    if (!stellantisApi::hasRemoteToken()) {
+      self::alerterOtpRequired();
+      throw new stellantisException(__('Pilotage à distance non activé : activez l\'OTP dans la configuration du plugin', __FILE__), 0, 'otp_required');
+    }
+    // 3) Pose le debounce AVANT tout appel réseau (publish MQTT) : borne les tentatives répétées quel qu'en soit le résultat.
+    cache::set($_cleDebounce, time(), $_debounce);
+    // 4) Publication (gère quota global compte + CID + démon + alignement token). Le correlation_id retourné
+    //    n'est volontairement PAS mémorisé (commande stateless, cf. docblock).
+    $this->publishRemoteCommand($_service, $_reqParameters);
+  }
+
   /**
    * Hook cron Jeedom (chaque minute) : rafraîchit la télémétrie des véhicules dus. On utilise cron()
    * (pas cron5) car isDue() teste une correspondance EXACTE à la minute ; sous cron5 (multiples de 5),
@@ -2328,6 +2411,14 @@ class stellantisCmd extends cmd {
       case 'unlock':
         // UC16 : déverrouille les portes (confirmation core actionConfirm=1 avant d'arriver ici).
         $eqLogic->doorControl(false);
+        break;
+      case 'horn':
+        // UC17 : klaxonne pour retrouver le véhicule. Garde-fous debounce/quota + pré-requis OTP dans horn().
+        $eqLogic->horn();
+        break;
+      case 'lights':
+        // UC17 : allume les feux pour retrouver le véhicule. Garde-fous debounce/quota + pré-requis OTP dans lights().
+        $eqLogic->lights();
         break;
       default:
         log::add('stellantis', 'warning', 'Commande action inconnue : ' . $this->getLogicalId());

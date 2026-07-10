@@ -152,6 +152,14 @@ C'est **le** piège conceptuel. Il y a deux systèmes de tokens **indépendants*
   > cid/{CID}` + **segment de service** : le wakeup passe par **`/VehCharge/state`** (pas un « /state »
   > générique). Implémenté côté PHP par `stellantis::buildMqttRequest()` + `publishRemoteCommand()` (point
   > unique de publication, réutilisable UC14-17). Cf. `13-tech.md`.
+  > ⚠️ **Segments de service confirmés (2026-07-10, vs `psa/RemoteClient.py` master)** : charge `/VehCharge`
+  > (UC14), précond `/ThermalPrecond` (UC15), portes `/Doors` (UC16), **klaxon `/Horn`** et **feux `/Lights`**
+  > (UC17). Le contrat klaxon/feux signalé « évolutif » par l'issue #1199 dans la spec 17 est en réalité
+  > **INCHANGÉ** en master : `horn(vin,count)` → `/Horn` `{"nb_horn":count,"action":"activate"}` ;
+  > `lights(vin,duration)` → `/Lights` `{"action":"activate","duration":duration}`. Klaxon/feux sont des
+  > commandes **« sans état »** (aucune télémétrie `/status` associée) → UC17 ne pose **pas** de mapping de
+  > corrélation ack→véhicule (le seul consommateur actuel — refresh REST — serait inutile ; corrélation pour
+  > un retour d'état = périmètre **UC18**). Cf. `17-tech.md`.
 - **wakeup limité à 6 / 20 min** (niveau **compte**). psa_car_controller envoie un wakeup auto toutes les
   24 h pour garder la session vivante.
 

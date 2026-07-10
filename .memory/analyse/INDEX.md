@@ -11,7 +11,11 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-09 (UC16 : `stellantis-data-model.md` § 2.4 — commande MQTT
+> **Dernière synchro** : 2026-07-10 (UC17 : `stellantis-api-architecture.md` § 1.3 — segments de service
+> MQTT klaxon **`/Horn`** `{"nb_horn":count,"action":"activate"}` et feux **`/Lights`**
+> `{"action":"activate","duration":s}` confirmés vs `psa_car_controller` master ; contrat #1199 en réalité
+> **INCHANGÉ** ; commandes **« sans état »** → pas de corrélation ack→véhicule côté UC17, renvoyée à UC18).
+> Précédemment 2026-07-09 (UC16 : `stellantis-data-model.md` § 2.4 — commande MQTT
 > verrouillage confirmée contre `psa_car_controller` : service `/Doors`, payload
 > `{"action":"lock"|"unlock"}`, aucun `failure_cause` dédié ; `jeedom-widgets-commandes.md` § 4 —
 > **activation serveur de la confirmation d'action** `setConfiguration('actionConfirm',1)` → garde core
