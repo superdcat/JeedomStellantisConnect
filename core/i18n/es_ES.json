@@ -128,6 +128,7 @@
         "Verrouillage": "Bloqueo",
         "Position": "Posición",
         "Dernière MAJ": "Última actualización",
+        "Dernier résultat commande": "Último resultado del comando",
         "Pilotage à distance (OTP)": "Control remoto (OTP)",
         "Activé": "Activado",
         "Expiré — renouvellement nécessaire": "Caducado — renovación necesaria",
@@ -162,7 +163,16 @@
         "Klaxonner": "Tocar el claxon",
         "Allumer les feux": "Encender las luces",
         "Klaxon déjà déclenché à l'instant ; patientez %d s": "Claxon ya activado hace un momento; espere %d s",
-        "Feux déjà déclenchés à l'instant ; patientez %d s": "Luces ya activadas hace un momento; espere %d s"
+        "Feux déjà déclenchés à l'instant ; patientez %d s": "Luces ya activadas hace un momento; espere %d s",
+        "Commande à distance en échec pour l'équipement #%1$d : %2$s": "Comando remoto fallido para el dispositivo #%1$d: %2$s",
+        "Commande à distance : session renouvelée pour l'équipement #%d, veuillez réessayer": "Comando remoto: sesión renovada para el dispositivo #%d, vuelva a intentarlo",
+        "Échec : %s": "Fallo: %s",
+        "Échec (code %s)": "Fallo (código %s)",
+        "Succès": "Éxito",
+        "Session renouvelée, veuillez réessayer": "Sesión renovada, vuelva a intentarlo",
+        "Acceptée par le véhicule": "Aceptado por el vehículo",
+        "Transmise au véhicule": "Transmitido al vehículo",
+        "Véhicule en veille": "Vehículo en reposo"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Acceso no autorizado",

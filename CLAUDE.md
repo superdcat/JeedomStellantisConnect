@@ -122,7 +122,23 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > consommateur actuel — refresh REST au prochain cron — serait inutile et gaspillerait un slot de quota
 > anti-ban) ; la corrélation ack→véhicule pour un retour d'état relève d'**UC18**. Garde-fous : debounce
 > per-véhicule court (10 s, clés séparées klaxon/feux) + quota global compte réutilisé de
-> `publishRemoteCommand`. Suite = post-MVP (retour d'état async UC18, localisation, entretien…). Cette note est
+> `publishRemoteCommand`. **Post-MVP : UC18** — **retour d'état asynchrone des commandes** (transverse
+> UC13-17) : le callback démon interprète les acks MQTT du topic `.../to/cid/...` et expose une info
+> universelle **`last_command_result`** par véhicule. Le pipeline UC13 (`programmerRefreshApresAck`) est
+> **remplacé** par `stellantis::traiterRetourCommande()` + le helper pur `interpreterAck()` : parse défensif
+> du code (`return_code` prioritaire sinon `process_code` — `0`=succès, `400`=token, `900`/`903`
+> intermédiaires, `901`=veille, autre=échec), **corrélation ack→véhicule par `correlation_id` puis repli
+> `vin`** (le `correlation_id` n'est **pas fiable** sur les acks `return_code` — confirmé vs
+> `psa_car_controller` master, cf. analyse § 1.3), MAJ de `last_command_result` sur **chaque** message (le
+> terminal, résolu par `vin`, écrase l'état intermédiaire « Acceptée »), **échec jamais silencieux**
+> (`message::add`, `removeAll` avant `add`), refresh REST au prochain cron **borné aux commandes corrélées
+> stateful** (jamais sur le repli vin — klaxon/feux, events poussés). Le topic `events/MPHRTServices/#`
+> (états poussés `charging_state`/`precond_state`) est **filtré** (préfixe topic) — hors périmètre. Sur
+> code `400`, **pas de re-publish auto** (décision : token rafraîchi chaque minute → 400 rare) : on signale
+> (« session renouvelée, réessayez »). Sécurité : texte externe (`reason`/`process_message`/codes) aseptisé
+> (helper `aseptiser()`) **puis** `htmlspecialchars` avant tout usage UI/log ; filtre de topic sur le topic
+> **brut**. Aucun appel réseau dans le callback (répond 200 vite) ; démon (`demond.py`) **inchangé**. Suite =
+> post-MVP (résilience connexion démon UC19, localisation, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
 
@@ -151,7 +167,9 @@ Disposition Jeedom fixe (type MVC). Pièces principales, toutes nommées d'aprè
     (UC13)** → `stellantis->wakeup()`, **charge start/stop (UC14)** → `stellantis->chargeControl(bool)`,
     **préconditionnement (UC15)** → `stellantis->precondControl(bool)`, **verrouillage/déverrouillage
     (UC16)** → `stellantis->doorControl(bool)` et **klaxon/feux (UC17)** → `stellantis->horn()` /
-    `stellantis->lights()` implémentés ; retour d'état async… = post-MVP (UC18). Publication MQTT
+    `stellantis->lights()` implémentés. **Retour d'état async (UC18)** : le callback démon
+    (`stellantis::handleDaemonMessage` → `traiterRetourCommande`) interprète les acks MQTT, alimente l'info
+    `last_command_result` par véhicule et signale les échecs. Publication MQTT
     centralisée par `stellantis::publishRemoteCommand()`/`buildMqttRequest()`.
 - **Client API `stellantisApi`** (définie dans `core/class/stellantis.class.php`, cf. `MVP/02`,`03`) —
   **brique unique** par laquelle passent **tous** les appels HTTP REST : OAuth2 PKCE (URL d'autorisation,

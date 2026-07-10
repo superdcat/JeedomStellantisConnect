@@ -128,6 +128,7 @@
         "Verrouillage": "Locking",
         "Position": "Position",
         "Dernière MAJ": "Last update",
+        "Dernier résultat commande": "Last command result",
         "Pilotage à distance (OTP)": "Remote control (OTP)",
         "Activé": "Activated",
         "Expiré — renouvellement nécessaire": "Expired — renewal required",
@@ -162,7 +163,16 @@
         "Klaxonner": "Sound horn",
         "Allumer les feux": "Turn on lights",
         "Klaxon déjà déclenché à l'instant ; patientez %d s": "Horn already triggered just now; wait %d s",
-        "Feux déjà déclenchés à l'instant ; patientez %d s": "Lights already triggered just now; wait %d s"
+        "Feux déjà déclenchés à l'instant ; patientez %d s": "Lights already triggered just now; wait %d s",
+        "Commande à distance en échec pour l'équipement #%1$d : %2$s": "Remote command failed for device #%1$d: %2$s",
+        "Commande à distance : session renouvelée pour l'équipement #%d, veuillez réessayer": "Remote command: session renewed for device #%d, please try again",
+        "Échec : %s": "Failure: %s",
+        "Échec (code %s)": "Failure (code %s)",
+        "Succès": "Success",
+        "Session renouvelée, veuillez réessayer": "Session renewed, please try again",
+        "Acceptée par le véhicule": "Accepted by the vehicle",
+        "Transmise au véhicule": "Transmitted to the vehicle",
+        "Véhicule en veille": "Vehicle in sleep mode"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Unauthorized access",

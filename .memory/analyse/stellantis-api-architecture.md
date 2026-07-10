@@ -128,9 +128,20 @@ C'est **le** piège conceptuel. Il y a deux systèmes de tokens **indépendants*
   `[authorization.denied.cvs…no.matching.service.key]`) ; `process_code` (payload
   `{process_date,vin,correlation_id,process_code,process_message}`) **900** = requête acceptée,
   **901** = véhicule en veille, **903** = transmise au véhicule ; autres (**113/300/500**) = échec.
-  Côté plugin (`programmerRefreshApresAck`, corrigé audit UC11-16 2026-07-10) : lecture des DEUX champs,
-  **901** ⇒ pas de refresh (veille, mapping conservé), sinon refresh REST au prochain cron. Le mapping
-  fin code→sens (erreurs remontées à l'utilisateur) est le périmètre d'**UC18**.
+  Côté plugin : lecture des DEUX champs (`return_code` prioritaire).
+  > ⚠️ **Confirmation UC18 (2026-07-10, vs `psa/RemoteClient.py` master)** : le code de référence maintenu
+  > (psa_car_controller) ne lit en fait QUE `return_code` (`0`=succès, `400`=token, autre=échec + `reason`)
+  > sur `to/cid`, et **ne stocke AUCUN `correlation_id`** (il corrèle par `self.last_request` global + le
+  > `vin` du message) ; les `process_code` 900/901/903 + `correlation_id` viennent de la variante HA. **Le
+  > `correlation_id` n'est donc PAS ré-émis de façon fiable** sur les acks `return_code`. → le plugin
+  > (`traiterRetourCommande`, UC18) résout le véhicule par **`correlation_id` si présent, sinon repli
+  > `vin`**. Le topic `events/MPHRTServices/#` porte des **états poussés** (`charging_state`/`precond_state`),
+  > **pas** des résultats de commande → filtré (préfixe `to/cid/`) et hors périmètre du retour d'état.
+  > **900/903 sont INTERMÉDIAIRES** (mapping conservé) ; le terminal est `return_code 0`/un échec — d'où la
+  > MAJ de `last_command_result` sur CHAQUE message (le terminal, résolu par `vin`, écrase « Acceptée »).
+  > **Décision : PAS de re-publish auto sur 400** (token rafraîchi proactivement chaque minute → 400 rare ;
+  > re-publish auto = état global fragile + risque multi-véhicules) → on signale (`last_command_result` +
+  > notif « réessayez »). Cf. `18-tech.md`.
 - Auth MQTT : `username = "IMA_OAUTH_ACCESS_TOKEN"`, `password = ` **le REMOTE token OTP** (couche 2),
   le token étant **aussi** réinjecté dans le payload. Réponse `return_code='400'` ⇒ token expiré →
   refresh + re-publish.

@@ -36,7 +36,11 @@ réactive `resources/demond` (squelette Jeedom déjà présent) avec un client M
 - **Ack** : payload `{process_date, vin, correlation_id, process_code, process_message}` ;
   **900**=accepté, **901**=véhicule en veille, **903**=transmise (cf. UC18).
 - **Pont** : PHP (socket) → `{action, vin, params}` → démon publie ; réponses → `jeedom_com` → Jeedom.
-- **Reconnexion + token** : sur `return_code='400'` (token expiré) → refresh + re-publish.
+- **Reconnexion + token** : sur `return_code='400'` (token expiré) → refresh + reconnexion. ⚠️ **UC18
+  (décision 2026-07-10)** : le **re-publish automatique** de la commande **n'a pas été retenu** (le remote
+  token est rafraîchi proactivement chaque minute par `syncDaemonToken` → 400 rare ; re-publish auto =
+  état global « dernière requête » + risque de rejouer la mauvaise commande en multi-véhicules). À la
+  place, UC18 **signale** l'incident (`last_command_result` = « session renouvelée, réessayez » + notif).
 - **Packaging** : `pip3 paho-mqtt<2.0.0`. ⚠️ **Debian 12** : pip « externally managed » → virtualenv ou
   `--break-system-packages` ; `system::getCmdPython3(__CLASS__)`. Lib démon recommandée :
   **`Mips2648/jeedom-daemon-py`** (`jeedomdaemon~=1.2.0`, Python 3.9+). `hasOwnDeamon:true`, `hasDependency:true`.

@@ -537,6 +537,10 @@ class stellantis extends eqLogic {
       'position'         => array(__('Position', __FILE__), 'string', 'GEOLOC', '', false),
       'last_update'      => array(__('Dernière MAJ', __FILE__), 'string', '', '', false),
       'precond_status'   => array(__('Préconditionnement', __FILE__), 'string', '', '', false),
+      // UC18 : retour d'état asynchrone des commandes à distance. Alimentée UNIQUEMENT par le callback
+      // démon (traiterRetourCommande) — jamais par parseStatus/refreshTelemetry, donc jamais écrasée par
+      // un refresh REST. Universelle (toute commande à distance existe sur tout véhicule).
+      'last_command_result' => array(__('Dernier résultat commande', __FILE__), 'string', '', '', false),
     );
   }
 
@@ -547,7 +551,8 @@ class stellantis extends eqLogic {
    */
   public function createCommands(): void {
     $motorisation = trim((string) $this->getConfiguration('energy', ''));
-    $aCreer = array('mileage', 'doors_locked', 'position', 'last_update', 'precond_status');
+    // 'last_command_result' (UC18) : universelle (toute commande à distance existe sur tout véhicule).
+    $aCreer = array('mileage', 'doors_locked', 'position', 'last_update', 'precond_status', self::CMD_RESULT_LOGICAL_ID);
     if ($motorisation == 'Electric' || $motorisation == 'Hybrid') {
       $aCreer = array_merge($aCreer, array('battery_soc', 'autonomy', 'charging_status', 'charging_plugged'));
     }
@@ -834,8 +839,8 @@ class stellantis extends eqLogic {
       if (strcasecmp($statutPrecond, 'Failure') == 0) {
         $causeBrute = isset($_status['preconditionning']['airConditioning']['failure_cause']) && is_scalar($_status['preconditionning']['airConditioning']['failure_cause'])
           ? (string) $_status['preconditionning']['airConditioning']['failure_cause'] : 'inconnue';
-        // Aseptisation avant log (même traitement que $topicLog dans handleDaemonMessage) : donnée API externe, jamais réinjectée brute dans les logs.
-        $cause = mb_substr(preg_replace('/[[:cntrl:]]/', '', $causeBrute), 0, 200);
+        // Aseptisation avant log (helper partagé) : donnée API externe, jamais réinjectée brute dans les logs.
+        $cause = self::aseptiser($causeBrute);
         log::add('stellantis', 'warning', 'Préconditionnement refusé par le véhicule (cause : ' . $cause . ')');
       }
     }
@@ -1084,7 +1089,7 @@ class stellantis extends eqLogic {
 
   // Topics de réponse à souscrire (les deux du contrat). Vide si CID inconnu (abonnement différé).
   // - Réponses aux commandes : `.../to/cid/{CID}/#` (wildcard multi-niveaux, tous services). Porte les
-  //   acks corrélés (correlation_id) consommés par programmerRefreshApresAck.
+  //   acks corrélés (correlation_id) consommés par traiterRetourCommande (UC18).
   // - Événements poussés (états charge/précond…) : `.../events/MPHRTServices/#`. ⚠️ Le code de référence
   //   s'abonne PAR VIN (`.../MPHRTServices/{vin}`) ; on utilise le wildcard `#` qui couvre tous les
   //   véhicules du compte sans dépendre de la liste des VIN. Un préfixe NU (`.../MPHRTServices/`, sans
@@ -1318,8 +1323,8 @@ class stellantis extends eqLogic {
   /**
    * Traite un message remonté par le démon (callback jeeStellantis.php). Dispatch défensif sur 'type' :
    * - token_expired : rafraîchit le token OAuth2 (une fois, borné — pas de boucle) et le repousse ;
-   * - connected/disconnected/message : trace (le parsing métier des acks est en UC18) ;
-   * - inconnu : ignoré silencieusement (types futurs UC13-18).
+   * - connected/disconnected : trace ; message : retour d'état des commandes (UC18, traiterRetourCommande) ;
+   * - inconnu : ignoré silencieusement (types futurs).
    * Jamais de levée : appelé depuis un point d'entrée externe qui doit toujours répondre 200.
    */
   public static function handleDaemonMessage(array $_data): void {
@@ -1352,15 +1357,18 @@ class stellantis extends eqLogic {
         log::add('stellantis', 'info', 'Démon : déconnecté du broker MQTT');
         break;
       case 'message':
-        // On trace la réception ; le décodage métier COMPLET des acks/états arrive en UC18.
+        // On trace la réception, puis on interprète l'ack (UC18, traiterRetourCommande).
         // Le topic vient du broker (donnée externe) → aseptiser avant log (anti log-injection) : retrait des
         // caractères de contrôle + troncature.
-        $topic = isset($_data['topic']) ? (string) $_data['topic'] : '?';
-        $topicLog = mb_substr(preg_replace('/[[:cntrl:]]/', '', $topic), 0, 200);
-        log::add('stellantis', 'debug', 'Démon : message MQTT reçu sur ' . $topicLog);
-        // UC13/UC14/UC15 : si le message est l'ack d'une commande qu'on a émise (wakeup, charge, précond…), programmer un
-        // refresh REST (sans appel réseau ici — le callback doit répondre 200 vite ; refresh au prochain cron).
-        self::programmerRefreshApresAck($_data);
+        $topic = isset($_data['topic']) ? (string) $_data['topic'] : '';
+        $topicLog = self::aseptiser($topic);
+        log::add('stellantis', 'debug', 'Démon : message MQTT reçu sur ' . ($topicLog != '' ? $topicLog : '?'));
+        // UC18 : interpréter l'ack d'une commande qu'on a émise (wakeup/charge/précond/portes/klaxon/feux),
+        // remonter un retour d'état exploitable (last_command_result), signaler les échecs et programmer le
+        // refresh REST au prochain cron. Aucun appel réseau ici (le callback doit répondre 200 vite).
+        // On passe le topic BRUT (le filtre de préfixe est une décision de routage : il ne doit pas dépendre
+        // de l'aseptisation de présentation du log — cf. review sécurité UC18).
+        self::traiterRetourCommande($_data, $topic);
         break;
       default:
         // Type inconnu (futurs UC) : ignoré sans erreur.
@@ -1368,44 +1376,151 @@ class stellantis extends eqLogic {
     }
   }
 
+  // Aseptise une chaîne d'origine externe (topic/payload broker, cause de refus API…) avant journalisation :
+  // retrait des caractères de contrôle (anti log-injection) + troncature. NE protège PAS contre le HTML —
+  // pour un usage UI, envelopper le retour dans htmlspecialchars() en plus (cf. traiterRetourCommande).
+  private static function aseptiser(string $_texte, int $_max = 200): string {
+    return mb_substr(preg_replace('/[[:cntrl:]]/', '', $_texte), 0, $_max);
+  }
+
   /**
-   * UC13/UC14 : à réception d'un message MQTT, si c'est l'ack d'une commande qu'on a émise (wakeup, charge…
-   * — correlation_id connu), programmer une remontée d'état fraîche du véhicule concerné. On ne fait AUCUN
-   * appel REST ici (ce callback doit répondre 200 vite) : on pose un flag consommé au prochain cron(). On
-   * ignore le code 901 (véhicule en veille : rien de frais à lire) et on retire le mapping (ack traité une
-   * seule fois). Best-effort, jamais de levée (appelé depuis un point d'entrée externe).
+   * UC18 — Retour d'état asynchrone des commandes à distance. À réception d'un message MQTT sur le topic
+   * d'ACK (`.../to/cid/...`), interprète le code (return_code prioritaire sinon process_code) et :
+   *  - met à jour l'info `last_command_result` du véhicule concerné (retour utilisateur : succès, états
+   *    intermédiaires, échec — jamais figé sur « Accepté » car le message TERMINAL, résolu par vin,
+   *    réactualise l'info) ;
+   *  - signale les échecs / le renouvellement de session dans le centre de messages (jamais silencieux) ;
+   *  - programme un refresh REST au prochain cron() pour les commandes CORRÉLÉES (stateful) atteignant le
+   *    véhicule (flag consommé par cron() — aucun appel réseau ici, le callback doit répondre 200 vite).
+   * Corrélation ack→véhicule : correlation_id (précis, distingue deux commandes) puis repli vin
+   * (per-véhicule). Best-effort, jamais de levée (point d'entrée externe). Les events/MPHRTServices poussés
+   * (états spontanés, sans commande émise) sont hors périmètre : filtrés par le préfixe de topic.
    */
-  private static function programmerRefreshApresAck(array $_data): void {
+  private static function traiterRetourCommande(array $_data, string $_topic): void {
+    // 1) Filtre topic (décision de routage, sur le topic BRUT reçu du démon) : seuls les ACK de commande
+    //    (.../to/cid/...) portent un retour d'état. Les events poussés (events/MPHRTServices) n'ont pas de
+    //    lien avec une commande émise → ignorés (hors UC18).
+    if (strpos($_topic, self::MQTT_RESP_TOPIC_PREFIX) !== 0) {
+      return;
+    }
     $payload = isset($_data['payload']) ? $_data['payload'] : null;
-    if (!is_array($payload) || !isset($payload['correlation_id']) || !is_scalar($payload['correlation_id'])) {
+    if (!is_array($payload)) {
       return;
     }
-    $cle = self::CMD_CORR_KEY . (string) $payload['correlation_id'];
-    $eqId = (int) cache::byKey($cle)->getValue(0);
-    if ($eqId <= 0) {
-      return; // pas un ack d'une de nos commandes
+    // 2) Parse défensif (données broker externes, NON FIABLES). return_code prioritaire sur process_code
+    //    (aligné code de référence : `data.get("return_code") or data.get("process_code")`). Toutes les
+    //    valeurs réinjectées dans un log / la valeur d'une commande / le centre de messages sont aseptisées
+    //    (caractères de contrôle + troncature) PUIS échappées HTML (défense en profondeur XSS stocké, review
+    //    sécurité UC18 — l'échappement est transparent pour les codes/raisons légitimes). L'échappement des
+    //    codes rc/pc est inoffensif pour les comparaisons ci-dessous (les codes légitimes sont numériques).
+    $rc = htmlspecialchars(self::aseptiser((isset($payload['return_code']) && is_scalar($payload['return_code'])) ? (string) $payload['return_code'] : '', 40), ENT_QUOTES, 'UTF-8');
+    $pc = htmlspecialchars(self::aseptiser((isset($payload['process_code']) && is_scalar($payload['process_code'])) ? (string) $payload['process_code'] : '', 40), ENT_QUOTES, 'UTF-8');
+    $corr = (isset($payload['correlation_id']) && is_scalar($payload['correlation_id'])) ? (string) $payload['correlation_id'] : '';
+    $vin = (isset($payload['vin']) && is_scalar($payload['vin'])) ? (string) $payload['vin'] : '';
+    $reasonBrut = '';
+    if (isset($payload['reason']) && is_scalar($payload['reason'])) {
+      $reasonBrut = (string) $payload['reason'];
+    } elseif (isset($payload['process_message']) && is_scalar($payload['process_message'])) {
+      $reasonBrut = (string) $payload['process_message'];
     }
-    // Le code de résultat PSA arrive sous 'return_code' OU 'process_code' selon le type de message (cf.
-    // code de référence : `data.get("return_code") or data.get("process_code")`) → lire les DEUX, sinon un
-    // 901 (véhicule en veille) reçu sous return_code échapperait à la garde ci-dessous et déclencherait un
-    // refresh REST inutile (léger coût anti-ban). Corrigé lors de l'audit UC11-16, 2026-07-10.
-    $code = '';
-    if (isset($payload['return_code']) && is_scalar($payload['return_code']) && (string) $payload['return_code'] !== '') {
-      $code = (string) $payload['return_code'];
-    } elseif (isset($payload['process_code']) && is_scalar($payload['process_code'])) {
-      $code = (string) $payload['process_code'];
-    }
-    // 901 = véhicule en veille : la commande n'a pas abouti à une remontée fraîche → on n'efface pas le
-    // mapping (un état ultérieur — Success/903 — peut encore arriver pour ce même correlation_id).
-    if ($code === '901') {
-      log::add('stellantis', 'info', 'Commande MQTT : véhicule en veille (équipement #' . $eqId . '), pas de rafraîchissement programmé');
+    $reason = htmlspecialchars(self::aseptiser($reasonBrut), ENT_QUOTES, 'UTF-8');
+    // 3) Interprétation. known=false ⇒ message to/cid sans code exploitable → on ne touche à rien (pas de
+    //    faux « Échec »).
+    $interp = self::interpreterAck($rc, $pc, $reason);
+    if (!$interp['known']) {
       return;
     }
-    // TTL généreux (> backoff 429) : si le cron sort tôt (cooldown anti rate-limit actif), le flag survit
-    // jusqu'à la reprise de la boucle véhicule — le refresh post-ack n'est pas perdu silencieusement.
-    cache::set(self::CMD_PENDING_KEY . $eqId, '1', self::CMD_PENDING_TTL);
-    cache::delete($cle);
-    log::add('stellantis', 'info', 'Commande MQTT : ack reçu (équipement #' . $eqId . '), rafraîchissement programmé au prochain cron');
+    // 4) Résolution du véhicule : correlation_id (précis) puis repli vin (per-véhicule).
+    $eqId = 0;
+    $corrMapped = false;
+    if ($corr != '') {
+      $eqId = (int) cache::byKey(self::CMD_CORR_KEY . $corr)->getValue(0);
+      if ($eqId > 0) {
+        $corrMapped = true;
+      }
+    }
+    $eqLogic = null;
+    if ($eqId > 0) {
+      $eqLogic = eqLogic::byId($eqId);
+    } elseif ($vin != '') {
+      $eqLogic = eqLogic::byLogicalId($vin, 'stellantis');
+    }
+    // eqLogic introuvable ou désactivé (véhicule disparu du compte, désactivé par la sync) → on ignore.
+    if (!is_object($eqLogic) || !($eqLogic instanceof stellantis) || !$eqLogic->getIsEnable()) {
+      return;
+    }
+    $eqId = (int) $eqLogic->getId();
+    // 5) MAJ de l'info retour d'état (création paresseuse pour les véhicules antérieurs à UC18).
+    try {
+      $eqLogic->checkAndUpdateCmd($eqLogic->ensureCommand(self::CMD_RESULT_LOGICAL_ID), $interp['result']);
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'warning', 'Retour d\'état : MAJ de last_command_result impossible pour l\'équipement #' . $eqId . ' (' . $e->getMessage() . ')');
+    }
+    // 6) Notif centre de messages (jamais silencieux). removeAll avant add ⇒ au plus un message actif par
+    //    véhicule, actualisé (pas d'empilement — même pattern que otp_required).
+    $cleMessage = 'command_failed::' . $eqId;
+    if ($interp['notify'] == 'failure') {
+      message::removeAll('stellantis', $cleMessage);
+      $detail = ($reason != '') ? $reason : ('code ' . ($rc != '' ? $rc : $pc));
+      message::add('stellantis', sprintf(__('Commande à distance en échec pour l\'équipement #%1$d : %2$s', __FILE__), $eqId, $detail), '', $cleMessage);
+      log::add('stellantis', 'warning', 'Retour d\'état : commande en échec pour l\'équipement #' . $eqId . ' (' . $detail . ')');
+    } elseif ($interp['notify'] == 'token') {
+      message::removeAll('stellantis', $cleMessage);
+      message::add('stellantis', sprintf(__('Commande à distance : session renouvelée pour l\'équipement #%d, veuillez réessayer', __FILE__), $eqId), '', $cleMessage);
+      log::add('stellantis', 'info', 'Retour d\'état : session renouvelée (token) pour l\'équipement #' . $eqId . ' — commande à rejouer');
+    } elseif ($interp['notify'] == 'clear') {
+      // Succès : lever une éventuelle notif d'échec antérieure de ce véhicule.
+      message::removeAll('stellantis', $cleMessage);
+    }
+    // 7) Refresh REST au prochain cron : uniquement pour une commande CORRÉLÉE (stateful) atteignant le
+    //    véhicule. Le repli vin (klaxon/feux stateless, message terminal sans corr) ne programme rien
+    //    (anti-ban). TTL du flag > backoff 429 : survit si le cron sort tôt.
+    if ($corrMapped && $interp['refresh']) {
+      cache::set(self::CMD_PENDING_KEY . $eqId, '1', self::CMD_PENDING_TTL);
+      log::add('stellantis', 'info', 'Retour d\'état : ack corrélé (équipement #' . $eqId . '), rafraîchissement programmé au prochain cron');
+    }
+    // 8) Cycle de vie du mapping : conservé sur les états intermédiaires (900/903/901) pour capter un
+    //    éventuel message terminal encore corrélé ; supprimé sur un état terminal (succès/échec/400).
+    if ($corr != '' && !$interp['keepMapping']) {
+      cache::delete(self::CMD_CORR_KEY . $corr);
+    }
+  }
+
+  /**
+   * UC18 — Interprète les codes d'ack MQTT (return_code prioritaire sinon process_code) en instructions de
+   * traitement. Sémantique (analyse § 1.3 + code de référence psa_car_controller) : return_code 0=succès /
+   * 400=token expiré / autre=échec ; process_code 900=acceptée / 903=transmise / 901=en veille / autre
+   * (113/300/500)=échec. 900/903/901 sont INTERMÉDIAIRES (mapping conservé) ; le terminal est un succès ou
+   * un échec. Retourne ['result'(string UI), 'refresh'(bool), 'keepMapping'(bool),
+   * 'notify'('none'|'failure'|'token'|'clear'), 'known'(bool)]. known=false ⇒ aucun code exploitable.
+   * ⚠️ i18n : toutes les chaînes UI sont des __() LITTÉRAUX ici (scan statique de l'extracteur, piège UC07).
+   */
+  private static function interpreterAck(string $_rc, string $_pc, string $_reason): array {
+    $echec = ($_reason != '')
+      ? sprintf(__('Échec : %s', __FILE__), $_reason)
+      : sprintf(__('Échec (code %s)', __FILE__), ($_rc != '' ? $_rc : $_pc));
+    if ($_rc !== '') {
+      if ($_rc === '0') {
+        return array('result' => __('Succès', __FILE__), 'refresh' => true, 'keepMapping' => false, 'notify' => 'clear', 'known' => true);
+      }
+      if ($_rc === '400') {
+        return array('result' => __('Session renouvelée, veuillez réessayer', __FILE__), 'refresh' => false, 'keepMapping' => false, 'notify' => 'token', 'known' => true);
+      }
+      return array('result' => $echec, 'refresh' => false, 'keepMapping' => false, 'notify' => 'failure', 'known' => true);
+    }
+    if ($_pc !== '') {
+      if ($_pc === '900') {
+        return array('result' => __('Acceptée par le véhicule', __FILE__), 'refresh' => true, 'keepMapping' => true, 'notify' => 'none', 'known' => true);
+      }
+      if ($_pc === '903') {
+        return array('result' => __('Transmise au véhicule', __FILE__), 'refresh' => true, 'keepMapping' => true, 'notify' => 'none', 'known' => true);
+      }
+      if ($_pc === '901') {
+        return array('result' => __('Véhicule en veille', __FILE__), 'refresh' => false, 'keepMapping' => true, 'notify' => 'none', 'known' => true);
+      }
+      return array('result' => $echec, 'refresh' => false, 'keepMapping' => false, 'notify' => 'failure', 'known' => true);
+    }
+    return array('result' => '', 'refresh' => false, 'keepMapping' => true, 'notify' => 'none', 'known' => false);
   }
 
   /* * ******************* UC12 — Activation OTP & remote token ******************* */
@@ -1729,6 +1844,8 @@ class stellantis extends eqLogic {
   const CMD_PENDING_TTL = 1200;                                  // TTL du flag pending : > backoff 429 (RATELIMIT_COOLDOWN) pour ne pas perdre le refresh si le cron sort tôt
   const CMD_CORR_KEY = 'stellantis::cmd_corr::';                 // + correlation_id (cache) => eqId : corrélation ack→véhicule (toute commande MQTT)
   const CMD_CORR_TTL = 300;                                      // TTL du mapping corrélation→eqId (s) : fenêtre d'attente de l'ack d'une commande (wakeup/charge/…)
+  const CMD_RESULT_LOGICAL_ID = 'last_command_result';          // logicalId de l'info « Dernier résultat commande » (UC18), alimentée par le callback démon
+  const MQTT_RESP_TOPIC_PREFIX = 'psa/RemoteServices/to/cid/';  // préfixe des topics d'ACK de commande (UC18) ; les events/MPHRTServices sont hors périmètre du retour d'état
   const WAKEUP_QUOTA_KEY = 'stellantis::wakeup_quota';           // quota GLOBAL compte (fenêtre glissante JSON)
   const WAKEUP_QUOTA_MAX = 5;                                     // marge sous le ban serveur (~6 wakeups / 20 min, niveau COMPTE)
   const WAKEUP_QUOTA_FENETRE = 1200;                             // fenêtre du quota global (s) = 20 min
@@ -2121,10 +2238,10 @@ class stellantis extends eqLogic {
    * Point commun des commandes de SIGNALEMENT « sans état » (klaxon/feux, UC17) : debounce per-véhicule →
    * pré-requis OTP → pose du debounce AVANT réseau → publication MQTT. Volontairement PLUS SIMPLE que le
    * gabarit UC13-16 : commandes stateless, donc AUCUN mapping CMD_CORR_KEY posé.
-   * ⚠️ Dette assumée (validée) : aujourd'hui CMD_CORR_KEY sert UNIQUEMENT à programmer un refresh REST au
-   * prochain cron (programmerRefreshApresAck) — inutile ici (rien de frais à relire pour klaxon/feux) et
-   * gaspilleur d'un slot de quota anti-ban. La corrélation ack→véhicule pour un retour d'état
-   * (last_command_result) relève d'UC18, transverse à UC13-17, qui réécrira ce pipeline.
+   * ⚠️ Décision (validée) : CMD_CORR_KEY sert à programmer un refresh REST au prochain cron pour les
+   * commandes STATEFUL — inutile ici (rien de frais à relire pour klaxon/feux) et gaspilleur d'un slot de
+   * quota anti-ban. UC18 (traiterRetourCommande) remonte tout de même un retour d'état
+   * (last_command_result) pour klaxon/feux via le REPLI VIN de l'ack, sans mapping et sans refresh REST.
    * ⚠️ i18n : $_refusMsg DOIT être une chaîne déjà traduite (produite par un __() LITTÉRAL au point
    * d'appel — horn()/lights()), jamais reconstruite ici : l'extracteur i18n est un scan statique (piège UC07).
    * @throws stellantisException 'rate_limited' (debounce/quota), 'otp_required' (OTP non activé), sinon api_error
@@ -2211,7 +2328,7 @@ class stellantis extends eqLogic {
     }
     foreach ($vehicules as $eqLogic) {
       // UC13/UC14 : une commande MQTT (wakeup, charge…) a été acquittée depuis la dernière passe (flag posé
-      // par programmerRefreshApresAck) → remontée d'état FORCÉE (hors cadence autorefresh), avec les
+      // par traiterRetourCommande, UC18) → remontée d'état FORCÉE (hors cadence autorefresh), avec les
       // garde-fous 429 de refreshTelemetry(). Consommé une seule fois. Le backoff rate-limit ci-dessus a
       // déjà court-circuité la passe si besoin.
       $clePending = self::CMD_PENDING_KEY . $eqLogic->getId();

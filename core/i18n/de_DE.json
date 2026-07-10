@@ -128,6 +128,7 @@
         "Verrouillage": "Verriegelung",
         "Position": "Position",
         "Dernière MAJ": "Letzte Aktualisierung",
+        "Dernier résultat commande": "Letztes Befehlsergebnis",
         "Pilotage à distance (OTP)": "Fernsteuerung (OTP)",
         "Activé": "Aktiviert",
         "Expiré — renouvellement nécessaire": "Abgelaufen — Erneuerung erforderlich",
@@ -162,7 +163,16 @@
         "Klaxonner": "Hupen",
         "Allumer les feux": "Licht einschalten",
         "Klaxon déjà déclenché à l'instant ; patientez %d s": "Hupe wurde soeben ausgelöst; warten Sie %d s",
-        "Feux déjà déclenchés à l'instant ; patientez %d s": "Licht wurde soeben eingeschaltet; warten Sie %d s"
+        "Feux déjà déclenchés à l'instant ; patientez %d s": "Licht wurde soeben eingeschaltet; warten Sie %d s",
+        "Commande à distance en échec pour l'équipement #%1$d : %2$s": "Fernbefehl für Gerät #%1$d fehlgeschlagen: %2$s",
+        "Commande à distance : session renouvelée pour l'équipement #%d, veuillez réessayer": "Fernbefehl: Sitzung für Gerät #%d erneuert, bitte versuchen Sie es erneut",
+        "Échec : %s": "Fehlschlag: %s",
+        "Échec (code %s)": "Fehlschlag (Code %s)",
+        "Succès": "Erfolg",
+        "Session renouvelée, veuillez réessayer": "Sitzung erneuert, bitte versuchen Sie es erneut",
+        "Acceptée par le véhicule": "Vom Fahrzeug akzeptiert",
+        "Transmise au véhicule": "An das Fahrzeug übermittelt",
+        "Véhicule en veille": "Fahrzeug im Ruhezustand"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert",

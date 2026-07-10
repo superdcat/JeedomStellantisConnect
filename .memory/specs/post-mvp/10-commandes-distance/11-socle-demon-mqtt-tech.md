@@ -22,8 +22,12 @@
 - **CID** (`AP-ACNT…` PSA / `OV-ACNT…` Opel-Vauxhall) : source API **non figée** (`get_mqtt_customer_id()`
   côté référence) → **hors périmètre socle**, relève de UC12. Le socle lit `config customer_id` ; si vide,
   il se connecte au broker mais **diffère l'abonnement** (loggué), sans échec.
-- **Ack** (UC18) : payload `{process_date,vin,correlation_id,process_code,process_message}` ;
-  `return_code=='400'` = token expiré → refresh + reconnexion.
+- **Ack** (UC18) : deux formes coexistent — `{process_date,vin,correlation_id,process_code,process_message}`
+  (900/901/903) **ou** `{return_code,reason,vin}` (`0`=succès, `400`=token, autre=échec ; ⚠️ **sans
+  `correlation_id` fiable** sur cette forme → UC18 corrèle par `correlation_id` puis **repli `vin`**).
+  `return_code=='400'` → refresh + reconnexion, **sans re-publish auto** (décision UC18, signalé à la
+  place). Le topic `events/MPHRTServices/#` porte des **états poussés** (`charging_state`/`precond_state`),
+  **pas** des résultats de commande → hors périmètre du retour d'état.
 
 ## Architecture
 
