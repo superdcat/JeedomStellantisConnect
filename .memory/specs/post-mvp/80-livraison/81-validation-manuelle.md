@@ -46,6 +46,32 @@ manuelle** sur un Jeedom réel : la « preuve » qu'une UC marche vraiment (lint
      orphelin (`ps aux | grep demond`), port socket libéré.
   > CID inconnu au socle → log « abonnement différé (customer id inconnu) » attendu, sans erreur
   > (l'abonnement effectif et l'ack de commande relèvent de UC12+).
+- **Résilience connexion démon (post-MVP 19, ajouté 2026-07-11 — les 6 AC de `19-resilience-connexion-demon.md`)** :
+  > ⚠️ Le scénario `rc=7` **organique** d'avant UC12 n'est plus reproductible (depuis UC12,
+  > `pushDaemonConnect` exige `hasRemoteToken()`) → les cas « auth » se testent par **déclenchement
+  > artificiel** (broker/token délibérément invalides).
+  1. **Backoff transitoire** : pointer `broker_host` (config plugin) vers un hôte injoignable (ex. IP non
+     routée) → « Démarrer le démon ». Logs `stellantis_daemon` : « nouvelle tentative dans Xs » avec X
+     **croissant** (≈5 → 10 → 20 …) et **plafonné à 300 s**, **jamais < 5 s**. Aucune rafale de
+     reconnexions immédiates. Le POST callback (log plugin) n'est **pas** émis à chaque tentative
+     (1 seul événement `disconnected`/`retrying` pour la série).
+  2. **Blocage après N échecs d'auth** : avec un pilotage OTP activé, invalider volontairement le remote
+     token/CID (ou pointer vers un broker qui refuse l'auth) → après **5 échecs d'auth consécutifs**, log
+     « N échecs d'authentification consécutifs → arrêt des tentatives » ; le process `demond.py` reste
+     **vivant** (`ps aux | grep demond`) mais **cesse** de retenter ; un **message** utilisateur
+     « démon … n'a pas pu s'authentifier … » apparaît (centre de messages), non spammé (1 seul).
+  3. **Réarmement** : depuis l'état bloqué, deux déclencheurs remettent compteur + backoff à zéro et
+     relancent une tentative (retour en connexion si les credentials sont redevenus valides) —
+     (a) **« Démarrer le démon »** (relance → action `connect`) → log « Connexion MQTT à … (tentative) » ;
+     (b) **rotation du remote token** (~15 min, action `set_token`) → log « Rotation du token MQTT →
+     reconnexion (réarmement de la FSM) ». Dans les deux cas, plus aucun « arrêt des tentatives ».
+  4. **Reset sur succès** : après une connexion réussie (`rc=0`), une coupure réseau ultérieure repart
+     d'un backoff **court** (compteur réinitialisé), pas du dernier délai plafonné.
+  5. **Page Santé** : pour chacun des 3 états, la ligne « Connexion du démon (pilotage à distance) »
+     reflète l'état (Connecté / Reconnexion en cours / **Authentification refusée** en rouge) ; ligne
+     **absente** si le démon est arrêté ou l'OTP non activé (pas de faux négatif).
+  6. **Aucun secret loggué** : `grep -iE "apikey|password|access_token|token|Bearer"` sur
+     `log/stellantis_daemon` (y compris en niveau **debug**) → **0** occurrence en clair (seulement `***`).
 - **Commandes (post-MVP 12-x)** : OTP réalisée une fois ; wakeup throttlé ; lock/charge → ack remonté ;
   refus véhicule signalé.
 - **Anti-ban/batterie (72/73)** : vérifier qu'aucune rafale n'est émise ; auto-wakeup off par défaut.

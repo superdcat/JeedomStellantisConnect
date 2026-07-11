@@ -28,7 +28,7 @@ Un plugin Jeedom **n'est pas autonome** : il s'installe sous `<jeedom>/plugins/s
 PHP dépend du core Jeedom, atteint via `require_once __DIR__ . '/../../../../core/php/core.inc.php';`.
 Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 
-> **État d'avancement (2026-07-10)** : l'id a été renommé `template` → `stellantis` (classes
+> **État d'avancement (2026-07-11)** : l'id a été renommé `template` → `stellantis` (classes
 > `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP lecture seule COMPLET** : UC01 à
 > UC10 sont implémentées (configuration du plugin, client HTTP REST, authentification OAuth2 PKCE/token,
 > test de connexion, découverte des véhicules, création/synchronisation des équipements, commandes info
@@ -137,8 +137,30 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > code `400`, **pas de re-publish auto** (décision : token rafraîchi chaque minute → 400 rare) : on signale
 > (« session renouvelée, réessayez »). Sécurité : texte externe (`reason`/`process_message`/codes) aseptisé
 > (helper `aseptiser()`) **puis** `htmlspecialchars` avant tout usage UI/log ; filtre de topic sur le topic
-> **brut**. Aucun appel réseau dans le callback (répond 200 vite) ; démon (`demond.py`) **inchangé**. Suite =
-> post-MVP (résilience connexion démon UC19, localisation, entretien…). Cette note est
+> **brut**. Aucun appel réseau dans le callback (répond 200 vite) ; démon (`demond.py`) **inchangé** à UC18.
+> **Post-MVP : UC19** — **résilience de la connexion du démon MQTT** (backoff + arrêt sur échec d'auth) :
+> l'auto-reconnexion **native de paho est abandonnée** au profit d'une **machine à états mono-thread**
+> (`resources/demond/demond.py`, classe `MqttBridge`) pilotée depuis `listen()` — `connect()` synchrone +
+> **pompage manuel `client.loop(timeout=0)`** à chaque tick (aucun thread, aucun verrou). États
+> `IDLE/CONNECTING/CONNECTED/BACKOFF/BLOCKED` : **backoff exponentiel** plafonné (base 5 s, ×2, plafond
+> 300 s) + jitter ±20 %, plancher dur ≥5 s ; **compteur d'échecs d'auth** → après **N=5** consécutifs,
+> passage en **BLOCKED** (arrêt des tentatives, **process vivant**, socket à l'écoute pour réarmement) ;
+> distinction **transitoire vs auth** via `decider_categorie()` (rc=3 transitoire ; rc 1/2/4/5 ou `rc=7`
+> sans CONNACK = auth) ; **réarmement** sur `connect`/`set_token` (reset compteur+backoff, y compris depuis
+> BLOCKED — le `syncDaemonToken` du cron pousse un `set_token` ~toutes les 15 min, réarmant implicitement).
+> ⚠️ **Quirks de `paho-mqtt==1.6.1` neutralisés** (constatés empiriquement, cf. `19-tech.md` § Garde-fous
+> FSM) : `reconnect_on_failure=False` (2e canal d'auto-reconnexion interne sur rc=1/2, sans `on_connect`) ;
+> `client._connect_timeout` forcé (`socket.setdefaulttimeout()` **sans effet** sur `connect()`) ;
+> **anti-double-comptage** : un CONNACK refusé (rc 4/5) déclenchant `on_connect` **ET** `on_disconnect`,
+> seul `on_disconnect` compte l'échec (`on_connect` mémorise le rc) ; garde `client is not self._client`
+> contre les callbacks d'un client périmé. **Remontée d'état throttlée** : le démon ne `_notify` qu'au
+> **changement d'état public** (`connected`/`retrying`/`blocked`) — pas un POST par tentative. Côté PHP,
+> `handleDaemonMessage()` gère le nouvel event **`auth_failed`** (→ `alerterDaemonAuthFailed()`, alerte
+> `message::add` throttlée calquée sur `alerterOtpRequired`, clé `daemon_auth_failed`), enrichit
+> `connected` (efface l'alerte) / `disconnected`, maintient un **cache d'état démon** (`DAEMON_CONN_STATE_KEY`)
+> lu par `health()` (ligne « Connexion du démon », **sans appel réseau**, affichée seulement si démon lancé
+> + OTP actif) ; nettoyage dans `deamon_stop()`/`purgeOtp()`. Suite =
+> post-MVP (localisation, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
 

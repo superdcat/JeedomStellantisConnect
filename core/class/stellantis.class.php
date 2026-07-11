@@ -1011,6 +1011,36 @@ class stellantis extends eqLogic {
       'advice' => ($otp == 'expired') ? __('Renouvelez le jeton distant depuis la configuration du plugin (sans SMS si possible)', __FILE__) : '',
       'state' => ($otp != 'expired'),
     );
+    // UC19 : état de la connexion démon↔broker (FSM de reconnexion). AUCUN appel réseau (lecture cache
+    // seule, alimentée par handleDaemonMessage). Affichée seulement si le démon tourne ET le pilotage à
+    // distance est actif — sinon c'est du bruit (démon non lancé, ou OTP non activé : rien à signaler ici).
+    if (self::deamon_info()['state'] == 'ok' && $otp == 'active') {
+      $connState = (string) cache::byKey(self::DAEMON_CONN_STATE_KEY)->getValue('');
+      if ($connState == 'auth_failed') {
+        $lignes[] = array(
+          'test' => __('Connexion du démon (pilotage à distance)', __FILE__),
+          'result' => __('Authentification refusée — reconnexion suspendue', __FILE__),
+          'advice' => __('Réactivez le pilotage à distance (OTP) puis redémarrez le démon', __FILE__),
+          'state' => false,
+        );
+      } elseif ($connState == 'connected') {
+        $lignes[] = array(
+          'test' => __('Connexion du démon (pilotage à distance)', __FILE__),
+          'result' => __('Connecté au broker', __FILE__),
+          'advice' => '',
+          'state' => true,
+        );
+      } elseif ($connState == 'retrying') {
+        $lignes[] = array(
+          'test' => __('Connexion du démon (pilotage à distance)', __FILE__),
+          'result' => __('Reconnexion en cours', __FILE__),
+          'advice' => '',
+          'state' => true,
+        );
+      }
+      // $connState == '' (non initialisé, ex. juste après démarrage) : ligne omise, jamais interprétée
+      // comme un échec (cf. pattern otpState — le vide n'est pas une erreur).
+    }
     foreach (eqLogic::byType('stellantis', true) as $eqLogic) {
       $nom = $eqLogic->getName();
       // Privacy connu du dernier /status (cf. refreshTelemetry) : signalé sans être une erreur dure.
@@ -1074,6 +1104,11 @@ class stellantis extends eqLogic {
   const MQTT_PORT = 8885;
   const MQTT_USERNAME = 'IMA_OAUTH_ACCESS_TOKEN';
   const DAEMON_TOKEN_MARKER = 'stellantis::daemon_token_marker';
+
+  // UC19 — Résilience de la connexion démon (backoff + arrêt sur échec d'auth, cf. resources/demond/demond.py).
+  const DAEMON_AUTH_ALERT_KEY = 'stellantis::daemon_auth_alert'; // cache : dédup/throttle de l'alerte auth démon
+  const DAEMON_AUTH_COOLDOWN = 3600;                              // s : throttle de l'alerte (1x/h max)
+  const DAEMON_CONN_STATE_KEY = 'stellantis::daemon_conn_state';  // cache (lifetime 0) : dernier état conn démon reçu ('connected'|'retrying'|'auth_failed')
 
   // Hôte du broker MQTT (config 'broker_host' sinon défaut). Le port est constant (8885 TLS).
   public static function brokerHost(): string {
@@ -1199,6 +1234,7 @@ class stellantis extends eqLogic {
     }
     system::fuserk(self::socketPort());
     cache::delete(self::DAEMON_TOKEN_MARKER);
+    cache::delete(self::DAEMON_CONN_STATE_KEY); // UC19 : l'état de connexion démon ne survit pas à l'arrêt
     sleep(1);
   }
 
@@ -1323,7 +1359,9 @@ class stellantis extends eqLogic {
   /**
    * Traite un message remonté par le démon (callback jeeStellantis.php). Dispatch défensif sur 'type' :
    * - token_expired : rafraîchit le token OAuth2 (une fois, borné — pas de boucle) et le repousse ;
-   * - connected/disconnected : trace ; message : retour d'état des commandes (UC18, traiterRetourCommande) ;
+   * - connected/disconnected : trace + MAJ de l'état de connexion (UC19) ;
+   * - auth_failed (UC19) : le démon a cessé de retenter après N échecs d'auth → alerte utilisateur throttlée ;
+   * - message : retour d'état des commandes (UC18, traiterRetourCommande) ;
    * - inconnu : ignoré silencieusement (types futurs).
    * Jamais de levée : appelé depuis un point d'entrée externe qui doit toujours répondre 200.
    */
@@ -1351,10 +1389,25 @@ class stellantis extends eqLogic {
         }
         break;
       case 'connected':
+        // UC19 : une connexion réussie efface toute alerte/état « auth requise » précédent — la FSM du
+        // démon vient de démontrer que l'authentification fonctionne à nouveau.
         log::add('stellantis', 'info', 'Démon : connecté au broker MQTT');
+        message::removeAll('stellantis', 'daemon_auth_failed');
+        cache::delete(self::DAEMON_AUTH_ALERT_KEY);
+        cache::set(self::DAEMON_CONN_STATE_KEY, 'connected', 0);
         break;
       case 'disconnected':
+        // UC19 : déconnexion transitoire (le démon retente déjà avec backoff, déjà throttlé côté démon —
+        // pas de message::add ici, juste l'état de santé).
         log::add('stellantis', 'info', 'Démon : déconnecté du broker MQTT');
+        cache::set(self::DAEMON_CONN_STATE_KEY, 'retrying', 0);
+        break;
+      case 'auth_failed':
+        // UC19 : N échecs d'authentification consécutifs → le démon a cessé de retenter (reste vivant).
+        // Jamais de levée (point d'entrée externe) : alerte utilisateur throttlée + état de santé.
+        log::add('stellantis', 'warning', 'Démon : authentification refusée par le broker après plusieurs tentatives — reconnexion suspendue');
+        cache::set(self::DAEMON_CONN_STATE_KEY, 'auth_failed', 0);
+        self::alerterDaemonAuthFailed();
         break;
       case 'message':
         // On trace la réception, puis on interprète l'ack (UC18, traiterRetourCommande).
@@ -1823,6 +1876,19 @@ class stellantis extends eqLogic {
     log::add('stellantis', 'warning', 'UC12 : remote token expiré → renouvellement/ré-activation OTP requis (alerte utilisateur)');
   }
 
+  // UC19 — Alerte utilisateur « le démon n'arrive plus à s'authentifier auprès du broker », THROTTLÉE
+  // (calquée sur alerterOtpRequired) : appelée depuis handleDaemonMessage (cas auth_failed) → sans garde,
+  // elle noierait le centre de messages si le démon repassait plusieurs fois en état bloqué.
+  private static function alerterDaemonAuthFailed(): void {
+    if (cache::byKey(self::DAEMON_AUTH_ALERT_KEY)->getValue('') != '') {
+      return;
+    }
+    cache::set(self::DAEMON_AUTH_ALERT_KEY, '1', self::DAEMON_AUTH_COOLDOWN);
+    message::removeAll('stellantis', 'daemon_auth_failed');
+    message::add('stellantis', __('Le démon de pilotage à distance n\'a pas pu s\'authentifier auprès du broker après plusieurs tentatives. Vérifiez votre connexion et, si nécessaire, réactivez le pilotage à distance (OTP) depuis la configuration du plugin, puis redémarrez le démon.', __FILE__), '', 'daemon_auth_failed');
+    log::add('stellantis', 'warning', 'UC19 : démon bloqué après plusieurs échecs d\'authentification MQTT (alerte utilisateur)');
+  }
+
   // Purge le remote token + le device OTP + l'état d'alerte/pending. Appelée sur changement de
   // credentials/marque (device devenu incohérent) et à la désinstallation. NE réinitialise PAS le
   // compteur SMS à vie (sécurité : ne jamais rouvrir un quota potentiellement épuisé côté serveur).
@@ -1832,6 +1898,11 @@ class stellantis extends eqLogic {
     config::save(self::OTP_SMS_PENDING_KEY, '', 'stellantis');
     cache::delete(self::OTP_ALERT_KEY);
     message::removeAll('stellantis', 'otp_required');
+    // UC19 : purge l'état/alerte de résilience démon (cohérence cycle de vie avec la purge OTP, dont
+    // dépend l'authentification MQTT — cf. -tech UC19 § Cycle de vie).
+    message::removeAll('stellantis', 'daemon_auth_failed');
+    cache::delete(self::DAEMON_AUTH_ALERT_KEY);
+    cache::delete(self::DAEMON_CONN_STATE_KEY);
   }
 
   /* * ******************* UC13 — Wakeup / rafraîchissement à la demande ******************* */
