@@ -200,7 +200,22 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > `Electric`/`Hybrid`). **Migration** (`plugin_info/install.php` → `stellantis_update()`) : sur un thermique
 > **déjà découvert**, l'ancien `autonomy` (autrefois alimenté par le carburant) se fige ⇒ **masqué**
 > (`setIsVisible(0)`, best-effort, idempotent, non destructif, borné à `energy=='Thermal'`) pour éviter le
-> doublon avec `autonomy_fuel`. Suite =
+> doublon avec `autonomy_fuel`. **Post-MVP : UC24** — **suivi & statistiques de charge** (télémétrie
+> énergie dérivée, 100 % lecture/parsing, aucun appel réseau/MQTT nouveau) : détection des **sessions de
+> charge** par une machine à états en cache dans `refreshTelemetry()` (`suivreSessionCharge()`,
+> orchestration cache+IO **séparée** du calcul pur `calculerRecapSession()`, précédent UC18). Transition
+> `charging_status` **`InProgress` → statut terminal** (`Finished`/`Stopped`/`Disconnected`/`Failure` ;
+> l'API ne connaît **pas** de valeur `Started`, détection insensible à la casse `estStatutTerminal()`) ⇒
+> 3 commandes info **historisées, créées paresseusement** (jamais dans `createCommands`, précédent
+> UC21/23) : `charge_session_energy` (kWh ≈ Δ SOC% × capacité), `charge_session_duration` (min),
+> `charge_session_cost` (€) — libellés « (est.) » (estimations, AC2). Capacité = **config véhicule
+> `battery_capacity` (kWh) autoritaire**, repli best-effort `energies[].extension.electric.battery.load.capacity` ;
+> tarif = config `charge_tarif` (€/kWh) — 2 champs **éditables** ajoutés au formulaire desktop (sinon
+> effacés au Sauvegarder). ⚠️ Les états terminaux de `charging.status` **persistent** poll après poll
+> (`Disconnected` au repos, `Finished` tant que non débranché) → le log « session non comptabilisée » n'est
+> émis que sur **transition** (dernier statut mémorisé en cache `CHARGE_LAST_STATUT_KEY`), jamais à chaque
+> poll (~288×/j sinon ; cf. `stellantis-data-model.md` § 2.1). `health()` signale une capacité manquante ;
+> idempotence par purge du cache de session **avant** écriture des commandes. Suite =
 > post-MVP (localisation, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
@@ -285,6 +300,8 @@ Configuration & secrets :
   SMS **à vie** 0..20, jamais remis à 0 auto), `otp_sms_pending` (flag « SMS envoyé, activation en
   attente »). `client_secret` **chiffré**, jamais loggué.
 - **Par véhicule** (`configuration` de l'eqLogic) : `id` API, `vin`, `brand`, motorisation, capacités.
+  **UC24** ajoute 2 champs **saisis manuellement** (formulaire desktop, éditables) : `battery_capacity`
+  (capacité batterie kWh, sert à estimer l'énergie de charge) et `charge_tarif` (prix du kWh €, coût estimé).
 - **Tokens** OAuth2 (access/refresh) + **remote token OTP** (UC12, clé cache `stellantis::remote_token`,
   **distinct** du token OAuth2 — c'est le mot de passe MQTT, TTL ~890 s) : en cache **chiffré** (classe
   `cache`). ⚠️ `access_token` OAuth2 à durée courte (~15 min) → refresh proactif/réactif.

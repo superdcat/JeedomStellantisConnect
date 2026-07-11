@@ -11,7 +11,13 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-11 (UC23 : `stellantis-data-model.md` § 2.1 — **carburant & hybrides** :
+> **Dernière synchro** : 2026-07-11 (UC24 : `stellantis-data-model.md` § 2.1 — **suivi de sessions de
+> charge** : les états terminaux de `charging.status` **persistent** poll après poll (`Disconnected` au
+> repos, `Finished` non débranché) → une machine à états doit agir sur la **transition** `InProgress →
+> terminal` (dernier statut en cache), jamais à chaque poll (sinon spam ~288×/j) ; **pas** de valeur
+> `Started` ; énergie = Δ SOC% × capacité (`battery_capacity` config autoritaire, repli
+> `extension.electric.battery.load.capacity`) — cf. `24-tech.md`). Précédemment 2026-07-11 (UC23 :
+> `stellantis-data-model.md` § 2.1 — **carburant & hybrides** :
 > autonomie **scindée par énergie** (`autonomy` élec / `autonomy_fuel` carburant, clés distinctes) ; **aucune
 > autonomie combinée native** → `autonomy_total` = valeur **dérivée** (somme, création paresseuse, hybride
 > uniquement), seule exception au pattern « 1 champ → 1 commande » ; migration masquant l'ancien `autonomy`
@@ -72,6 +78,7 @@
 | **PHP natif vs démon Python** : lecture en PHP, commandes MQTT → démon (inversion vs philosophie « sans démon ») | `stellantis-api-architecture.md` § 2 et § 3 |
 | **Limites** : ban API (wakeup ~2 min), batterie 12 V, mode privacy, quotas OTP (6/24 h), seuil charge | `stellantis-api-architecture.md` § 1.4 |
 | **Champs de télémétrie** (SOC, autonomie, charge, position, portes, km, pneus…) → quelles commandes info | `stellantis-data-model.md` |
+| **`charging.status`** : valeurs, états terminaux **persistants** (≠ momentanés), machine à états de **session de charge** (transition, pas par-poll), énergie = Δ SOC × capacité | `stellantis-data-model.md` § 2.1 |
 | Création conditionnelle de commandes selon **motorisation** (élec/hybride/thermique) | `stellantis-data-model.md` § 3 |
 | **Où trouver le contrat exact** (endpoint/payload non documenté) : code de référence à lire | `stellantis-implementations-reference.md` |
 | Plugin Jeedom PSA **existant** (PHP) et intégrations HA/openHAB à miner | `stellantis-implementations-reference.md` |

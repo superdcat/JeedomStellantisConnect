@@ -114,6 +114,20 @@ Biologic}` — `energy` absent sur Electric).
 > `parseStatus`), seule exception au pattern « 1 champ `/status` → 1 commande », créée **paresseusement** et
 > émise uniquement quand un même `/status` fournit les deux autonomies (⇒ hybride uniquement). Détail :
 > `.memory/specs/post-mvp/20-energie-charge/23-tech.md`.
+>
+> ⚠️ **`charging.status` : les états terminaux PERSISTENT poll après poll (vérifié UC24, 2026-07-11 —
+> raisonné vs code de réf. + domaine, à confirmer en recette)** : `charging.status` est renvoyé à **chaque**
+> `/status` d'un VE/PHEV (branche `electric` de `parseStatus`), **jamais** momentané. `Disconnected` est
+> l'**état de repos** normal d'un véhicule non branché ; `Finished` **reste** tant que le câble n'est pas
+> débranché. ⇒ Toute **machine à états de charge** (détection de session UC24, future notif « charge
+> terminée », etc.) doit **agir sur la TRANSITION** (mémoriser le dernier statut en cache et comparer),
+> **jamais** à chaque poll — sinon log/notif spammé ~288×/j/véhicule (bug corrigé UC24 via
+> `CHARGE_LAST_STATUT_KEY`). La **fin de session** = transition `InProgress → terminal`
+> (`Finished`/`Stopped`/`Disconnected`/`Failure`, comparaison **insensible à la casse**) ; l'enum ne connaît
+> **PAS** de valeur `Started` (⚠️ la spec fonctionnelle 24 disait à tort « Started→Finished »). L'énergie de
+> session = Δ SOC% × capacité (`battery_capacity` config **autoritaire**, repli
+> `energies[].extension.electric.battery.load.capacity` Wh). Détail :
+> `.memory/specs/post-mvp/20-energie-charge/24-tech.md`.
 
 ### 2.2 Position — `GET /user/vehicles/{id}/lastPosition` (GeoJSON)
 - ⚠️ `geometry.coordinates = [longitude, latitude, altitude]` — **ordre GeoJSON, PAS [lat,lon]** ! (lire `[0]`=lon, `[1]`=lat).

@@ -554,6 +554,12 @@ class stellantis extends eqLogic {
       // (somme élec+carburant), créée paresseusement uniquement quand les deux coexistent (hybride).
       'autonomy_fuel'      => array(__('Autonomie carburant', __FILE__), 'numeric', '', 'km', true),
       'autonomy_total'     => array(__('Autonomie totale', __FILE__), 'numeric', '', 'km', true),
+      // UC24 : suivi des sessions de charge. Créées PARESSEUSEMENT (jamais dans createCommands, précédent
+      // UC21/23) — naissent à la 1re session close. Libellés « (est.) » = marquage estimation (AC2). VE/PHEV
+      // uniquement par construction (suivreSessionCharge gated sur charging_status, branche 'electric').
+      'charge_session_energy'   => array(__('Énergie dernière charge (est.)', __FILE__), 'numeric', '', 'kWh', true),
+      'charge_session_duration' => array(__('Durée dernière charge', __FILE__), 'numeric', '', 'min', true),
+      'charge_session_cost'     => array(__('Coût dernière charge (est.)', __FILE__), 'numeric', '', '€', true),
     );
   }
 
@@ -750,6 +756,9 @@ class stellantis extends eqLogic {
       // purger le cache pour que heureChargeDifferee() retombe sur [0,0] et ne republie PAS une heure périmée.
       cache::delete(self::CHARGE_NEXT_TIME_KEY . $this->getId());
     }
+    // UC24 : suivi des sessions de charge (VE/PHEV). Best-effort, robuste — ne lève jamais (try/catch interne),
+    // posé APRÈS le reste du refresh pour ne rien interrompre.
+    $this->suivreSessionCharge($valeurs, $status);
   }
 
   // Extrait le tableau d'énergies du /status : energies[] (v4.15+) prioritaire, fallback energy[].
@@ -1097,6 +1106,17 @@ class stellantis extends eqLogic {
     }
     foreach (eqLogic::byType('stellantis', true) as $eqLogic) {
       $nom = $eqLogic->getName();
+      // UC24 : capacité requise pour estimer l'énergie de charge (VE/PHEV). Absente ⇒ énergie jamais estimée →
+      // nudge actionnable. state=true : fonction estimative optionnelle, PAS une erreur dure (cf. ligne privacy).
+      $motor = trim((string) $eqLogic->getConfiguration('energy', ''));
+      if (($motor == 'Electric' || $motor == 'Hybrid') && trim((string) $eqLogic->getConfiguration('battery_capacity', '')) == '') {
+        $lignes[] = array(
+          'test'   => $nom,
+          'result' => __('Capacité batterie non renseignée — énergie de charge non estimée', __FILE__),
+          'advice' => __('Renseignez la capacité (kWh) dans la configuration du véhicule pour estimer l\'énergie de charge', __FILE__),
+          'state'  => true,
+        );
+      }
       // Privacy connu du dernier /status (cf. refreshTelemetry) : signalé sans être une erreur dure.
       $privacy = (string) cache::byKey('stellantis::privacy::' . $eqLogic->getId())->getValue('');
       if ($privacy != '' && strcasecmp($privacy, 'None') != 0) {
@@ -2500,6 +2520,178 @@ class stellantis extends eqLogic {
     // 4) Publication (gère quota global compte + CID + démon + alignement token). Le correlation_id retourné
     //    n'est volontairement PAS mémorisé (commande stateless, cf. docblock).
     $this->publishRemoteCommand($_service, $_reqParameters);
+  }
+
+  /* * ******************* UC24 — Suivi & statistiques de charge ******************* */
+
+  const CHARGE_SESSION_KEY = 'stellantis::charge_session::';     // + eqId (cache) : session en cours {start_ts,start_soc,cap_kwh}
+  const CHARGE_SESSION_TTL = 604800;                              // 7 j — RÉÉCRIT à chaque poll InProgress → jamais d'expiration en cours de charge
+  const CHARGE_STATUTS_TERMINAUX = array('Finished', 'Stopped', 'Disconnected', 'Failure'); // fins de session (≠ InProgress)
+  const CHARGE_LAST_STATUT_KEY = 'stellantis::charge_last_statut::'; // + eqId (cache) : dernier charging_status observé, pour ne loguer QUE sur transition
+
+  /**
+   * UC24 : machine à états mono-passe qui détecte les sessions de charge (transition charging_status
+   * InProgress → statut terminal) et produit un récapitulatif (énergie/durée/coût estimés) via les 3
+   * commandes info charge_session_*. Best-effort, robuste — NE LÈVE JAMAIS (try/catch enveloppant + log
+   * warning), posé APRÈS le reste de refreshTelemetry() pour ne rien interrompre (robustesse cron).
+   * Gating : uniquement si le /status porte un état de charge (⇒ VE/PHEV ; thermique pur = clé absente).
+   */
+  private function suivreSessionCharge(array $_valeurs, array $_status): void {
+    try {
+      if (!isset($_valeurs['charging_status'])) {
+        return;
+      }
+      $statut = (string) $_valeurs['charging_status']; // déjà assaini (lettres) par parseStatus
+      // Dernier statut observé (toutes issues confondues) : sert UNIQUEMENT à distinguer une vraie
+      // TRANSITION vers un terminal d'un état terminal STABLE qui persiste poll après poll (ex. Disconnected
+      // au repos, ou Finished qui reste jusqu'au débranchement) — sans quoi le log ci-dessous spammerait à
+      // chaque poll (~288×/j/véhicule). Réécrit AVANT toute branche/return : tous les chemins de sortie
+      // laissent le cache à jour pour le prochain appel.
+      $cleDernierStatut = self::CHARGE_LAST_STATUT_KEY . $this->getId();
+      $dernierStatut = (string) cache::byKey($cleDernierStatut)->getValue('');
+      cache::set($cleDernierStatut, $statut, self::CHARGE_SESSION_TTL);
+      $cleSession = self::CHARGE_SESSION_KEY . $this->getId();
+      $brut = (string) cache::byKey($cleSession)->getValue('');
+      $session = ($brut !== '') ? json_decode($brut, true) : null;
+      if (!is_array($session)) {
+        $session = null; // auto-guérison : JSON invalide / absent ⇒ pas de session
+      }
+      $soc = $this->socCourant($_valeurs); // ?float : /status courant, sinon dernière valeur connue (execCmd)
+
+      // ── Début de session ────────────────────────────────────────────────
+      if (strcasecmp($statut, 'InProgress') == 0) {
+        if ($session === null) {
+          if ($soc === null) {
+            return; // début vu mais SOC inconnu : attendre un poll avec SOC (pas de start_soc fiable inventé)
+          }
+          $session = array(
+            'start_ts'  => time(),
+            'start_soc' => $soc,
+            'cap_kwh'   => $this->capaciteBatterieKwh($_status), // snapshot de repli (config prioritaire, sinon extension API)
+          );
+        }
+        // (Ré)écrit systématiquement → rafraîchit le TTL. start_ts/start_soc restent figés (première détection).
+        cache::set($cleSession, json_encode($session), self::CHARGE_SESSION_TTL);
+        return;
+      }
+
+      // ── Fin de session ──────────────────────────────────────────────────
+      if (self::estStatutTerminal($statut)) {
+        if ($session === null) {
+          // Terminal sans session : charge trop courte entre 2 polls (cadence ≥ 5 min), ou cache::flush admin.
+          // Logué UNIQUEMENT sur TRANSITION vers ce terminal (dernierStatut différent) — un terminal STABLE
+          // qui persiste poll après poll (Disconnected au repos, Finished non débranché…) ne reloggue pas
+          // (sinon spam permanent, cf. limite documentée 24-tech). Jamais de récap fabriqué (convention UC18).
+          if ($dernierStatut !== '' && strcasecmp($dernierStatut, $statut) != 0) {
+            log::add('stellantis', 'info', 'Charge : fin détectée sans session enregistrée (charge courte ou cache vidé) pour l\'équipement #' . $this->getId() . ' — non comptabilisée');
+          }
+          return;
+        }
+        // Idempotence : CONSOMMER (purger) la session AVANT d'écrire les commandes. Si le statut reste
+        // terminal au poll suivant → session absente → no-op (aucun doublon d'historique). Un échec d'écriture
+        // rarissime coûte 1 récap perdu, préféré à un doublon silencieux.
+        cache::delete($cleSession);
+        $capKwh = $this->capaciteBatterieKwh($_status); // relu à la FIN (config fraîche prioritaire)…
+        if ($capKwh === null && isset($session['cap_kwh']) && is_numeric($session['cap_kwh'])) {
+          $capKwh = (float) $session['cap_kwh'];       // …repli sur le snapshot de début
+        }
+        $recap = self::calculerRecapSession($session, time(), $soc, $capKwh, $this->tarifCharge());
+        foreach ($recap as $logicalId => $valeur) {
+          $cmd = $this->ensureCommand($logicalId); // création paresseuse ici
+          $this->checkAndUpdateCmd($cmd, $valeur);
+        }
+        return;
+      }
+      // Autre statut (ni InProgress ni terminal, ou charging_status momentanément absent traité plus haut) :
+      // no-op — ne ferme JAMAIS une session (anti-fragmentation).
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'warning', 'Charge : suivi de session en erreur pour l\'équipement #' . $this->getId() . ' : ' . $e->getMessage());
+    }
+  }
+
+  // Détection terminale insensible à la casse (harmonisée avec le strcasecmp du début de session — convention
+  // du fichier pour les enums API, cf. privacy/precond). Évite l'asymétrie stricte vs insensible.
+  private static function estStatutTerminal(string $_statut): bool {
+    foreach (self::CHARGE_STATUTS_TERMINAUX as $terminal) {
+      if (strcasecmp($_statut, $terminal) == 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * UC24 : calcule le récapitulatif d'une session close. PUR (aucun accès cache/cmd/config — tout est
+   * passé en argument, y compris l'instant de fin) → testable. Durée toujours calculée ; énergie/coût
+   * seulement si les données requises sont connues. ΔSOC clampé ≥ 0 (jamais d'énergie négative).
+   * @return array logicalId => valeur (clés absentes = non calculables, contrat façon parseStatus)
+   */
+  private static function calculerRecapSession(array $_session, int $_endTs, ?float $_endSoc, ?float $_capKwh, ?float $_tarif): array {
+    $recap = array();
+    $startTs = (isset($_session['start_ts']) && is_numeric($_session['start_ts'])) ? (int) $_session['start_ts'] : null;
+    if ($startTs !== null) {
+      // Durée bornée par la cadence de polling → ESTIMATION (documenté). max(0,…) contre une horloge qui recule.
+      $recap['charge_session_duration'] = (int) round(max(0, $_endTs - $startTs) / 60);
+    }
+    $startSoc = (isset($_session['start_soc']) && is_numeric($_session['start_soc'])) ? (float) $_session['start_soc'] : null;
+    if ($startSoc !== null && $_endSoc !== null && $_capKwh !== null && $_capKwh > 0) {
+      $deltaSoc = max(0.0, $_endSoc - $startSoc);
+      $kwh = round($deltaSoc / 100.0 * $_capKwh, 2);
+      $recap['charge_session_energy'] = $kwh;
+      if ($_tarif !== null && $_tarif >= 0) {
+        $recap['charge_session_cost'] = round($kwh * $_tarif, 2);
+      }
+    }
+    return $recap;
+  }
+
+  // SOC courant : /status frais prioritaire, sinon dernière valeur connue de la commande battery_soc
+  // (parseStatus est défensif : le SOC peut manquer au poll exact de la transition). ?float.
+  private function socCourant(array $_valeurs): ?float {
+    if (isset($_valeurs['battery_soc']) && is_numeric($_valeurs['battery_soc'])) {
+      return (float) $_valeurs['battery_soc'];
+    }
+    $cmd = $this->getCmd('info', 'battery_soc');
+    if (is_object($cmd)) {
+      $val = $cmd->execCmd();
+      if (is_numeric($val)) {
+        return (float) $val;
+      }
+    }
+    return null;
+  }
+
+  // Capacité batterie en kWh : config `battery_capacity` (autoritaire) sinon repli API best-effort. ?float.
+  private function capaciteBatterieKwh(array $_status): ?float {
+    $config = trim((string) $this->getConfiguration('battery_capacity', ''));
+    if ($config != '' && is_numeric($config) && (float) $config > 0) {
+      return (float) $config;
+    }
+    return self::extraireCapaciteBatterieKwh($_status);
+  }
+
+  // Repli API : energies[].extension.electric.battery.load.capacity (Wh → kWh). Via energiesDepuisStatus()
+  // (une seule source de vérité pour energies[] v4.15+/energy[], comme UC21/23). PUR. ?float.
+  private static function extraireCapaciteBatterieKwh(array $_status): ?float {
+    foreach (self::energiesDepuisStatus($_status) as $energie) {
+      if (!is_array($energie) || !isset($energie['type']) || strtolower((string) $energie['type']) != 'electric') {
+        continue;
+      }
+      $capaciteWh = $energie['extension']['electric']['battery']['load']['capacity'] ?? null; // ?? tolère chemins absents (PHP7+)
+      if (is_numeric($capaciteWh) && $capaciteWh > 0) {
+        return (float) $capaciteWh / 1000.0;
+      }
+    }
+    return null;
+  }
+
+  // Tarif électricité (€/kWh) depuis la config véhicule. Vide/non numérique ⇒ null (coût non estimé). ?float.
+  private function tarifCharge(): ?float {
+    $config = trim((string) $this->getConfiguration('charge_tarif', ''));
+    if ($config != '' && is_numeric($config) && (float) $config >= 0) {
+      return (float) $config;
+    }
+    return null;
   }
 
   /**

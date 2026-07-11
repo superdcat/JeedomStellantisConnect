@@ -192,6 +192,25 @@ $iconeConnexion = ($etatConnexion['state'] == 'ok') ? 'fa-check-circle' : (($eta
 									</div>
 								</div>
 							</div>
+							<!-- UC24 : suivi & statistiques de charge — 2 champs de config éditables (PAS readonly, à la
+							     différence des champs de synchro ci-dessus) : une clé de config absente du formulaire est
+							     effacée au Sauvegarder. -->
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Capacité batterie}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Capacité utile de la batterie de traction en kWh — saisie manuelle, sert à estimer l'énergie ajoutée lors d'une charge (laisser vide si inconnue)}}"></i></sup>
+								</label>
+								<div class="col-sm-6">
+									<input type="number" min="0" step="0.1" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="battery_capacity">
+								</div>
+							</div>
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Tarif électricité}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Prix du kWh en euros — sert à estimer le coût d'une charge (informatif, laisser vide pour ne pas estimer le coût)}}"></i></sup>
+								</label>
+								<div class="col-sm-6">
+									<input type="number" min="0" step="0.01" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="charge_tarif">
+								</div>
+							</div>
 						</div>
 
 						<!-- Partie droite de l'onglet "Équipement" -->
