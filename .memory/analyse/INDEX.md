@@ -11,7 +11,12 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-11 (UC21 : `stellantis-data-model.md` § 2.1 — `remaining_time` = **durée**
+> **Dernière synchro** : 2026-07-11 (UC22 : `stellantis-data-model.md` § 2.1 — **programmation de charge** :
+> reprogrammer l'heure différée = `RemoteClient.change_charge_hour` → **même** payload que `charge_stop`
+> (`/VehCharge` `{"program":{hour,minute},"type":"delayed"}`, seule l'heure change) ; **AUCUN seuil %/SoC
+> cible dans le contrat MQTT consommateur** (le `?percentage=` local PSACC ≠ commande véhicule) → un UC
+> « seuil de charge » n'est pas réalisable via MQTT ; `type:"delayed"` interrompt une charge immédiate en
+> cours). Puis 2026-07-11 (UC21 : `stellantis-data-model.md` § 2.1 — `remaining_time` = **durée**
 > (→ minutes via `dureeIsoEnMinutes`, **sans clamp**, peut dépasser 24 h) ≠ `next_delayed_time` = **heure
 > d'horloge** (`parseHeureIso`, clampé, derrière garde de format `/^\s*PT\d/`) ; `battery.voltage` racine
 > = 12 V de servitude **universel** (`battery_12v` sans garde motorisation), DISTINCT de `energy[].battery.*`
@@ -72,6 +77,7 @@
 | Widget pilotant **plusieurs commandes** (carte + actions) ; résoudre les sœurs par `byEqLogic` | `jeedom-widgets-commandes.md` § 3 |
 | Exécuter une action depuis un widget + récupérer le retour PHP ; auth/CSRF AJAX ; AJAX plugin admin-only | `jeedom-widgets-commandes.md` §§ 4-5 |
 | **Confirmation avant une action sensible** (dialog anti-fausse-manip) : comment l'activer côté serveur | `jeedom-widgets-commandes.md` § 4 (`actionConfirm=1` → -32006) |
+| **Commande action PARAMÉTRÉE** (saisie utilisateur : subType `message`, valeur dans `$_options['message']`) | `jeedom-widgets-commandes.md` § 4 (UC22) |
 | **CSP Jeedom bloque tout média/image EXTERNE** → proxy same-origin (ex. tuile carte) | `jeedom-widgets-commandes.md` § 7 |
 | Ajouter une **PAGE** au menu Jeedom (panel) ; toggle natif `displayDesktopPanel/Mobile` ; page non-admin | `jeedom-panel-page-menu.md` |
 

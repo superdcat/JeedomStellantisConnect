@@ -580,6 +580,8 @@ class stellantis extends eqLogic {
     if ($motorisation == 'Electric' || $motorisation == 'Hybrid') {
       $this->ensureActionCommand('charge_start');
       $this->ensureActionCommand('charge_stop');
+      // UC22 : programmation de l'heure de charge différée (HHMM), même périmètre que charge_start/stop.
+      $this->ensureActionCommand('charge_set_time');
     }
     // UC15 : commandes de préconditionnement, UNIVERSELLES (chauffage habitacle pertinent aussi sur thermique).
     $this->ensureActionCommand('precond_on');
@@ -601,15 +603,18 @@ class stellantis extends eqLogic {
   // exécution (config actionConfirm=1, UC16 unlock) — dialog natif géré par le core, cf. ensureActionCommand.
   private static function definitionsActions(): array {
     return array(
-      'wakeup'       => array(__('Réveiller', __FILE__), 'other', ''),
-      'charge_start' => array(__('Démarrer la charge', __FILE__), 'other', ''),
-      'charge_stop'  => array(__('Arrêter la charge', __FILE__), 'other', ''),
-      'precond_on'   => array(__('Activer le préconditionnement', __FILE__), 'other', ''),
-      'precond_off'  => array(__('Désactiver le préconditionnement', __FILE__), 'other', ''),
-      'lock'         => array(__('Verrouiller', __FILE__), 'other', '', false),
-      'unlock'       => array(__('Déverrouiller', __FILE__), 'other', '', true),
-      'horn'         => array(__('Klaxonner', __FILE__), 'other', ''),
-      'lights'       => array(__('Allumer les feux', __FILE__), 'other', ''),
+      'wakeup'           => array(__('Réveiller', __FILE__), 'other', ''),
+      'charge_start'     => array(__('Démarrer la charge', __FILE__), 'other', ''),
+      'charge_stop'      => array(__('Arrêter la charge', __FILE__), 'other', ''),
+      // UC22 : 1ère commande action PARAMÉTRÉE du plugin. subType 'message' = widget natif champ texte
+      // (saisie libre HHMM) ; le nom porte le format attendu, faute de contrainte de saisie du widget natif.
+      'charge_set_time'  => array(__('Programmer l\'heure de charge (HHMM)', __FILE__), 'message', ''),
+      'precond_on'       => array(__('Activer le préconditionnement', __FILE__), 'other', ''),
+      'precond_off'      => array(__('Désactiver le préconditionnement', __FILE__), 'other', ''),
+      'lock'             => array(__('Verrouiller', __FILE__), 'other', '', false),
+      'unlock'           => array(__('Déverrouiller', __FILE__), 'other', '', true),
+      'horn'             => array(__('Klaxonner', __FILE__), 'other', ''),
+      'lights'           => array(__('Allumer les feux', __FILE__), 'other', ''),
     );
   }
 
@@ -2141,6 +2146,53 @@ class stellantis extends eqLogic {
   }
 
   /**
+   * UC22 : programme une heure de charge différée (delayed) SAISIE PAR L'UTILISATEUR sur CE véhicule via
+   * une commande MQTT (widget action paramétré `message`, saisie HHMM). Gabarit de chargeControl() — mêmes
+   * garde-fous (motorisation, debounce PARTAGÉ avec charge_start/charge_stop car même service MQTT
+   * `/VehCharge`, pré-requis OTP) — mais SANS refresh-avant-envoi : l'utilisateur impose délibérément une
+   * heure, il n'y a rien à préserver (contrairement à « Arrêter la charge »).
+   * ⚠️ Effet de bord assumé : `type:"delayed"` repasse le véhicule en charge différée, ce qui INTERROMPT
+   * une charge immédiate en cours (même mécanisme que chargeControl(false)) — décision 2026-07-11, pas de
+   * confirmation native (action de routine à faible enjeu, contrairement à `unlock`).
+   * @throws stellantisException 'not_configured' (véhicule non rechargeable), 'invalid_input' (heure
+   *   saisie invalide), 'rate_limited' (debounce/quota), 'otp_required' (OTP non activé), sinon api_error
+   */
+  public function chargeSetTime(string $_heure): void {
+    // 1) Garde métier (même garde que chargeControl) : aucun appel réseau si le véhicule n'est pas rechargeable.
+    $motorisation = trim((string) $this->getConfiguration('energy', ''));
+    if ($motorisation != 'Electric' && $motorisation != 'Hybrid') {
+      throw new stellantisException(__('Commande de charge indisponible : véhicule non rechargeable', __FILE__), 0, 'not_configured');
+    }
+    // 2) Parse + validation AVANT tout effet de bord réseau : une saisie invalide échoue proprement.
+    list($heure, $minute) = self::parserHeureSaisie($_heure);
+    // 3) Anti-boucle per-véhicule : clé PARTAGÉE avec charge_start/charge_stop (même service MQTT /VehCharge).
+    $cleDebounce = self::CHARGE_DEBOUNCE_KEY . $this->getId();
+    $dernier = (int) cache::byKey($cleDebounce)->getValue(0);
+    if ($dernier > 0) {
+      $reste = self::CHARGE_DEBOUNCE - (time() - $dernier);
+      if ($reste > 0) {
+        throw new stellantisException(sprintf(__('Commande de charge déjà envoyée à l\'instant ; patientez %d s', __FILE__), $reste), 429, 'rate_limited');
+      }
+    }
+    // 4) Pré-requis OTP : sans remote token, pas de canal MQTT. Alerte cohérente avec les autres call sites.
+    if (!stellantisApi::hasRemoteToken()) {
+      self::alerterOtpRequired();
+      throw new stellantisException(__('Pilotage à distance non activé : activez l\'OTP dans la configuration du plugin', __FILE__), 0, 'otp_required');
+    }
+    // 5) Pose le debounce AVANT tout appel réseau (publish MQTT) : borne les tentatives répétées.
+    cache::set($cleDebounce, time(), self::CHARGE_DEBOUNCE);
+    // 6) Publication : PAS de refresh-avant-envoi (contrairement à chargeControl(false)) — l'heure vient
+    //    délibérément de l'utilisateur, il n'y a aucune programmation existante à préserver.
+    $correlationId = $this->publishRemoteCommand(self::CHARGE_SERVICE, array(
+      'program' => array('hour' => $heure, 'minute' => $minute),
+      'type' => self::CHARGE_TYPE_DELAYED,
+    ));
+    // 7) Mapping ack→véhicule (commande stateful : refresh REST au prochain cron → charge_next_time à jour).
+    cache::set(self::CMD_CORR_KEY . $correlationId, $this->getId(), self::CMD_CORR_TTL);
+    log::add('stellantis', 'info', sprintf('Programmation de charge (%02d:%02d) demandée pour l\'équipement #%d', $heure, $minute, $this->getId()));
+  }
+
+  /**
    * Heure de charge différée [heure, minute] de CE véhicule d'après le dernier /status (cache alimenté par
    * refreshTelemetry). Sert à préserver la programmation lors d'un « Arrêter la charge » (delayed). Cache
    * vide → repli [0,0] avec warning (effet de bord potentiel : reprogrammation à minuit — mais donnée
@@ -2175,6 +2227,45 @@ class stellantis extends eqLogic {
       $minute = (int) $m[2];
     }
     return array(max(0, min(23, $heure)), max(0, min(59, $minute)));
+  }
+
+  /**
+   * UC22 : parse une heure SAISIE PAR L'UTILISATEUR (widget action `message`) au format Jeedom `HHMM` sans
+   * séparateur (ex. "2030" = 20h30, "730" = 07h30, "0030" = 00h30). Tolère par robustesse les séparateurs
+   * `:`/`h`/`H` et les espaces (copier-coller), mais le format canonique documenté (nom de la commande)
+   * reste `HHMM`. Distinct de parseHeureIso() (qui parse une donnée SERVEUR et clampe en repli silencieux) :
+   * ici c'est une saisie UTILISATEUR → REJET NET (exception 'invalid_input'), jamais de clamp silencieux,
+   * jamais de valeur devinée sur une saisie ambiguë.
+   * @return array{0:int,1:int} [heure 0..23, minute 0..59]
+   * @throws stellantisException 'invalid_input' si le format ou la plage est invalide
+   */
+  private static function parserHeureSaisie(string $_saisie): array {
+    $saisie = trim($_saisie);
+    // Deux branches distinctes (pas de strip de séparateur suivi d'une lecture longueur-3/4 générique) :
+    // stripper le séparateur AVANT de tester la longueur ferait accepter SILENCIEUSEMENT une heure fausse
+    // pour une saisie combinant séparateur + heure 2 chiffres + minute 1 chiffre (ex. "20h5" strippé en
+    // "205", longueur 3, lu à tort comme HMM = 02:05 au lieu de rejeter une saisie ambiguë).
+    if (preg_match('/[\s:hH]/', $saisie)) {
+      // Saisie AVEC séparateur (ex. "20h30", "20:30", "20 30") : minute EXIGÉE sur 2 chiffres pour lever
+      // toute ambiguïté ("20h5" est rejeté, jamais interprété 02:05 ni 20:05 — on ne devine pas).
+      if (!preg_match('/^(\d{1,2})[\s:hH]+(\d{2})$/', $saisie, $m)) {
+        throw new stellantisException(__('Format d\'heure invalide (attendu HHMM, ex. 2030)', __FILE__), 0, 'invalid_input');
+      }
+      $heure = (int) $m[1];
+      $minute = (int) $m[2];
+    } else {
+      // Format canonique Jeedom HHMM SANS séparateur : 3 chiffres = HMM, 4 = HHMM. Rejet net
+      // (invalid_input) si non exploitable — JAMAIS de clamp d'une saisie utilisateur.
+      if (!ctype_digit($saisie) || strlen($saisie) < 3 || strlen($saisie) > 4) {
+        throw new stellantisException(__('Format d\'heure invalide (attendu HHMM, ex. 2030)', __FILE__), 0, 'invalid_input');
+      }
+      $minute = (int) substr($saisie, -2);
+      $heure = (int) substr($saisie, 0, strlen($saisie) - 2);
+    }
+    if ($heure > 23 || $minute > 59) {
+      throw new stellantisException(__('Heure hors plage (00h00 à 23h59)', __FILE__), 0, 'invalid_input');
+    }
+    return array($heure, $minute);
   }
 
   /**
@@ -2647,6 +2738,14 @@ class stellantisCmd extends cmd {
         // UC14 : arrête la charge (delayed). Rafraîchit d'abord l'état réel pour ne pas reprogrammer la charge différée.
         $eqLogic->chargeControl(false);
         break;
+      case 'charge_set_time':
+        // UC22 : programme l'heure de charge différée (HHMM). Valeur saisie via le widget action 'message'
+        // (title en repli défensif ; is_string garde contre un $_options non-scalaire d'un appel scénario/API).
+        $heure = (isset($_options['message']) && is_string($_options['message']) && $_options['message'] !== '')
+          ? $_options['message']
+          : ((isset($_options['title']) && is_string($_options['title'])) ? $_options['title'] : '');
+        $eqLogic->chargeSetTime($heure);
+        break;
       case 'precond_on':
         // UC15 : active le préconditionnement climatique (immédiat). Garde-fous debounce/quota + pré-requis OTP dans precondControl().
         $eqLogic->precondControl(true);
@@ -2683,9 +2782,11 @@ class stellantisCmd extends cmd {
 /**
  * Exception typée du plugin pour toute erreur d'appel à l'API Stellantis/PSA.
  * Types possibles : not_configured | token_expired | auth_required | rate_limited | no_vehicle |
- * privacy | api_error | transport.
+ * privacy | invalid_input | api_error | transport.
  * ⚠️ « privacy » n'est jamais produit par typeFromResponse() : réservé au code métier (UC07), qui le
  * construira lui-même face à une réponse 2xx vide de statut (mode privé activé sur le véhicule).
+ * ⚠️ « invalid_input » (UC22) n'est jamais produit par typeFromResponse() non plus : réservé à la
+ * validation d'une SAISIE UTILISATEUR côté code métier (ex. parserHeureSaisie), jamais à une réponse API.
  */
 class stellantisException extends Exception {
   private $httpCode;

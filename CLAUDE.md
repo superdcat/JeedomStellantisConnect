@@ -170,7 +170,23 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > `battery_12v` (racine `battery.voltage`, 12 V de servitude) est mappé **UNIVERSELLEMENT** (sans garde de
 > motorisation — décision validée, cf. `stellantis-data-model.md` § 2.1/2.6), DISTINCT de `energy[].battery.*`
 > (SOH/traction, hors périmètre). **Création paresseuse** : `createCommands()` **inchangé** ; les 5 commandes
-> naissent au 1er `/status` qui les contient (boucle `ensureCommand` de `refreshTelemetry`). Suite =
+> naissent au 1er `/status` qui les contient (boucle `ensureCommand` de `refreshTelemetry`). **Post-MVP :
+> UC22** — **programmation de la charge** (1ʳᵉ commande action *paramétrée* du plugin) : commande action
+> `charge_set_time` (subType **`message`**, saisie utilisateur au format Jeedom **`HHMM` sans séparateur**,
+> ex. `2030`=20:30), créée **uniquement sur véhicule rechargeable** (`Electric`/`Hybrid`), `execute()` →
+> `stellantis->chargeSetTime(string)`. Publiée via `publishRemoteCommand()` sur le **même** service
+> `/VehCharge` qu'UC14 avec le payload `{"program":{"hour","minute"},"type":"delayed"}` (contrat
+> `RemoteClient.change_charge_hour` de `psa_car_controller`), l'heure venant de l'utilisateur
+> (reprogrammation délibérée) — **sans** refresh-avant-envoi (rien à préserver, ≠ `charge_stop`). ⚠️ Effet
+> de bord assumé : `type:"delayed"` **interrompt une charge immédiate en cours** au profit du différé ;
+> **pas** de confirmation native (action de routine, ≠ `unlock`). Parsing via le helper pur
+> `parserHeureSaisie()` (deux branches avec/sans séparateur, rejet net via le **nouveau type d'exception
+> `invalid_input`**, jamais de clamp d'une saisie utilisateur). **Seuil % (target SoC) hors périmètre** :
+> confirmé non supporté par le contrat consommateur MQTT (aucun pourcentage dans les payloads
+> `RemoteClient` ; cf. `stellantis-data-model.md` § 2.1). La **lecture** de la programmation
+> (`charge_next_time`) était déjà en UC21. Garde-fous : garde motorisation + debounce per-véhicule
+> **partagé** avec `charge_start`/`charge_stop` (même service `/VehCharge`) + quota global compte réutilisé
+> de `publishRemoteCommand`. Suite =
 > post-MVP (localisation, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
@@ -199,8 +215,9 @@ Disposition Jeedom fixe (type MVC). Pièces principales, toutes nommées d'aprè
     (`switch` sur `logicalId`) vers la méthode métier du véhicule, en passant par le démon MQTT. **Wakeup
     (UC13)** → `stellantis->wakeup()`, **charge start/stop (UC14)** → `stellantis->chargeControl(bool)`,
     **préconditionnement (UC15)** → `stellantis->precondControl(bool)`, **verrouillage/déverrouillage
-    (UC16)** → `stellantis->doorControl(bool)` et **klaxon/feux (UC17)** → `stellantis->horn()` /
-    `stellantis->lights()` implémentés. **Retour d'état async (UC18)** : le callback démon
+    (UC16)** → `stellantis->doorControl(bool)`, **klaxon/feux (UC17)** → `stellantis->horn()` /
+    `stellantis->lights()` et **programmation de charge (UC22)** → `stellantis->chargeSetTime(string)`
+    (commande action *paramétrée* `message`) implémentés. **Retour d'état async (UC18)** : le callback démon
     (`stellantis::handleDaemonMessage` → `traiterRetourCommande`) interprète les acks MQTT, alimente l'info
     `last_command_result` par véhicule et signale les échecs. Publication MQTT
     centralisée par `stellantis::publishRemoteCommand()`/`buildMqttRequest()`.

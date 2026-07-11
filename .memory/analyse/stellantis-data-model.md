@@ -74,6 +74,20 @@ Biologic}` — `energy` absent sur Electric).
 > (`stellantis::parseHeureIso`) et ne s'appuie sur l'heure que pour *préserver* la programmation lors d'un
 > « arrêter » (delayed). Détail : `.memory/specs/post-mvp/10-commandes-distance/14-tech.md`.
 
+> ⚠️ **Programmation de la charge : SEULE l'heure est pilotable, PAS de seuil % (target SoC) — vérifié
+> UC22, 2026-07-11 vs `psa_car_controller/psa/RemoteClient.py` master.** Reprogrammer l'heure de charge
+> différée = `RemoteClient.change_charge_hour(vin, hour, minute)` → `veh_charge_request(..., DELAYED_CHARGE)`
+> → **même** service/payload que `charge_stop` : `/VehCharge` `{"program":{"hour","minute"},"type":"delayed"}`,
+> seule l'heure change. **AUCUN payload de charge de `RemoteClient` (`charge_now`/`veh_charge_request`/
+> `change_charge_hour`) ne porte de pourcentage / SoC cible / charge-limit** : le `?percentage=` de
+> l'endpoint Flask **local** de PSACC et l'entité `charge_limit` de l'intégration HA sont des fonctions
+> **logicielles locales** (arrêt auto côté logiciel qui surveille le SOC), **pas** une commande véhicule.
+> ⇒ un futur UC « seuil de charge » n'est **pas réalisable** via le contrat consommateur MQTT (à ne pas
+> reconfondre avec le pré-requis « batterie > ~50 % » de `stellantis-api-architecture.md` § 1.4, qui est
+> une condition d'acceptation côté serveur, pas un paramètre réglable). ⚠️ Effet de bord de `type:"delayed"` :
+> repasser en différé **interrompt une charge immédiate en cours** (même mécanisme que `charge_stop`).
+> Détail : `.memory/specs/post-mvp/20-energie-charge/22-tech.md`.
+
 > ⚠️ **`remaining_time` = DURÉE, ≠ `next_delayed_time` = HEURE d'horloge (vérifié UC21, 2026-07-11)** :
 > ne PAS parser `remaining_time` avec `parseHeureIso()` (qui clampe 0-23 h / 0-59 min pour une *heure*). Une
 > **durée** peut dépasser 24 h (charge lente ⇒ `PT25H` = 1500 min, pas écrêté) → helper dédié

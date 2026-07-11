@@ -63,6 +63,19 @@ véhicule (lit `battery_soc`/`autonomy`/`position` ensemble).
   ⚠️ **Ce n'est PAS une frontière d'autorisation** : la garde vit uniquement dans le contrôleur AJAX de
   l'UI web. Un scénario Jeedom, l'API JSON-RPC (apikey) ou un autre plugin appelant `execCmd()` directement
   **contournent** le dialog. La vraie protection repose sur la maîtrise des droits Jeedom (scénarios, clé API).
+- **Commande action PARAMÉTRÉE (saisie utilisateur)** — introduit UC22 (`charge_set_time`, 1ʳᵉ du plugin ;
+  toutes les actions UC13-17 étaient des boutons `subType='other'` sans paramètre). Pour recueillir **une
+  valeur libre**, `subType='message'` : le widget natif rend un champ texte + bouton d'envoi, et
+  `cmd::execute($_options)` reçoit la valeur dans **`$_options['message']`** (le widget expose **aussi** un
+  champ « Titre » → `$_options['title']`, inutile ici mais à lire en **repli défensif**). Bonnes pratiques
+  actées : lire `is_string($_options['message'] ?? null)` avant tout cast (un scénario/API peut passer un
+  tableau → sinon warning « Array to string conversion ») ; **valider/parser côté serveur** (rejet net,
+  jamais de clamp d'une saisie utilisateur) car le widget natif n'impose aucune contrainte de format ;
+  faire porter le **format attendu par le nom** de la commande (ex. `Programmer l'heure de charge (HHMM)`).
+  Alternative écartée : `subType='slider'` (`$_options['slider']`) — inadapté à une heure HH:MM (glissement
+  imprécis). ⚠️ Contrat `$_options['message']` = **convention core, non re-vérifiée au runtime dans ce
+  projet** (pas d'interpréteur PHP local ; repli `title` + rejet serveur bornent le risque) → à confirmer en
+  recette. Réutilisable pour tout futur paramètre (durée feux/klaxon UC17, température précond…).
 
 ## 5. Auth AJAX (core 4.4+)
 
