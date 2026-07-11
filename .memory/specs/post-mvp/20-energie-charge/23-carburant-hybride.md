@@ -23,4 +23,15 @@ parallèle de la partie électrique, sans dupliquer ni mélanger les deux énerg
 - [ ] Un thermique pur n'a aucune commande EV.
 
 ## À confirmer
-- Clés exactes pour le carburant (`fuel`/`Fuel`/`level`) et présence d'une autonomie combinée — data-model.
+- **Résolu (UC23, 2026-07-11)** : clés carburant = entrée `energies[].type == 'Fuel'`, niveau
+  `energies[].level` → `fuel_level`, autonomie `energies[].autonomy` → `autonomy_fuel` (cf. data-model
+  § 2.1). **Aucune autonomie combinée côté API** : `autonomy_total` est une valeur **dérivée** (somme élec
+  + carburant) calculée dans `parseStatus`, émise/créée paresseusement seulement sur un hybride fournissant
+  les deux autonomies. Détail : `23-tech.md`.
+
+> **Implémenté (UC23, 2026-07-11)** — 100 % lecture/parsing PHP (`core/class/stellantis.class.php`) :
+> scission `autonomy` (élec) / `autonomy_fuel` (carburant) dans `parseStatus`, création par motorisation
+> dans `createCommands` (thermique pur → `fuel_level`/`autonomy_fuel`, aucune commande EV), dérivée
+> `autonomy_total` sur hybride ; migration `install.php` masquant l'ancien `autonomy` figé des thermiques
+> déjà découverts. Les 2 AC sont couverts par construction (voir `23-tech.md`), à cocher après recette
+> sur véhicule réel (`81-validation-manuelle.md`).

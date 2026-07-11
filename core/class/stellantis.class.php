@@ -528,7 +528,7 @@ class stellantis extends eqLogic {
   private static function definitionsCommandes(): array {
     return array(
       'battery_soc'      => array(__('Batterie', __FILE__), 'numeric', 'BATTERY', '%', true),
-      'autonomy'         => array(__('Autonomie', __FILE__), 'numeric', '', 'km', true),
+      'autonomy'         => array(__('Autonomie électrique', __FILE__), 'numeric', '', 'km', true),
       'charging_status'  => array(__('État de charge', __FILE__), 'string', '', '', false),
       'charging_plugged' => array(__('Câble branché', __FILE__), 'binary', 'PRESENCE', '', false),
       'fuel_level'       => array(__('Carburant', __FILE__), 'numeric', '', '%', true),
@@ -549,6 +549,11 @@ class stellantis extends eqLogic {
       'charging_mode'      => array(__('Mode de charge', __FILE__), 'string', '', '', false),
       'charge_next_time'   => array(__('Prochaine charge programmée', __FILE__), 'string', '', '', false),
       'battery_12v'        => array(__('Batterie 12 V', __FILE__), 'numeric', '', 'V', true),
+      // UC23 : carburant & hybrides. 'autonomy_fuel' = mapping direct (branche 'fuel' de parseStatus,
+      // clé propre — ne partage plus 'autonomy' avec l'électrique). 'autonomy_total' = valeur DÉRIVÉE
+      // (somme élec+carburant), créée paresseusement uniquement quand les deux coexistent (hybride).
+      'autonomy_fuel'      => array(__('Autonomie carburant', __FILE__), 'numeric', '', 'km', true),
+      'autonomy_total'     => array(__('Autonomie totale', __FILE__), 'numeric', '', 'km', true),
     );
   }
 
@@ -565,10 +570,10 @@ class stellantis extends eqLogic {
       $aCreer = array_merge($aCreer, array('battery_soc', 'autonomy', 'charging_status', 'charging_plugged'));
     }
     if ($motorisation == 'Thermal' || $motorisation == 'Hybrid') {
+      // UC23 : carburant/hybride. Clé propre 'autonomy_fuel' (ne collisionne plus avec 'autonomy'
+      // électrique) ; 'autonomy_total' reste en création paresseuse (jamais déclarée ici).
       $aCreer[] = 'fuel_level';
-      if (!in_array('autonomy', $aCreer)) {
-        $aCreer[] = 'autonomy';
-      }
+      $aCreer[] = 'autonomy_fuel';
     }
     foreach ($aCreer as $logicalId) {
       $this->ensureCommand($logicalId);
@@ -852,12 +857,17 @@ class stellantis extends eqLogic {
         if (isset($energie['level']) && is_numeric($energie['level'])) {
           $valeurs['fuel_level'] = (float) $energie['level'];
         }
-        // Autonomie carburant : ne pas écraser l'autonomie électrique déjà posée (PHEV : élec prioritaire ;
-        // scission autonomy_fuel = post-MVP/23)
-        if (!isset($valeurs['autonomy']) && isset($energie['autonomy']) && is_numeric($energie['autonomy'])) {
-          $valeurs['autonomy'] = (float) $energie['autonomy'];
+        if (isset($energie['autonomy']) && is_numeric($energie['autonomy'])) {
+          $valeurs['autonomy_fuel'] = (float) $energie['autonomy'];
         }
       }
+    }
+    // UC23 : autonomie totale combinée = somme élec + carburant. VALEUR DÉRIVÉE (aucun champ API natif,
+    // cf. data-model § 2.1) — seule exception au pattern "1 champ /status → 1 clé" de parseStatus. Émise
+    // UNIQUEMENT si les DEUX autonomies sont présentes dans ce même /status ⇒ impossible hors hybride
+    // (satisfait AC1/AC2 par construction). Création paresseuse : jamais déclarée dans createCommands.
+    if (isset($valeurs['autonomy']) && isset($valeurs['autonomy_fuel'])) {
+      $valeurs['autonomy_total'] = $valeurs['autonomy'] + $valeurs['autonomy_fuel'];
     }
     // Odomètre (racine depuis v4.15)
     if (isset($_status['odometer']['mileage']) && is_numeric($_status['odometer']['mileage'])) {

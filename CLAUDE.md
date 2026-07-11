@@ -186,7 +186,21 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > `RemoteClient` ; cf. `stellantis-data-model.md` § 2.1). La **lecture** de la programmation
 > (`charge_next_time`) était déjà en UC21. Garde-fous : garde motorisation + debounce per-véhicule
 > **partagé** avec `charge_start`/`charge_stop` (même service `/VehCharge`) + quota global compte réutilisé
-> de `publishRemoteCommand`. Suite =
+> de `publishRemoteCommand`. **Post-MVP : UC23** — **carburant & véhicules hybrides** (télémétrie énergie,
+> 100 % lecture/parsing, aucun appel réseau/MQTT nouveau) : **scission propre de l'autonomie par énergie**
+> dans `parseStatus()` — l'entrée `energies[].type=='Electric'` alimente `autonomy` (libellé renommé
+> « Autonomie électrique »), l'entrée `'Fuel'` alimente la **nouvelle** info `autonomy_fuel` (« Autonomie
+> carburant », clé propre : fin du partage « élec prioritaire » sur `autonomy`). Nouvelle info **dérivée**
+> `autonomy_total` (« Autonomie totale » = somme élec + carburant) — **aucun champ d'autonomie combinée
+> n'existe côté API** (cf. `stellantis-data-model.md` § 2.1), donc calculée dans `parseStatus` et **créée
+> paresseusement** (jamais dans `createCommands`, précédent UC21), émise uniquement quand un même `/status`
+> fournit les **deux** autonomies ⇒ hybride uniquement (satisfait AC1/AC2 par construction).
+> `createCommands()` route désormais `autonomy_fuel` (eager, comme `fuel_level`) sur `Thermal`/`Hybrid` : un
+> **thermique pur** n'obtient **aucune** commande EV (`battery_soc`/`autonomy`/`charging_*` restent
+> `Electric`/`Hybrid`). **Migration** (`plugin_info/install.php` → `stellantis_update()`) : sur un thermique
+> **déjà découvert**, l'ancien `autonomy` (autrefois alimenté par le carburant) se fige ⇒ **masqué**
+> (`setIsVisible(0)`, best-effort, idempotent, non destructif, borné à `energy=='Thermal'`) pour éviter le
+> doublon avec `autonomy_fuel`. Suite =
 > post-MVP (localisation, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.

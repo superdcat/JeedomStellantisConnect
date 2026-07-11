@@ -105,6 +105,15 @@ Biologic}` — `energy` absent sur Electric).
 > le mettre en cache avec horodatage (cf. UC21/24). Exemple réel e-C4 : `extension.electric.battery.load`
 > = `capacity 36384 Wh / residual 21856 Wh` à 69 % SOC.
 > **PHEV** : `energy[]` a **2 entrées** — `[0]=Electric` (SOC), `[1]=Fuel` (niveau).
+>
+> ⚠️ **Autonomie scindée par énergie + pas d'autonomie combinée native (vérifié UC23, 2026-07-11)** :
+> `energies[].autonomy` existe sur **chaque** entrée → l'entrée `Electric` alimente `autonomy` (autonomie
+> élec, libellé « Autonomie électrique ») et l'entrée `Fuel` alimente `autonomy_fuel` (« Autonomie
+> carburant ») — clés **distinctes**, plus de partage. **Aucun champ d'autonomie combinée n'existe côté
+> API** : le plugin expose `autonomy_total` comme valeur **DÉRIVÉE** (somme élec + carburant dans
+> `parseStatus`), seule exception au pattern « 1 champ `/status` → 1 commande », créée **paresseusement** et
+> émise uniquement quand un même `/status` fournit les deux autonomies (⇒ hybride uniquement). Détail :
+> `.memory/specs/post-mvp/20-energie-charge/23-tech.md`.
 
 ### 2.2 Position — `GET /user/vehicles/{id}/lastPosition` (GeoJSON)
 - ⚠️ `geometry.coordinates = [longitude, latitude, altitude]` — **ordre GeoJSON, PAS [lat,lon]** ! (lire `[0]`=lon, `[1]`=lat).

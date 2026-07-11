@@ -30,6 +30,14 @@ manuelle** sur un Jeedom réel : la « preuve » qu'une UC marche vraiment (lint
   perso conservé.
 - **Télémétrie (07-08)** : après un trajet/charge, les infos (SOC, autonomie, km, position) évoluent au
   cron ; un véhicule injoignable n'interrompt pas les autres.
+- **Carburant & hybrides (post-MVP 23, ajouté 2026-07-11 — les 2 AC de `23-carburant-hybride.md`)** :
+  1. **Hybride** : l'équipement expose SIMULTANÉMENT « Batterie » + « Autonomie électrique » (élec) ET
+     « Carburant » + « Autonomie carburant » (thermique), sans collision (valeurs distinctes) ; « Autonomie
+     totale » apparaît quand le `/status` fournit les deux autonomies (≈ somme des deux).
+  2. **Thermique pur** : aucune commande EV (« Batterie »/« État de charge »/« Câble branché »/« Autonomie
+     électrique » absentes) ; seules « Carburant » + « Autonomie carburant » (+ km, position, portes). Sur un
+     thermique déjà découvert avant la mise à jour, l'ancienne « Autonomie » (carburant) est **masquée**
+     (migration `stellantis_update`), pas de doublon avec « Autonomie carburant ».
 - **Robustesse (09-10)** : couper la config → message clair, pas de crash ; provoquer un 401 → refresh
   transparent.
 - **Socle démon MQTT (post-MVP 11, ajouté 2026-07-08 — les 5 AC de `11-socle-demon-mqtt.md`)** :

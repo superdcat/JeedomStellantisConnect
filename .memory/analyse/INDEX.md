@@ -11,7 +11,12 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-11 (UC22 : `stellantis-data-model.md` § 2.1 — **programmation de charge** :
+> **Dernière synchro** : 2026-07-11 (UC23 : `stellantis-data-model.md` § 2.1 — **carburant & hybrides** :
+> autonomie **scindée par énergie** (`autonomy` élec / `autonomy_fuel` carburant, clés distinctes) ; **aucune
+> autonomie combinée native** → `autonomy_total` = valeur **dérivée** (somme, création paresseuse, hybride
+> uniquement), seule exception au pattern « 1 champ → 1 commande » ; migration masquant l'ancien `autonomy`
+> figé des thermiques déjà découverts — cf. `23-tech.md`). Précédemment 2026-07-11 (UC22 :
+> `stellantis-data-model.md` § 2.1 — **programmation de charge** :
 > reprogrammer l'heure différée = `RemoteClient.change_charge_hour` → **même** payload que `charge_stop`
 > (`/VehCharge` `{"program":{hour,minute},"type":"delayed"}`, seule l'heure change) ; **AUCUN seuil %/SoC
 > cible dans le contrat MQTT consommateur** (le `?percentage=` local PSACC ≠ commande véhicule) → un UC

@@ -29,6 +29,21 @@ function stellantis_update() {
   } catch (\Throwable $e) {
     log::add('stellantis', 'warning', 'Mise à jour : arrêt du démon ignoré (' . $e->getMessage() . ')');
   }
+  // UC23 : après scission autonomy/autonomy_fuel, l'ancienne cmd 'autonomy' d'un THERMIQUE PUR (alimentée
+  // autrefois par le carburant) se fige. La masquer pour éviter le doublon avec 'autonomy_fuel'. Best-effort,
+  // idempotent, thermique UNIQUEMENT (hybride/électrique : 'autonomy' reste l'autonomie élec, ne pas toucher).
+  try {
+    foreach (eqLogic::byType('stellantis') as $eq) {
+      if (trim((string) $eq->getConfiguration('energy', '')) !== 'Thermal') { continue; }
+      $cmd = $eq->getCmd('info', 'autonomy');
+      if (is_object($cmd) && $cmd->getIsVisible() == 1) {
+        $cmd->setIsVisible(0);
+        $cmd->save();
+      }
+    }
+  } catch (\Throwable $e) {
+    log::add('stellantis', 'warning', 'Mise à jour UC23 : masquage autonomy thermique ignoré (' . $e->getMessage() . ')');
+  }
 }
 
 // Fonction exécutée automatiquement après la suppression du plugin
