@@ -215,8 +215,22 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > (`Disconnected` au repos, `Finished` tant que non débranché) → le log « session non comptabilisée » n'est
 > émis que sur **transition** (dernier statut mémorisé en cache `CHARGE_LAST_STATUT_KEY`), jamais à chaque
 > poll (~288×/j sinon ; cf. `stellantis-data-model.md` § 2.1). `health()` signale une capacité manquante ;
-> idempotence par purge du cache de session **avant** écriture des commandes. Suite =
-> post-MVP (localisation, entretien…). Cette note est
+> idempotence par purge du cache de session **avant** écriture des commandes. **Post-MVP : UC31** —
+> **position GPS structurée** (télémétrie localisation, 100 % lecture/parsing, aucun appel réseau/MQTT
+> nouveau : dérivée du **même** GeoJSON `/lastPosition` déjà récupéré au cron par `refreshTelemetry`,
+> gardé par `privacy.state=='None'`) : 5 commandes info **créées paresseusement** (jamais dans
+> `createCommands`, précédent UC21/23/24), au-delà de la seule chaîne `position` (`lat,lon`, `GEOLOC`,
+> socle MVP07 **inchangé, eager**) — `latitude`/`longitude` (⚠️ GeoJSON `geometry.coordinates=[lon,lat]`,
+> ordre **lon,lat** inversé en `lat,lon`), `heading` (« Cap », °), `gps_signal` (`properties.signalQuality`
+> 0-9), `position_updated` (`properties.createdAt`, **horodatage propre à la position**, distinct du
+> `last_update` global). Enrichissement confiné au bloc position de `parseStatus()` avec **deux gardes
+> INDÉPENDANTES** (coordonnées via `geometry` / propriétés via `properties`, jamais imbriquées) ;
+> `heading`/`gps_signal` testés `is_numeric` (**`0` = valeur valide**, pas une absence). Nouveau helper pur
+> `formaterDateApi()` (`strtotime` + garde `=== false` **avant** `date()` — sinon `TypeError` PHP 8 ⇒
+> exception dans `parseStatus`, sans try/catch par champ ⇒ échec de **tout** le refresh du véhicule) ;
+> `extraireFraicheur()` non refactorisé. ⚠️ **Asymétrie eager/lazy assumée** : un véhicule en privacy
+> permanente affiche « Position » (vide) mais jamais les 5 dérivées. Suite =
+> post-MVP (localisation carte/geofencing, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
 

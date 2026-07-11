@@ -560,6 +560,16 @@ class stellantis extends eqLogic {
       'charge_session_energy'   => array(__('Énergie dernière charge (est.)', __FILE__), 'numeric', '', 'kWh', true),
       'charge_session_duration' => array(__('Durée dernière charge', __FILE__), 'numeric', '', 'min', true),
       'charge_session_cost'     => array(__('Coût dernière charge (est.)', __FILE__), 'numeric', '', '€', true),
+      // UC31 : position GPS structurée, dérivée du MÊME GeoJSON /lastPosition que 'position' (MVP07).
+      // generic_type '' : Jeedom n'expose pas de type générique par axe lat/lon (seul GEOLOC existe, déjà
+      // porté par 'position') — convention projet « on ne devine pas de constante core non vérifiée ».
+      // Non historisées (cohérent avec 'position'/'last_update' ; l'historisation d'une trace relève des
+      // UC trajets 32+). Création PARESSEUSE (cf. createCommands) : naissent au 1er /lastPosition exploitable.
+      'latitude'         => array(__('Latitude', __FILE__), 'numeric', '', '', false),
+      'longitude'        => array(__('Longitude', __FILE__), 'numeric', '', '', false),
+      'heading'          => array(__('Cap', __FILE__), 'numeric', '', '°', false),
+      'position_updated' => array(__('Position (mise à jour)', __FILE__), 'string', '', '', false),
+      'gps_signal'       => array(__('Qualité du signal GPS', __FILE__), 'numeric', '', '', false),
     );
   }
 
@@ -571,6 +581,10 @@ class stellantis extends eqLogic {
   public function createCommands(): void {
     $motorisation = trim((string) $this->getConfiguration('energy', ''));
     // 'last_command_result' (UC18) : universelle (toute commande à distance existe sur tout véhicule).
+    // UC31 : asymétrie eager/lazy ASSUMÉE — 'position' reste eager ici (socle MVP/07), tandis que ses 5
+    // dérivées (latitude/longitude/heading/position_updated/gps_signal) sont créées PARESSEUSEMENT par
+    // ensureCommand() au 1er /lastPosition exploitable (même pattern que le détail UC21). Un véhicule en
+    // privacy permanente affiche donc 'Position' (vide) mais jamais les 5 autres — pas un oubli.
     $aCreer = array('mileage', 'doors_locked', 'position', 'last_update', 'precond_status', self::CMD_RESULT_LOGICAL_ID);
     if ($motorisation == 'Electric' || $motorisation == 'Hybrid') {
       $aCreer = array_merge($aCreer, array('battery_soc', 'autonomy', 'charging_status', 'charging_plugged'));
@@ -912,7 +926,32 @@ class stellantis extends eqLogic {
       $coords = (isset($_position['geometry']['coordinates']) && is_array($_position['geometry']['coordinates']))
         ? $_position['geometry']['coordinates'] : null;
       if (is_array($coords) && count($coords) >= 2 && is_numeric($coords[0]) && is_numeric($coords[1])) {
-        $valeurs['position'] = ((float) $coords[1]) . ',' . ((float) $coords[0]);
+        $lat = (float) $coords[1];
+        $lon = (float) $coords[0];
+        $valeurs['position'] = $lat . ',' . $lon;
+        // UC31 : latitude/longitude structurées, dérivées des MÊMES coordonnées que 'position'.
+        $valeurs['latitude'] = $lat;
+        $valeurs['longitude'] = $lon;
+      }
+      // UC31 : propriétés du point GPS — garde INDÉPENDANT de celui des coordonnées ci-dessus (ne pas
+      // imbriquer : un GeoJSON peut porter des properties sans geometry exploitable, ou l'inverse).
+      $proprietesPosition = (isset($_position['properties']) && is_array($_position['properties']))
+        ? $_position['properties'] : null;
+      if ($proprietesPosition !== null) {
+        // is_numeric (pas de test de vérité) : 0 est une valeur de cap/qualité valide, pas une absence.
+        if (isset($proprietesPosition['heading']) && is_numeric($proprietesPosition['heading'])) {
+          $valeurs['heading'] = (float) $proprietesPosition['heading'];
+        }
+        if (isset($proprietesPosition['signalQuality']) && is_numeric($proprietesPosition['signalQuality'])) {
+          $valeurs['gps_signal'] = (int) $proprietesPosition['signalQuality'];
+        }
+        // Horodatage PROPRE à la position (distinct de last_update global, cf. extraireFraicheur ci-dessous).
+        if (isset($proprietesPosition['createdAt']) && is_string($proprietesPosition['createdAt']) && $proprietesPosition['createdAt'] != '') {
+          $dateFormatee = self::formaterDateApi($proprietesPosition['createdAt']);
+          if ($dateFormatee !== null) {
+            $valeurs['position_updated'] = $dateFormatee;
+          }
+        }
       }
     }
     // Fraîcheur : horodatage API (conforme UC09 — la donnée peut être ancienne sans wakeup)
@@ -982,6 +1021,20 @@ class stellantis extends eqLogic {
       return date('Y-m-d H:i:s');
     }
     return date('Y-m-d H:i:s', $plusRecent);
+  }
+
+  /**
+   * UC31 : formate un horodatage API (RFC3339, ex. properties.createdAt de /lastPosition) en
+   * 'Y-m-d H:i:s' pour affichage dans une commande info. Garde `=== false` OBLIGATOIRE avant date() :
+   * PHP 8 lève un TypeError sur date(false, ...) et PHP 7.4 fabriquerait une epoch 1970 trompeuse ;
+   * parseStatus() n'a PAS de try/catch par champ, une exception ici ferait échouer TOUT le refresh du
+   * véhicule. `null` si la chaîne n'est pas exploitable (jamais de valeur fabriquée). Distinct
+   * d'extraireFraicheur() (compare des timestamps int pour ne garder que le plus récent) : pas de
+   * mutualisation, le point commun est trop mince pour justifier un refactor (churn non justifiée).
+   */
+  private static function formaterDateApi(string $_iso): ?string {
+    $ts = strtotime($_iso);
+    return $ts === false ? null : date('Y-m-d H:i:s', $ts);
   }
 
   // Traduit une erreur API typée en message utilisateur actionnable (chaîne UI → enveloppée __()).

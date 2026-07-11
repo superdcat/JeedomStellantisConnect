@@ -14,7 +14,7 @@ de la simple chaîne `lat,lon` du MVP : commandes structurées + base pour la ca
 
 ## Détails techniques
 - GeoJSON : `geometry.coordinates = [lon, lat, (alt)]` (⚠️ **ordre lon, lat**),
-  `properties.{updatedAt, heading, signalQuality, type}` (cf. data-model § 2.2).
+  `properties.{createdAt, heading, signalQuality, type}` (cf. data-model § 2.2).
 - Commande `position` au format `lat,lon` (generic_type `GEOLOC`) pour compat widgets/scénarios Jeedom.
 - Fraîcheur : `position_updated` ≠ `last_update` global (la position a son propre horodatage).
 

@@ -202,7 +202,12 @@
         "Session renouvelée, veuillez réessayer": "Sitzung erneuert, bitte versuchen Sie es erneut",
         "Acceptée par le véhicule": "Vom Fahrzeug akzeptiert",
         "Transmise au véhicule": "An das Fahrzeug übermittelt",
-        "Véhicule en veille": "Fahrzeug im Ruhezustand"
+        "Véhicule en veille": "Fahrzeug im Ruhezustand",
+        "Latitude": "Breitengrad",
+        "Longitude": "Längengrad",
+        "Cap": "Kurs",
+        "Position (mise à jour)": "Position (Aktualisierung)",
+        "Qualité du signal GPS": "GPS-Signalqualität"
     },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert",
