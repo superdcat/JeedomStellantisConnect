@@ -541,6 +541,14 @@ class stellantis extends eqLogic {
       // démon (traiterRetourCommande) — jamais par parseStatus/refreshTelemetry, donc jamais écrasée par
       // un refresh REST. Universelle (toute commande à distance existe sur tout véhicule).
       'last_command_result' => array(__('Dernier résultat commande', __FILE__), 'string', '', '', false),
+      // UC21 : détail batterie & charge. Les 4 premières (charging.*) VE/PHEV uniquement (mappées dans la
+      // branche 'electric' de parseStatus) ; 'battery_12v' UNIVERSELLE (battery.voltage racine — batterie
+      // de servitude, distincte de energy[].battery.* qui est la batterie de traction/SOH, hors scope).
+      'charging_rate'      => array(__('Vitesse de charge', __FILE__), 'numeric', '', 'km/h', true),
+      'charging_remaining' => array(__('Temps de charge restant', __FILE__), 'numeric', '', 'min', true),
+      'charging_mode'      => array(__('Mode de charge', __FILE__), 'string', '', '', false),
+      'charge_next_time'   => array(__('Prochaine charge programmée', __FILE__), 'string', '', '', false),
+      'battery_12v'        => array(__('Batterie 12 V', __FILE__), 'numeric', '', 'V', true),
     );
   }
 
@@ -812,6 +820,29 @@ class stellantis extends eqLogic {
         if (isset($energie['charging']['plugged'])) {
           $valeurs['charging_plugged'] = $energie['charging']['plugged'] ? 1 : 0;
         }
+        // UC21 : détail de charge (VE/PHEV uniquement — branche 'electric', respecte AC3).
+        if (isset($energie['charging']['charging_rate']) && is_numeric($energie['charging']['charging_rate'])) {
+          $valeurs['charging_rate'] = (float) $energie['charging']['charging_rate'];
+        }
+        if (isset($energie['charging']['remaining_time']) && is_scalar($energie['charging']['remaining_time'])) {
+          $minutesRestantes = self::dureeIsoEnMinutes((string) $energie['charging']['remaining_time']);
+          if ($minutesRestantes !== null) {
+            $valeurs['charging_remaining'] = $minutesRestantes;
+          }
+        }
+        if (isset($energie['charging']['charging_mode']) && is_scalar($energie['charging']['charging_mode'])) {
+          // Enum texte (No/Slow/Quick) : même assainissement que charging_status (défense en profondeur).
+          $valeurs['charging_mode'] = preg_replace('/[^A-Za-z]/', '', (string) $energie['charging']['charging_mode']);
+        }
+        if (isset($energie['charging']['next_delayed_time']) && is_scalar($energie['charging']['next_delayed_time'])) {
+          $brutHeure = trim((string) $energie['charging']['next_delayed_time']);
+          // Garde de format AVANT parseHeureIso() : un format inconnu renverrait [0,0] → "00:00" fabriqué
+          // (valeur inventée, interdite par le contrat de parseStatus). N'émettre que sur un format reconnu.
+          if (preg_match('/^\s*PT\d/', $brutHeure) || preg_match('/T\d{2}:\d{2}/', $brutHeure)) {
+            list($heureProg, $minuteProg) = self::parseHeureIso($brutHeure);
+            $valeurs['charge_next_time'] = sprintf('%02d:%02d', $heureProg, $minuteProg);
+          }
+        }
       } elseif ($type == 'fuel') {
         if (isset($energie['level']) && is_numeric($energie['level'])) {
           $valeurs['fuel_level'] = (float) $energie['level'];
@@ -826,6 +857,14 @@ class stellantis extends eqLogic {
     // Odomètre (racine depuis v4.15)
     if (isset($_status['odometer']['mileage']) && is_numeric($_status['odometer']['mileage'])) {
       $valeurs['mileage'] = (float) $_status['odometer']['mileage'];
+    }
+    // UC21 : batterie 12 V de servitude — champ racine `battery.voltage`, UNIVERSEL (décision validée
+    // 2026-07-11) : présente sur tout véhicule (y compris thermique pur), donc SANS garde de motorisation,
+    // à la différence des 4 champs charging.* ci-dessus. DISTINCT de energy[].battery.* (capacité/SOH de
+    // la batterie de TRACTION, hors périmètre UC21). Exposée brute (unité incertaine, cf. data-model § 2.6
+    // — pas de borne de vraisemblance, elle produirait des faux positifs).
+    if (isset($_status['battery']['voltage']) && is_numeric($_status['battery']['voltage'])) {
+      $valeurs['battery_12v'] = (float) $_status['battery']['voltage'];
     }
     // Verrouillage
     $verrouillage = self::extraireVerrouillage($_status);
@@ -2136,6 +2175,30 @@ class stellantis extends eqLogic {
       $minute = (int) $m[2];
     }
     return array(max(0, min(23, $heure)), max(0, min(59, $minute)));
+  }
+
+  /**
+   * UC21 : convertit une DURÉE ISO 8601 (`PT1H30M`, `remaining_time`) en minutes. Distinct de
+   * parseHeureIso() (qui parse une HEURE ponctuelle, PT ou RFC3339, avec clamp 0..23/0..59) : ici c'est
+   * une durée, potentiellement > 24 h (ex. `PT25H` = 1500 min) → AUCUN clamp. `null` si la chaîne ne
+   * correspond à aucun format de durée ISO8601 reconnu (jamais de "0" fabriqué).
+   */
+  private static function dureeIsoEnMinutes(string $_iso): ?int {
+    $iso = trim($_iso);
+    if (!preg_match('/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/', $iso, $m)) {
+      return null;
+    }
+    // isset() (jamais accès direct à $m[n]) : les groupes optionnels non capturés sont OMIS du tableau
+    // par PHP (pas de "" ni de warning) ⇒ null distinct de "0 explicite" (ex. "PT0S" reste une durée
+    // valable de 0 min, alors que "PT" seul — aucun composant — n'en est pas une).
+    $jours = (isset($m[1]) && $m[1] !== '') ? (int) $m[1] : null;
+    $heures = (isset($m[2]) && $m[2] !== '') ? (int) $m[2] : null;
+    $minutes = (isset($m[3]) && $m[3] !== '') ? (int) $m[3] : null;
+    $secondes = (isset($m[4]) && $m[4] !== '') ? (int) $m[4] : null;
+    if ($jours === null && $heures === null && $minutes === null && $secondes === null) {
+      return null; // "P" ou "PT" seuls (aucun composant numérique) : pas de durée exploitable.
+    }
+    return ($jours ?? 0) * 1440 + ($heures ?? 0) * 60 + ($minutes ?? 0) + intdiv($secondes ?? 0, 60);
   }
 
   // Extrait l'heure de charge différée brute (charging.next_delayed_time) de l'énergie électrique du

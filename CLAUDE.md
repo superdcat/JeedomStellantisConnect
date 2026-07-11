@@ -159,7 +159,18 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > `message::add` throttlée calquée sur `alerterOtpRequired`, clé `daemon_auth_failed`), enrichit
 > `connected` (efface l'alerte) / `disconnected`, maintient un **cache d'état démon** (`DAEMON_CONN_STATE_KEY`)
 > lu par `health()` (ligne « Connexion du démon », **sans appel réseau**, affichée seulement si démon lancé
-> + OTP actif) ; nettoyage dans `deamon_stop()`/`purgeOtp()`. Suite =
+> + OTP actif) ; nettoyage dans `deamon_stop()`/`purgeOtp()`. **Post-MVP : UC21** — **détail batterie &
+> charge** (télémétrie énergie enrichie, 100 % lecture/parsing, aucun appel réseau/MQTT nouveau) : 5
+> commandes info supplémentaires mappées dans `parseStatus()` depuis le `/status` déjà récupéré au cron —
+> `charging_rate` (km/h), `charging_remaining` (durée ISO `remaining_time` → **minutes** via le nouveau
+> helper pur `dureeIsoEnMinutes()`, **sans clamp** car une durée peut dépasser 24 h — distinct de
+> `parseHeureIso()` qui clampe une *heure*), `charging_mode`, `charge_next_time` (HH:MM via `parseHeureIso`
+> derrière une **garde de format** `/^\s*PT\d/` pour ne jamais fabriquer un `00:00`). Ces 4 champs
+> `charging.*` sont confinés à la branche `type=='electric'` (⇒ **jamais créés sur thermique pur**, AC3).
+> `battery_12v` (racine `battery.voltage`, 12 V de servitude) est mappé **UNIVERSELLEMENT** (sans garde de
+> motorisation — décision validée, cf. `stellantis-data-model.md` § 2.1/2.6), DISTINCT de `energy[].battery.*`
+> (SOH/traction, hors périmètre). **Création paresseuse** : `createCommands()` **inchangé** ; les 5 commandes
+> naissent au 1er `/status` qui les contient (boucle `ensureCommand` de `refreshTelemetry`). Suite =
 > post-MVP (localisation, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.

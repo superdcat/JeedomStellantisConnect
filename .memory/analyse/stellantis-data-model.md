@@ -74,6 +74,19 @@ Biologic}` — `energy` absent sur Electric).
 > (`stellantis::parseHeureIso`) et ne s'appuie sur l'heure que pour *préserver* la programmation lors d'un
 > « arrêter » (delayed). Détail : `.memory/specs/post-mvp/10-commandes-distance/14-tech.md`.
 
+> ⚠️ **`remaining_time` = DURÉE, ≠ `next_delayed_time` = HEURE d'horloge (vérifié UC21, 2026-07-11)** :
+> ne PAS parser `remaining_time` avec `parseHeureIso()` (qui clampe 0-23 h / 0-59 min pour une *heure*). Une
+> **durée** peut dépasser 24 h (charge lente ⇒ `PT25H` = 1500 min, pas écrêté) → helper dédié
+> `dureeIsoEnMinutes()` (jours/heures/min/sec, **sans clamp**, `null` sur non-match). `charging_remaining`
+> est exposée en **minutes**. À l'inverse `charge_next_time` (UC21) réutilise `parseHeureIso()` (HH:MM) mais
+> **derrière une garde de format** (`/^\s*PT\d/` ou `T\d{2}:\d{2}`) pour ne jamais fabriquer un `00:00`
+> quand le champ est présent mais non parsable (contrat `parseStatus` : champ invalide ⇒ clé absente).
+>
+> ⚠️ **`battery.voltage` racine (§ 2.6) = 12 V de servitude, UNIVERSEL** (décision UC21, 2026-07-11) :
+> `battery_12v` est mappé **sans garde de motorisation** (présent sur tout véhicule, thermique inclus),
+> à la différence des 4 champs `charging.*` (VE/PHEV, branche `electric`). DISTINCT de `energy[].battery.*`
+> (capacité/SOH batterie de **traction**, ci-dessous — hors périmètre UC21).
+>
 > ⚠️ **SOH (`battery.health.*`) n'est renseigné QUE pendant/juste après une charge** (null sinon) →
 > le mettre en cache avec horodatage (cf. UC21/24). Exemple réel e-C4 : `extension.electric.battery.load`
 > = `capacity 36384 Wh / residual 21856 Wh` à 69 % SOC.

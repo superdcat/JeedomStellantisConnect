@@ -11,7 +11,11 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-10 (UC18 : `stellantis-api-architecture.md` § 1.3 — retour d'état async
+> **Dernière synchro** : 2026-07-11 (UC21 : `stellantis-data-model.md` § 2.1 — `remaining_time` = **durée**
+> (→ minutes via `dureeIsoEnMinutes`, **sans clamp**, peut dépasser 24 h) ≠ `next_delayed_time` = **heure
+> d'horloge** (`parseHeureIso`, clampé, derrière garde de format `/^\s*PT\d/`) ; `battery.voltage` racine
+> = 12 V de servitude **universel** (`battery_12v` sans garde motorisation), DISTINCT de `energy[].battery.*`
+> traction/SOH). Précédemment 2026-07-10 (UC18 : `stellantis-api-architecture.md` § 1.3 — retour d'état async
 > confirmé vs `psa/RemoteClient.py` master : psa_car_controller ne lit QUE `return_code` sur `to/cid` et
 > **ne stocke aucun `correlation_id`** → celui-ci n'est **pas fiable** sur les acks `return_code`, d'où la
 > corrélation **`correlation_id` puis repli `vin`** ; `events/MPHRTServices` = états poussés
