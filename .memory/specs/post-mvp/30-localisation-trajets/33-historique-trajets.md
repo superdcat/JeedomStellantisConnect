@@ -1,6 +1,6 @@
 # 33 — Historique des trajets
 
-**Domaine :** Localisation / trajets · **Dépend de :** UC31 · **Statut :** à spécifier (faisabilité à valider)
+**Domaine :** Localisation / trajets · **Dépend de :** UC31 · **Statut :** implémenté (2026-07-12, reconstruction locale — cf. `33-tech.md`)
 
 ## Objectif / valeur
 Exposer les **trajets** (départ/arrivée, distance, durée, conso) à des fins de suivi/statistiques, à la
@@ -19,9 +19,14 @@ manière de `psa_car_controller` (qui reconstruit les trajets à partir des posi
   éventuelle page récap.
 
 ## Critères d'acceptation
-- [ ] Le dernier trajet (distance, durée) est calculé et lisible dans Jeedom.
-- [ ] La reconstruction ne dépend pas d'un endpoint déprécié/inaccessible.
+- [x] Le dernier trajet (distance, durée) est calculé et lisible dans Jeedom (commandes info
+  `trip_distance`/`trip_duration` historisées → l'historique Jeedom EST l'historique des trajets).
+- [x] La reconstruction ne dépend pas d'un endpoint déprécié/inaccessible (100 % locale, à partir du
+  `/status` déjà récupéré au cron : `kinetic.moving`/`ignition.type`/`odometer.mileage`/position).
 
 ## À confirmer
-- Disponibilité réelle d'un endpoint trips côté consommateur (probablement non) → confirmer l'approche
-  reconstruction. Cf. `stellantis-implementations-reference.md` (psa_car_controller trips).
+- ~~Disponibilité réelle d'un endpoint trips côté consommateur~~ → **tranché (2026-07-12)** : aucun
+  endpoint trips accessible → **reconstruction locale** retenue (machine à états calquée sur UC24, signal
+  robuste `moving OU ignition`). Cf. `33-tech.md` et `stellantis-data-model.md` § 2.3.
+- Recette réelle : détection effective d'un trajet sur véhicule vivant, apparition dans l'historique,
+  absence de fragmentation en usage (dépendante de la présence de `kinetic`/`ignition` selon millésime).

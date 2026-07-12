@@ -139,6 +139,19 @@ Biologic}` — `energy` absent sur Electric).
 - `odometer.mileage` (float km) → `mileage`.
 - `ignition.type` (`Stop`/`StartUp`/`Start`/`Free`) → `ignition`.
 
+> ⚠️ **Détection de trajet : `kinetic.moving` est INSTANTANÉ, `ignition.type` PERSISTE (vérifié UC33,
+> 2026-07-12).** `kinetic.moving` est la vélocité **à l'instant exact du poll** → à la cadence de polling
+> (défaut 5 min, lecture seule sans wakeup), un simple feu rouge/embouteillage coïncidant avec le poll
+> suffit à voir `moving=false` **au milieu** d'un trajet réel → une machine à états basée sur `moving`
+> **seul** fragmente les trajets. `ignition.type` reste sur un **état de conduite** (`Start`/`StartUp`)
+> pendant tout le trajet, y compris arrêts momentanés moteur tournant. ⇒ **Prédicat « en trajet » robuste
+> = `moving==1` OU `ignition ∈ {Start, StartUp}`** ; on ne clôt un trajet que quand **les deux** signaux
+> disent « arrêté ». La **distance** vient du **delta `odometer.mileage`** (cumulatif, exact) ; les
+> horodatages début/fin viennent de l'instant de poll (`time()`), donc durée à **±cadence** (estimation,
+> comme la durée de session de charge UC24). Reconstruction **100 % locale** (aucun endpoint « trips »
+> accessible côté consommateur, cf. § 0 et `stellantis-implementations-reference.md`) : machine à états en
+> cache calquée sur UC24 `suivreSessionCharge`. Détail : `.memory/specs/post-mvp/30-localisation-trajets/33-tech.md`.
+
 ### 2.4 Ouvrants & verrouillage (`doors_state`)
 - `doors_state.locked_state` (liste) : `Locked`/`Unlocked`/`SuperLocked`/`DriverDoorUnlocked`/
   `CabinDoorsUnlocked`/`CargoDoorsLocked`/`CargoDoorsUnlocked`/`RearDoorsUnlocked`/`RearDoorsLocked` → `doors_locked`.

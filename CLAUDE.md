@@ -248,8 +248,31 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > communautaire. **Défense en profondeur** : coordonnées + fraîcheur (`position_updated`) + lien
 > OpenStreetMap/`geo:` **toujours** affichés en texte, la tuile n'étant qu'un enrichissement (repli
 > placeholder). ⚠️ **Piège locale** : lat/lon formatés via `formaterCoordonnee()`
-> (`number_format(…,'.','')`) — un `(string)$float` casserait l'URL sous `LC_NUMERIC=fr_FR`. Suite =
-> post-MVP (trajets/historique, geofencing, entretien…). Cette note est
+> (`number_format(…,'.','')`) — un `(string)$float` casserait l'URL sous `LC_NUMERIC=fr_FR`. **Post-MVP :
+> UC33** — **historique des trajets** (télémétrie localisation dérivée, 100 % lecture/reconstruction,
+> aucun appel réseau/MQTT nouveau : reconstruit à partir du **même** `/status` déjà récupéré au cron par
+> `refreshTelemetry`) : les endpoints « trips » de l'API étant **dépréciés/inaccessibles** côté
+> consommateur (comme `psa_car_controller`, cf. `stellantis-data-model.md` § 2.3), les trajets sont
+> **reconstruits localement** par une machine à états en cache calquée à l'identique sur UC24
+> (`suivreTrajet()` orchestration cache+IO, appelée en fin de `refreshTelemetry` après
+> `suivreSessionCharge()` ; calcul pur séparé `calculerRecapTrajet()`). **Signal de détection robuste**
+> (`stellantis-data-model.md` § 2.3) : `kinetic.moving` est **instantané** (fragmente les trajets à la
+> cadence 5 min sur un simple arrêt), `ignition.type` **persiste** pendant tout le trajet ⇒ prédicat « en
+> trajet » = `moving==1` **OU** `ignition ∈ {Start,StartUp}`, clôture seulement quand **les deux** disent
+> « arrêté ». Nouveau mapping `parseStatus()` : `moving` (kinetic.moving 0/1) + `ignition` (ignition.type,
+> enum assaini). **8 commandes info** en **création paresseuse** (jamais dans `createCommands`, précédent
+> UC21/24/31), toutes `generic_type=''` (pas de GEOLOC dupliqué — réservé à la position « live ») :
+> `moving`, `ignition`, et pour le **dernier trajet clos** `trip_distance` (delta `odometer.mileage`, km,
+> **historisée** ⇒ l'historique Jeedom de cette commande **EST** l'historique des trajets, AC1),
+> `trip_duration` (min, **historisée**), `trip_start`/`trip_end` (heures, instant de poll), positions de
+> `trip_start_position`/`trip_end_position` (`"lat,lon"` via `formaterCoordonnee()`, piège locale évité).
+> **Garde-fous** : garde signal `moving` absent (ne rien décider) ; ouverture **différée** si `mileage`
+> absent (pas de `start_mileage` inventé, mirror UC24 « SOC inconnu ») ; clôture **reportée** si `mileage`
+> absent (session conservée un poll de plus, jamais de trajet perdu sur trou d'odomètre) ; **garde
+> anti-fantôme** distance ≤ 0 ⇒ aucun trajet écrit (flicker `moving`/bruit GPS à l'arrêt) ; **purge du
+> cache AVANT écriture** (idempotence UC24). Estimations documentées : durée à **±cadence** (instant de
+> poll) ; un arrêt > cadence reste un séparateur de trajets. Suite = post-MVP (geofencing, entretien,
+> alertes…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
 

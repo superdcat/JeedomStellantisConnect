@@ -591,6 +591,21 @@ class stellantis extends eqLogic {
       'heading'          => array(__('Cap', __FILE__), 'numeric', '', '°', false),
       'position_updated' => array(__('Position (mise à jour)', __FILE__), 'string', '', '', false),
       'gps_signal'       => array(__('Qualité du signal GPS', __FILE__), 'numeric', '', '', false),
+      // UC33 : historique des trajets. Reconstruction 100 % locale (endpoints « trips » de l'API dépréciés
+      // et inaccessibles côté consommateur, cf. 33-tech.md) à partir de kinetic.moving/ignition.type
+      // (détection arrêt→départ) + odometer.mileage/latitude/longitude (déjà collectés par parseStatus).
+      // 'moving'/'ignition' sont alimentées à CHAQUE poll (création paresseuse, comme UC21/23/31) ; les 6
+      // autres décrivent le DERNIER trajet clos, écrites uniquement à sa clôture (suivreTrajet).
+      // generic_type='' partout : pas de GEOLOC sur les positions de trajet (réservé à 'position', la
+      // position « live »). trip_distance/trip_duration HISTORISÉES : c'est l'historique des trajets (AC1).
+      'moving'              => array(__('En mouvement', __FILE__), 'binary', '', '', false),
+      'ignition'            => array(__('Contact', __FILE__), 'string', '', '', false),
+      'trip_distance'       => array(__('Distance dernier trajet', __FILE__), 'numeric', '', 'km', true),
+      'trip_duration'       => array(__('Durée dernier trajet', __FILE__), 'numeric', '', 'min', true),
+      'trip_start'          => array(__('Départ (heure)', __FILE__), 'string', '', '', false),
+      'trip_end'            => array(__('Arrivée (heure)', __FILE__), 'string', '', '', false),
+      'trip_start_position' => array(__('Départ (position)', __FILE__), 'string', '', '', false),
+      'trip_end_position'   => array(__('Arrivée (position)', __FILE__), 'string', '', '', false),
     );
   }
 
@@ -802,6 +817,9 @@ class stellantis extends eqLogic {
     // UC24 : suivi des sessions de charge (VE/PHEV). Best-effort, robuste — ne lève jamais (try/catch interne),
     // posé APRÈS le reste du refresh pour ne rien interrompre.
     $this->suivreSessionCharge($valeurs, $status);
+    // UC33 : suivi des trajets (universel). Best-effort, robuste — ne lève jamais (try/catch interne),
+    // posé APRÈS suivreSessionCharge() (robustesse cron, même convention que le suivi de charge).
+    $this->suivreTrajet($valeurs, $status);
   }
 
   // Extrait le tableau d'énergies du /status : energies[] (v4.15+) prioritaire, fallback energy[].
@@ -924,6 +942,17 @@ class stellantis extends eqLogic {
     // Odomètre (racine depuis v4.15)
     if (isset($_status['odometer']['mileage']) && is_numeric($_status['odometer']['mileage'])) {
       $valeurs['mileage'] = (float) $_status['odometer']['mileage'];
+    }
+    // UC33 : signaux de détection de trajet (racine depuis v4.15, comme odometer ci-dessus). kinetic.moving
+    // = vélocité instantanée à l'instant du poll ; ignition.type PERSISTE pendant tout le trajet (y compris
+    // arrêt momentané moteur tournant) — signal robuste contre la fragmentation. La machine à états qui les
+    // consomme est suivreTrajet() (fin de refreshTelemetry), pas ce mapping (pur).
+    if (isset($_status['kinetic']['moving'])) {
+      $valeurs['moving'] = $_status['kinetic']['moving'] ? 1 : 0;
+    }
+    if (isset($_status['ignition']['type']) && is_scalar($_status['ignition']['type'])) {
+      // Enum assaini (même convention que charging_status/precond_status) : ne garder que les lettres.
+      $valeurs['ignition'] = preg_replace('/[^A-Za-z]/', '', (string) $_status['ignition']['type']);
     }
     // UC21 : batterie 12 V de servitude — champ racine `battery.voltage`, UNIVERSEL (décision validée
     // 2026-07-11) : présente sur tout véhicule (y compris thermique pur), donc SANS garde de motorisation,
@@ -2774,6 +2803,137 @@ class stellantis extends eqLogic {
       return (float) $config;
     }
     return null;
+  }
+
+  /* * ******************* UC33 — Historique des trajets ******************* */
+
+  const TRIP_SESSION_KEY = 'stellantis::trip_session::';  // + eqId (cache) : session en cours JSON
+  const TRIP_SESSION_TTL = 86400;                          // 24 h — RÉÉCRIT à chaque poll en trajet
+  const TRIP_IGNITION_ON = array('Start', 'StartUp');      // ignition.type => "en trajet" (insensible casse)
+
+  /**
+   * UC33 : machine à états mono-passe qui détecte les trajets (arrêt→départ→arrêt) à partir de
+   * kinetic.moving/ignition.type/odometer.mileage/latitude/longitude, TOUS déjà collectés par le MÊME
+   * /status (+ /lastPosition) au cron par refreshTelemetry() — aucun appel réseau neuf (les endpoints
+   * « trips » de l'API officielle sont dépréciés et inaccessibles côté consommateur, cf. 33-tech.md).
+   * Best-effort, robuste — NE LÈVE JAMAIS (try/catch enveloppant + log warning), posé APRÈS
+   * suivreSessionCharge() (robustesse cron, même convention que le suivi de charge UC24). Universelle
+   * (contrairement à UC24 : moving/ignition/mileage existent sur tout véhicule, thermique compris).
+   */
+  private function suivreTrajet(array $_valeurs, array $_status): void {
+    try {
+      // 1) Garde signal absent : sans kinetic.moving ce poll-ci, on ne décide rien (ni ouverture ni
+      // clôture) — évite de clôturer à tort un trajet réel sur un trou transitoire de ce seul champ.
+      if (!isset($_valeurs['moving'])) {
+        return;
+      }
+      // 2) Prédicat « en trajet » : vélocité instantanée OU contact resté sur un état de conduite (persiste
+      // pendant tout le trajet, y compris arrêt momentané moteur tournant — réduit fortement la
+      // fragmentation). On ne clôture que quand LES DEUX signaux disent « arrêté ».
+      $enTrajet = ((int) $_valeurs['moving'] === 1);
+      if (!$enTrajet && isset($_valeurs['ignition'])) {
+        foreach (self::TRIP_IGNITION_ON as $etatConduite) {
+          if (strcasecmp((string) $_valeurs['ignition'], $etatConduite) == 0) {
+            $enTrajet = true;
+            break;
+          }
+        }
+      }
+      // 3) Session courante en cache (auto-guérison : JSON invalide/absent ⇒ pas de session en cours).
+      $cleSession = self::TRIP_SESSION_KEY . $this->getId();
+      $brut = (string) cache::byKey($cleSession)->getValue('');
+      $session = ($brut !== '') ? json_decode($brut, true) : null;
+      if (!is_array($session)) {
+        $session = null;
+      }
+      $mileage = (isset($_valeurs['mileage']) && is_numeric($_valeurs['mileage'])) ? (float) $_valeurs['mileage'] : null;
+
+      // 4) Ouverture.
+      if ($enTrajet && $session === null) {
+        if ($mileage === null) {
+          return; // départ vu mais odomètre inconnu : attendre un poll avec mileage (pas de start_mileage inventé, mirror UC24 « SOC inconnu »)
+        }
+        $session = array(
+          'start_ts'      => time(),
+          'start_mileage' => $mileage,
+        );
+        if (isset($_valeurs['latitude']) && is_numeric($_valeurs['latitude']) && isset($_valeurs['longitude']) && is_numeric($_valeurs['longitude'])) {
+          $session['start_lat'] = (float) $_valeurs['latitude'];
+          $session['start_lon'] = (float) $_valeurs['longitude'];
+        }
+        cache::set($cleSession, json_encode($session), self::TRIP_SESSION_TTL);
+        return;
+      }
+
+      // 5) Poursuite : réécrit systématiquement → rafraîchit le TTL. start_* restent figés (1re détection).
+      if ($enTrajet && $session !== null) {
+        cache::set($cleSession, json_encode($session), self::TRIP_SESSION_TTL);
+        return;
+      }
+
+      // 6) Clôture.
+      if (!$enTrajet && $session !== null) {
+        if ($mileage === null) {
+          // Pas de mileage ce poll-ci : NE PAS clôturer (session conservée) — évite de perdre un trajet réel
+          // sur un trou transitoire d'odomètre ; on attend un prochain poll qui en porte un (cf. advisor #3).
+          return;
+        }
+        $lat = (isset($_valeurs['latitude']) && is_numeric($_valeurs['latitude'])) ? (float) $_valeurs['latitude'] : null;
+        $lon = (isset($_valeurs['longitude']) && is_numeric($_valeurs['longitude'])) ? (float) $_valeurs['longitude'] : null;
+        $recap = self::calculerRecapTrajet($session, time(), $mileage, $lat, $lon);
+        if (count($recap) == 0) {
+          // Trajet-fantôme (distance ≤ 0 : flicker moving/bruit GPS à l'arrêt) : purger sans écrire.
+          cache::delete($cleSession);
+          log::add('stellantis', 'debug', 'Trajet : clôture ignorée (distance nulle/négative, probable flicker) pour l\'équipement #' . $this->getId());
+          return;
+        }
+        // Idempotence (comme UC24) : CONSOMMER (purger) la session AVANT d'écrire les commandes. Si l'état
+        // reste « arrêté » au poll suivant → session absente → no-op (aucun doublon d'historique).
+        cache::delete($cleSession);
+        foreach ($recap as $logicalId => $valeur) {
+          $cmd = $this->ensureCommand($logicalId); // création paresseuse ici
+          $this->checkAndUpdateCmd($cmd, $valeur);
+        }
+        return;
+      }
+      // 7) !$enTrajet && $session === null : rien à faire (no-op silencieux).
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'warning', 'Trajet : suivi en erreur pour l\'équipement #' . $this->getId() . ' : ' . $e->getMessage());
+    }
+  }
+
+  /**
+   * UC33 : calcule le récapitulatif d'un trajet clos. PUR/STATIQUE (aucun accès cache/cmd/config — tout
+   * est passé en argument) → testable, en parallèle de calculerRecapSession (UC24). Garde-fou maître
+   * (anti-fantôme) : un trajet n'est enregistrable que si start_mileage ET $_endMileage sont connus ET que
+   * la distance calculée est strictement positive — sinon AUCUN champ n'est écrit (même pas la durée, cf.
+   * 33-tech.md § 5 : distance > 0 est le seul critère de « vrai trajet »).
+   * @return array logicalId => valeur (clés absentes = non calculables, contrat façon parseStatus/calculerRecapSession)
+   */
+  private static function calculerRecapTrajet(array $_session, int $_endTs, ?float $_endMileage, ?float $_endLat, ?float $_endLon): array {
+    $recap = array();
+    $startMileage = (isset($_session['start_mileage']) && is_numeric($_session['start_mileage'])) ? (float) $_session['start_mileage'] : null;
+    if ($startMileage === null || $_endMileage === null) {
+      return $recap; // pas de trajet enregistrable sans les deux relevés d'odomètre
+    }
+    $distance = $_endMileage - $startMileage;
+    if ($distance <= 0) {
+      return $recap; // anti-fantôme : flicker moving/bruit GPS à l'arrêt, pas un vrai trajet
+    }
+    $recap['trip_distance'] = round($distance, 1);
+    $startTs = (isset($_session['start_ts']) && is_numeric($_session['start_ts'])) ? (int) $_session['start_ts'] : null;
+    if ($startTs !== null) {
+      $recap['trip_duration'] = (int) round(max(0, $_endTs - $startTs) / 60);
+      $recap['trip_start'] = date('Y-m-d H:i:s', $startTs);
+    }
+    $recap['trip_end'] = date('Y-m-d H:i:s', $_endTs);
+    if (isset($_session['start_lat']) && is_numeric($_session['start_lat']) && isset($_session['start_lon']) && is_numeric($_session['start_lon'])) {
+      $recap['trip_start_position'] = self::formaterCoordonnee((float) $_session['start_lat']) . ',' . self::formaterCoordonnee((float) $_session['start_lon']);
+    }
+    if ($_endLat !== null && $_endLon !== null) {
+      $recap['trip_end_position'] = self::formaterCoordonnee($_endLat) . ',' . self::formaterCoordonnee($_endLon);
+    }
+    return $recap;
   }
 
   /**

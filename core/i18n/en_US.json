@@ -213,7 +213,15 @@
         "Longitude": "Longitude",
         "Cap": "Heading",
         "Position (mise à jour)": "Position (last update)",
-        "Qualité du signal GPS": "GPS signal quality"
+        "Qualité du signal GPS": "GPS signal quality",
+        "En mouvement": "Moving",
+        "Contact": "Ignition",
+        "Distance dernier trajet": "Last trip distance",
+        "Durée dernier trajet": "Last trip duration",
+        "Départ (heure)": "Departure (time)",
+        "Arrivée (heure)": "Arrival (time)",
+        "Départ (position)": "Departure (position)",
+        "Arrivée (position)": "Arrival (position)"
     },
     "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
         "Carte de position": "Position map",

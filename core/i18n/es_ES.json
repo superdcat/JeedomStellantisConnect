@@ -213,7 +213,15 @@
         "Longitude": "Longitud",
         "Cap": "Rumbo",
         "Position (mise à jour)": "Posición (actualización)",
-        "Qualité du signal GPS": "Calidad de la señal GPS"
+        "Qualité du signal GPS": "Calidad de la señal GPS",
+        "En mouvement": "En movimiento",
+        "Contact": "Contacto",
+        "Distance dernier trajet": "Distancia del último trayecto",
+        "Durée dernier trajet": "Duración del último trayecto",
+        "Départ (heure)": "Salida (hora)",
+        "Arrivée (heure)": "Llegada (hora)",
+        "Départ (position)": "Salida (posición)",
+        "Arrivée (position)": "Llegada (posición)"
     },
     "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
         "Carte de position": "Mapa de posición",
