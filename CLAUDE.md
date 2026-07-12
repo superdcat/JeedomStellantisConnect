@@ -287,7 +287,33 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > `stellantis-data-model.md` § 2.2) : `home_lat`/`home_lon` **chiffrées au repos** (ajoutées à
 > `$_encryptConfigKey`, protège backups/exports) ; `home_distance` **non historisée** (distance-au-point-fixe
 > historisée + position exposée ⇒ trilatération possible de l'adresse). Restitution = scénarios Jeedom
-> natifs (déclencheur sur changement de `at_home`). Suite = post-MVP (entretien, alertes, supervision…).
+> natifs (déclencheur sur changement de `at_home`). **Post-MVP : UC41** — **kilométrage & entretien**
+> (télémétrie entretien, 100 % lecture/parsing, **1 nouvel appel REST throttlé**, aucun MQTT) : le
+> kilométrage (`mileage`, socle MVP07 historisé) est **inchangé** (AC1 déjà satisfait) ; les **échéances
+> d'entretien** viennent de l'**endpoint dédié `GET /user/vehicles/{id}/maintenance`** (contrat vérifié vs
+> `psa_car_controller/connected_car_api` : `mileageBeforeMaintenance` + **`daysBeforeMaintenace`, faute de
+> frappe RÉELLE de l'API** — un seul `n` ; parser lit aussi la forme correcte en repli ; wrapper runtime
+> incertain ⇒ parsing **multi-shape** `_embedded.maintenance` puis racine). ⚠️ **Disponibilité NON
+> garantie** (ni `psa_car_controller` ni l'intégration HA ne lisent réellement cet endpoint — présent
+> seulement dans le client Swagger généré) ⇒ **best-effort, jamais fatal, création paresseuse** de 3
+> commandes info : `service_distance` (km avant révision, historisée), `service_days` (jours, historisée),
+> `service_due` (binary « révision proche », historisée = déclencheur de scénario, précédent `at_home`).
+> Nouveau parser **pur** `parseMaintenance()` (seul endroit des chemins JSON `/maintenance`, `is_numeric`
+> strict **sans clamp** — jours négatif = révision dépassée, valide) + helper **pur** `calculerRevisionProche()`
+> (`1` si `service_distance <= seuilKm` **OU** `service_days <= seuilJours` — `<=` volontaire, ≠ `<` de la
+> spec ; `null` si aucun champ ⇒ `service_due` non émis). Orchestration `suivreMaintenance()` (best-effort,
+> `catch \Throwable`, ne lève jamais, appelée **en dernier** dans `refreshTelemetry()` après
+> `suivreGeofencing()`) : **throttle différencié** anti-ban (timestamp de prochaine interrogation autorisée,
+> précédent `RATELIMIT_KEY` — **24 h nominal**, **7 j sur HTTP 404** = endpoint mort pour ce
+> véhicule/forfait, **3 h sur erreur transitoire** ; court-circuit `rateLimitRemaining()>0` sans poser de
+> throttle) ; un endpoint « autre » ne s'appelle **jamais** à chaque poll de 5 min. **Seuils d'alerte PAR
+> VÉHICULE** (`service_alert_km`/`service_alert_days`, config eqLogic éditable dans `desktop/php/stellantis.php`
+> — précédent UC24 `battery_capacity`/`charge_tarif` ; repli sur défauts 1000 km / 30 j via helpers
+> `seuilAlerteKm/Jours()`, car une clé vide ≠ absente ⇒ ne doit pas valoir 0). Restitution « révision
+> proche » = **scénario Jeedom natif** sur `service_due` (pas de `message::add`). **Leçon transverse
+> capitalisée** (`stellantis-data-model.md` § 3) : un endpoint des modèles Swagger de référence n'est pas
+> une preuve qu'il est exploitable — vérifier qu'il est réellement **lu** par le code de référence avant d'y
+> compter. Suite = post-MVP (pression pneus, alertes véhicule, ouvrants détaillés, supervision…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
@@ -389,7 +415,9 @@ Configuration & secrets :
   **UC24** ajoute 2 champs **saisis manuellement** (formulaire desktop, éditables) : `battery_capacity`
   (capacité batterie kWh, sert à estimer l'énergie de charge) et `charge_tarif` (prix du kWh €, coût estimé).
   **UC32** ajoute `isVisiblePanel` (case du formulaire desktop, défaut 1 posé par le plugin — inclut le
-  véhicule dans le panneau carte « Mes véhicules »).
+  véhicule dans le panneau carte « Mes véhicules »). **UC41** ajoute 2 champs **éditables** (formulaire
+  desktop) : `service_alert_km` / `service_alert_days` (seuils « révision proche » par véhicule ; repli sur
+  défauts 1000 km / 30 j via `seuilAlerteKm/Jours()` si vides).
 - **Tokens** OAuth2 (access/refresh) + **remote token OTP** (UC12, clé cache `stellantis::remote_token`,
   **distinct** du token OAuth2 — c'est le mot de passe MQTT, TTL ~890 s) : en cache **chiffré** (classe
   `cache`). ⚠️ `access_token` OAuth2 à durée courte (~15 min) → refresh proactif/réactif.

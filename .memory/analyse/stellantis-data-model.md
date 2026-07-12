@@ -215,7 +215,24 @@ Biologic}` — `energy` absent sur Electric).
   éclairage. → UC42/43.
   > ⚠️ **La pression pneus NUMÉRIQUE est ABSENTE de `/status`** : seules des **alertes booléennes** via
   > `/alerts` existent. UC42 doit mapper des binaires, pas des valeurs en bar.
-- **`GET /user/vehicles/{id}/maintenance`** : prochaine révision / distance avant entretien → UC41.
+- **`GET /user/vehicles/{id}/maintenance`** : échéance d'entretien → UC41. **Contrat vérifié UC41
+  (2026-07-12 vs `psa_car_controller/connected_car_api/models/maintenance_obj.py`)** — champs (modèle
+  `MaintenanceObj`) : `mileageBeforeMaintenance` (int km, orthographe **correcte**), **`daysBeforeMaintenace`**
+  (int jours — ⚠️ **FAUTE DE FRAPPE RÉELLE de l'API** : un seul `n`, présente telle quelle dans
+  l'`attribute_map` de référence ; lire cette forme **puis** `daysBeforeMaintenance` en repli), `createdAt`.
+  > ⚠️ **Disponibilité NON garantie côté consommateur** : le wrapper runtime est incertain (modèle
+  > `Maintenance` racine = HAL `_links` seul, **pas** de `maintenance_embedded.py` contrairement à
+  > `alerts_embedded.py`/`status_embedded.py` → parser **multi-shape** : `_embedded.maintenance` puis
+  > racine). Surtout, **ni `psa_car_controller` ni `homeassistant-stellantis-vehicles` ne LISENT
+  > réellement cet endpoint** — il n'existe que dans le client Swagger généré. ⇒ UC41 le traite en
+  > **best-effort, jamais fatal, création paresseuse** des commandes `service_distance`/`service_days`/
+  > `service_due`, et **throttlé séparément du `/status`** (cadence 24 h nominale, **7 j sur HTTP 404** =
+  > endpoint mort pour ce véhicule/forfait, 3 h sur erreur transitoire ; discipline anti-ban). Ne PAS
+  > confondre avec `service.type` du `/status` (§ 2.6 = motorisation). Détail :
+  > `.memory/specs/post-mvp/40-entretien-alertes/41-tech.md`.
+  > **Leçon transverse (UC42/43/44…)** : un endpoint listé dans les modèles Swagger de référence n'est
+  > **pas** une preuve qu'il est exploitable — vérifier s'il est **effectivement LU** par le code de
+  > référence avant de compter dessus.
 - **`POST /user/vehicles/{id}/monitors`** : webhook push — **API B2C officielle uniquement** (inaccessible).
 
 ## 4. Conséquences pour la roadmap

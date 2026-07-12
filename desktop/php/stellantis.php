@@ -211,6 +211,26 @@ $iconeConnexion = ($etatConnexion['state'] == 'ok') ? 'fa-check-circle' : (($eta
 									<input type="number" min="0" step="0.01" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="charge_tarif">
 								</div>
 							</div>
+							<!-- UC41 : kilométrage & entretien — 2 champs de config éditables (PAS readonly, même
+							     précédent que battery_capacity/charge_tarif ci-dessus) : une clé de config absente du
+							     formulaire est effacée au Sauvegarder. Seuils PAR VÉHICULE (repli sur le défaut
+							     1000 km / 30 j si laissés vides). -->
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Seuil d'alerte révision (km)}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Distance restante en dessous de laquelle la révision est signalée proche — laisser vide pour utiliser le défaut (1000 km)}}"></i></sup>
+								</label>
+								<div class="col-sm-6">
+									<input type="number" min="0" step="1" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="service_alert_km">
+								</div>
+							</div>
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Seuil d'alerte révision (jours)}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Nombre de jours restants en dessous duquel la révision est signalée proche — laisser vide pour utiliser le défaut (30 jours)}}"></i></sup>
+								</label>
+								<div class="col-sm-6">
+									<input type="number" min="0" step="1" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="service_alert_days">
+								</div>
+							</div>
 							<!-- UC32 : panneau carte « Mes véhicules » — sélection par véhicule. Défaut (coché) posé par le
 							     plugin (stellantis::assurerVisiblePanelParDefaut) à la création ET au backfill des véhicules
 							     existants. Clé de configuration OBLIGATOIRE dans ce formulaire (sinon effacée au Sauvegarder,

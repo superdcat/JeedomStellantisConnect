@@ -231,7 +231,10 @@
         "Départ (position)": "Salida (posición)",
         "Arrivée (position)": "Llegada (posición)",
         "Au domicile": "En casa",
-        "Distance au domicile": "Distancia al domicilio"
+        "Distance au domicile": "Distancia al domicilio",
+        "Distance avant révision": "Distancia hasta la revisión",
+        "Jours avant révision": "Días hasta la revisión",
+        "Révision proche": "Revisión próxima"
     },
     "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
         "Carte de position": "Mapa de posición",
@@ -284,6 +287,10 @@
         "Capacité utile de la batterie de traction en kWh — saisie manuelle, sert à estimer l'énergie ajoutée lors d'une charge (laisser vide si inconnue)": "Capacidad útil de la batería de tracción en kWh — introducción manual, sirve para estimar la energía añadida durante una carga (dejar vacío si se desconoce)",
         "Tarif électricité": "Tarifa eléctrica",
         "Prix du kWh en euros — sert à estimer le coût d'une charge (informatif, laisser vide pour ne pas estimer le coût)": "Precio del kWh en euros — sirve para estimar el coste de una carga (informativo, dejar vacío para no estimar el coste)",
+        "Seuil d'alerte révision (km)": "Umbral de alerta de revisión (km)",
+        "Distance restante en dessous de laquelle la révision est signalée proche — laisser vide pour utiliser le défaut (1000 km)": "Distancia restante por debajo de la cual la revisión se señala como próxima — dejar vacío para usar el valor por defecto (1000 km)",
+        "Seuil d'alerte révision (jours)": "Umbral de alerta de revisión (días)",
+        "Nombre de jours restants en dessous duquel la révision est signalée proche — laisser vide pour utiliser le défaut (30 jours)": "Número de días restantes por debajo del cual la revisión se señala como próxima — dejar vacío para usar el valor por defecto (30 días)",
         "Afficher sur le panneau carte": "Mostrar en el panel de mapa",
         "Affiche ce véhicule dans le panneau « Mes véhicules » du menu": "Muestra este vehículo en el panel «Mis vehículos» del menú",
         "Informations": "Información",

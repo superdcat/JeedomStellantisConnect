@@ -231,7 +231,10 @@
         "Départ (position)": "Abfahrt (Position)",
         "Arrivée (position)": "Ankunft (Position)",
         "Au domicile": "Zuhause",
-        "Distance au domicile": "Entfernung zum Zuhause"
+        "Distance au domicile": "Entfernung zum Zuhause",
+        "Distance avant révision": "Strecke bis zur Inspektion",
+        "Jours avant révision": "Tage bis zur Inspektion",
+        "Révision proche": "Inspektion bald fällig"
     },
     "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
         "Carte de position": "Positionskarte",
@@ -284,6 +287,10 @@
         "Capacité utile de la batterie de traction en kWh — saisie manuelle, sert à estimer l'énergie ajoutée lors d'une charge (laisser vide si inconnue)": "Nutzbare Kapazität der Antriebsbatterie in kWh — manuelle Eingabe, dient zur Schätzung der bei einer Ladung hinzugefügten Energie (leer lassen, falls unbekannt)",
         "Tarif électricité": "Strompreis",
         "Prix du kWh en euros — sert à estimer le coût d'une charge (informatif, laisser vide pour ne pas estimer le coût)": "Preis pro kWh in Euro — dient zur Schätzung der Kosten einer Ladung (informativ, leer lassen, um die Kosten nicht zu schätzen)",
+        "Seuil d'alerte révision (km)": "Warnschwelle Inspektion (km)",
+        "Distance restante en dessous de laquelle la révision est signalée proche — laisser vide pour utiliser le défaut (1000 km)": "Restdistanz, unterhalb derer die Inspektion als bald fällig gemeldet wird — leer lassen, um den Standardwert zu verwenden (1000 km)",
+        "Seuil d'alerte révision (jours)": "Warnschwelle Inspektion (Tage)",
+        "Nombre de jours restants en dessous duquel la révision est signalée proche — laisser vide pour utiliser le défaut (30 jours)": "Anzahl verbleibender Tage, unterhalb derer die Inspektion als bald fällig gemeldet wird — leer lassen, um den Standardwert zu verwenden (30 Tage)",
         "Afficher sur le panneau carte": "Auf dem Kartenpanel anzeigen",
         "Affiche ce véhicule dans le panneau « Mes véhicules » du menu": "Zeigt dieses Fahrzeug im Menüpanel «Meine Fahrzeuge» an",
         "Informations": "Informationen",

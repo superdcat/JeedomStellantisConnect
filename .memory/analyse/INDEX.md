@@ -11,7 +11,14 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-12 (UC34 : `stellantis-data-model.md` § 2.2 — **posture de confidentialité
+> **Dernière synchro** : 2026-07-12 (UC41 : `stellantis-data-model.md` § 3 — **échéance d'entretien** :
+> endpoint dédié `/maintenance` (champs `mileageBeforeMaintenance` + **`daysBeforeMaintenace`, faute de
+> frappe réelle de l'API** — un seul `n` ; lire aussi la forme correcte en repli) ; **wrapper runtime
+> incertain** (parser multi-shape `_embedded.maintenance` puis racine) ; **disponibilité NON garantie** —
+> ni `psa_car_controller` ni l'intégration HA ne le lisent réellement → best-effort/création paresseuse/
+> throttle différencié (24 h nominal, 7 j sur 404, 3 h transitoire) ; **leçon transverse** : un endpoint
+> présent dans les modèles Swagger de référence n'est pas une preuve qu'il est exploitable — cf.
+> `41-tech.md`). Précédemment 2026-07-12 (UC34 : `stellantis-data-model.md` § 2.2 — **posture de confidentialité
 > des données de localisation** : (1) clé de config contenant des coordonnées (adresse domicile) → **chiffrer
 > au repos** via `$_encryptConfigKey` (le core chiffre auto les clés de config **plugin** listées, précédent
 > `client_secret` étendu à `home_lat`/`home_lon`) ; (2) **ne pas historiser** une distance dérivée d'un point
@@ -94,6 +101,7 @@
 | **Champs de télémétrie** (SOC, autonomie, charge, position, portes, km, pneus…) → quelles commandes info | `stellantis-data-model.md` |
 | **`charging.status`** : valeurs, états terminaux **persistants** (≠ momentanés), machine à états de **session de charge** (transition, pas par-poll), énergie = Δ SOC × capacité | `stellantis-data-model.md` § 2.1 |
 | **Détection de trajet** : `kinetic.moving` instantané (fragmente à 5 min) vs `ignition.type` persistant → prédicat `moving OU ignition∈{Start,StartUp}` ; distance = delta odomètre ; reconstruction locale (pas d'endpoint trips) | `stellantis-data-model.md` § 2.3 |
+| **Échéance d'entretien / kilométrage** : endpoint `/maintenance`, champs `mileageBeforeMaintenance` / `daysBeforeMaintenace` (**typo réelle de l'API**), disponibilité NON garantie (best-effort/lazy/throttle) ; un endpoint du client Swagger de réf. n'est pas forcément exploitable | `stellantis-data-model.md` § 3 |
 | **Confidentialité localisation** : clé config avec coordonnées → chiffrer (`$_encryptConfigKey`, marche pour la config plugin) ; ne PAS historiser une distance-à-un-point-fixe (trilatération de l'adresse) ; `at_home` binaire OK à historiser | `stellantis-data-model.md` § 2.2 |
 | Création conditionnelle de commandes selon **motorisation** (élec/hybride/thermique) | `stellantis-data-model.md` § 3 |
 | **Où trouver le contrat exact** (endpoint/payload non documenté) : code de référence à lire | `stellantis-implementations-reference.md` |

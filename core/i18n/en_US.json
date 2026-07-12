@@ -231,7 +231,10 @@
         "Départ (position)": "Departure (position)",
         "Arrivée (position)": "Arrival (position)",
         "Au domicile": "At home",
-        "Distance au domicile": "Distance to home"
+        "Distance au domicile": "Distance to home",
+        "Distance avant révision": "Distance to service",
+        "Jours avant révision": "Days to service",
+        "Révision proche": "Service due soon"
     },
     "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
         "Carte de position": "Position map",
@@ -284,6 +287,10 @@
         "Capacité utile de la batterie de traction en kWh — saisie manuelle, sert à estimer l'énergie ajoutée lors d'une charge (laisser vide si inconnue)": "Usable capacity of the traction battery in kWh — manual entry, used to estimate the energy added during a charge (leave empty if unknown)",
         "Tarif électricité": "Electricity rate",
         "Prix du kWh en euros — sert à estimer le coût d'une charge (informatif, laisser vide pour ne pas estimer le coût)": "Price per kWh in euros — used to estimate the cost of a charge (informative, leave empty to skip the cost estimate)",
+        "Seuil d'alerte révision (km)": "Service alert threshold (km)",
+        "Distance restante en dessous de laquelle la révision est signalée proche — laisser vide pour utiliser le défaut (1000 km)": "Remaining distance below which the service is flagged as due soon — leave empty to use the default (1000 km)",
+        "Seuil d'alerte révision (jours)": "Service alert threshold (days)",
+        "Nombre de jours restants en dessous duquel la révision est signalée proche — laisser vide pour utiliser le défaut (30 jours)": "Number of remaining days below which the service is flagged as due soon — leave empty to use the default (30 days)",
         "Afficher sur le panneau carte": "Show on the map panel",
         "Affiche ce véhicule dans le panneau « Mes véhicules » du menu": "Displays this vehicle in the «My vehicles» menu panel",
         "Informations": "Information",

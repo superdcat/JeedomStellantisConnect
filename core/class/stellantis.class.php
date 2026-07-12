@@ -618,6 +618,16 @@ class stellantis extends eqLogic {
       // distance+position exploitable par trilatération (confidentialité du domicile).
       'at_home'        => array(__('Au domicile', __FILE__), 'binary', 'PRESENCE', '', true),
       'home_distance'  => array(__('Distance au domicile', __FILE__), 'numeric', '', 'm', false),
+      // UC41 : kilométrage & entretien. 'mileage' (socle MVP07) reste eager/historisée, inchangée. Les 3
+      // suivantes sont dérivées de l'endpoint dédié GET /maintenance (disponibilité NON garantie selon
+      // véhicule/forfait, cf. 41-tech.md § contrat) → création PARESSEUSE (jamais dans createCommands,
+      // précédent UC21/23/24/31/33/34), naissent au 1er /maintenance exploitable (suivreMaintenance).
+      // Toutes HISTORISÉES : service_distance/service_days pour visualiser la décroissance (non redondant
+      // avec 'mileage' = odomètre ABSOLU, ici distance RESTANTE) ; service_due (binaire) = déclencheur de
+      // scénario (précédent at_home UC34). generic_type='' (pas de constante core fiable pour l'entretien).
+      'service_distance' => array(__('Distance avant révision', __FILE__), 'numeric', '', 'km', true),
+      'service_days'     => array(__('Jours avant révision', __FILE__), 'numeric', '', 'j', true),
+      'service_due'      => array(__('Révision proche', __FILE__), 'binary', '', '', true),
     );
   }
 
@@ -832,9 +842,13 @@ class stellantis extends eqLogic {
     // UC33 : suivi des trajets (universel). Best-effort, robuste — ne lève jamais (try/catch interne),
     // posé APRÈS suivreSessionCharge() (robustesse cron, même convention que le suivi de charge).
     $this->suivreTrajet($valeurs, $status);
-    // UC34 : geofencing zone domicile. Best-effort, robuste — ne lève jamais (try/catch interne), posé EN
-    // DERNIER (robustesse cron, même convention que le suivi de charge/trajet UC24/33).
+    // UC34 : geofencing zone domicile. Best-effort, robuste — ne lève jamais (try/catch interne), posé
+    // avant UC41 (même convention que le suivi de charge/trajet UC24/33).
     $this->suivreGeofencing($valeurs);
+    // UC41 : échéances d'entretien (endpoint dédié, throttlé séparément). Best-effort, robuste — ne lève
+    // jamais (try/catch interne), posé EN DERNIER dans refreshTelemetry() (robustesse cron, même
+    // convention que le suivi de charge/trajet/geofencing UC24/33/34).
+    $this->suivreMaintenance($apiId);
   }
 
   // Extrait le tableau d'énergies du /status : energies[] (v4.15+) prioritaire, fallback energy[].
@@ -3033,6 +3047,131 @@ class stellantis extends eqLogic {
       + cos(deg2rad($_lat1)) * cos(deg2rad($_lat2)) * sin($dLon / 2) * sin($dLon / 2);
     $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
     return $rayonTerreM * $c;
+  }
+
+  /* * ******************* UC41 — Kilométrage & entretien ******************* */
+
+  const MAINTENANCE_NEXT_KEY   = 'stellantis::maintenance_next::'; // + eqId (cache) : timestamp de prochaine interrogation /maintenance autorisée
+  const MAINTENANCE_TTL_OK     = 86400;   // 24 h — cadence nominale (donnée à évolution lente, anti-ban)
+  const MAINTENANCE_TTL_ABSENT = 604800;  // 7 j  — endpoint 404 (non supporté par ce véhicule/forfait)
+  const MAINTENANCE_TTL_ERREUR = 10800;   // 3 h  — erreur transitoire (réessai le jour même, sans storm)
+  const SERVICE_ALERT_KM_DEFAUT   = 1000; // km   — seuil « révision proche » par défaut (repli si config véhicule vide/invalide)
+  const SERVICE_ALERT_DAYS_DEFAUT = 30;   // j    — idem, jours
+
+  /**
+   * UC41 : mapping PUR et défensif de la réponse GET /maintenance vers logicalId => valeur. Champ absent
+   * => clé absente (jamais d'exception), même contrat que parseStatus(). SEUL endroit portant les chemins
+   * JSON /maintenance (cf. 41-tech.md § contrat).
+   * Parsing défensif multi-shape : le wrapper de réponse runtime n'est PAS garanti côté référence (pas de
+   * maintenance_embedded.py, contrairement à alerts_embedded.py/status_embedded.py) → on tente
+   * _embedded.maintenance (shape HAL probable) puis la racine du document (repli).
+   * @return array logicalId => valeur ('service_distance'/'service_days', selon ce que l'API expose)
+   */
+  public static function parseMaintenance(array $_maint): array {
+    $valeurs = array();
+    $obj = (isset($_maint['_embedded']['maintenance']) && is_array($_maint['_embedded']['maintenance']))
+      ? $_maint['_embedded']['maintenance']
+      : $_maint;
+    if (isset($obj['mileageBeforeMaintenance']) && is_numeric($obj['mileageBeforeMaintenance'])) {
+      $valeurs['service_distance'] = (float) $obj['mileageBeforeMaintenance'];
+    }
+    // ⚠️ Faute de frappe RÉELLE de l'API (attribute_map du modèle de référence) : un seul 'n'. Repli sur
+    // l'orthographe correcte en second, au cas où un millésime la corrige. is_numeric() STRICT (jamais une
+    // vérité) : 0 (révision due aujourd'hui) et les valeurs négatives (révision dépassée) sont valides,
+    // JAMAIS clampées (cf. 41-tech.md § 2).
+    if (isset($obj['daysBeforeMaintenace']) && is_numeric($obj['daysBeforeMaintenace'])) {
+      $valeurs['service_days'] = (int) $obj['daysBeforeMaintenace'];
+    } elseif (isset($obj['daysBeforeMaintenance']) && is_numeric($obj['daysBeforeMaintenance'])) {
+      $valeurs['service_days'] = (int) $obj['daysBeforeMaintenance'];
+    }
+    return $valeurs;
+  }
+
+  /**
+   * UC41 : détermine si une révision est proche. PUR/STATIQUE (aucun accès cache/cmd/config), en parallèle
+   * de calculerRecapSession/calculerRecapTrajet/distanceHaversineM. Retourne null si AUCUN des deux champs
+   * n'est disponible (⇒ suivreMaintenance() n'émet pas service_due), sinon 1/0.
+   * ⚠️ Comparaison <= (et non < de la spec fonctionnelle) : déviation CONSCIENTE — une valeur exactement au
+   * seuil doit déclencher l'alerte (cf. 41-tech.md § 3).
+   */
+  private static function calculerRevisionProche(array $_valeurs, int $_seuilKm, int $_seuilJours): ?int {
+    if (!isset($_valeurs['service_distance']) && !isset($_valeurs['service_days'])) {
+      return null;
+    }
+    if (isset($_valeurs['service_distance']) && (float) $_valeurs['service_distance'] <= $_seuilKm) {
+      return 1;
+    }
+    if (isset($_valeurs['service_days']) && (float) $_valeurs['service_days'] <= $_seuilJours) {
+      return 1;
+    }
+    return 0;
+  }
+
+  // Seuil d'alerte « révision proche » (km) : config VÉHICULE 'service_alert_km', repli sur le défaut si
+  // vide/non numérique/négatif — précédent capaciteBatterieKwh/tarifCharge (UC24) : le formulaire desktop
+  // soumet toujours la clé, une valeur vide ne doit PAS être interprétée comme un seuil de 0.
+  private function seuilAlerteKm(): int {
+    $config = trim((string) $this->getConfiguration('service_alert_km', ''));
+    if ($config != '' && is_numeric($config) && (float) $config >= 0) {
+      return (int) $config;
+    }
+    return self::SERVICE_ALERT_KM_DEFAUT;
+  }
+
+  // Idem, seuil en jours (config véhicule 'service_alert_days').
+  private function seuilAlerteJours(): int {
+    $config = trim((string) $this->getConfiguration('service_alert_days', ''));
+    if ($config != '' && is_numeric($config) && (float) $config >= 0) {
+      return (int) $config;
+    }
+    return self::SERVICE_ALERT_DAYS_DEFAUT;
+  }
+
+  /**
+   * UC41 : interroge l'endpoint dédié GET /maintenance (throttlé séparément du /status, cadence 24 h
+   * nominale) et met à jour service_distance/service_days/service_due. Best-effort, robuste — NE LÈVE
+   * JAMAIS (try/catch enveloppant + log info), posé EN DERNIER dans refreshTelemetry() (même convention
+   * que le suivi de charge/trajet/geofencing UC24/33/34). Disponibilité NON garantie (cf. 41-tech.md § 1) :
+   * un throttle LONG est posé sur 404 pour ne pas réinterroger un endpoint mort à chaque cycle.
+   * Un throttle est TOUJOURS posé (succès + toute branche catch), sauf le court-circuit rate-limit
+   * ci-dessous (lui-même borné) ⇒ aucun retry-storm possible.
+   * ⚠️ Catch élargi à \Throwable (et non le seul stellantisException du pseudo-code de 41-tech.md § 4) :
+   * garantit le « ne lève jamais » promis par la doc, en cohérence avec suivreSessionCharge/suivreTrajet/
+   * suivreGeofencing (UC24/33/34) qui protègent déjà chacune leur propre corps de méthode.
+   */
+  private function suivreMaintenance(string $_apiId): void {
+    $cle = self::MAINTENANCE_NEXT_KEY . $this->getId();
+    if ((int) cache::byKey($cle)->getValue(0) > time()) {
+      return; // throttle actif : rien à faire ce cycle-ci
+    }
+    if (stellantisApi::rateLimitRemaining() > 0) {
+      return; // cooldown anti rate-limit actif : réessai après, SANS poser de throttle maintenance (déjà borné par le cooldown lui-même)
+    }
+    try {
+      $maint = stellantisApi::callWithToken('GET', '/user/vehicles/' . $_apiId . '/maintenance');
+      cache::set($cle, time() + self::MAINTENANCE_TTL_OK, self::MAINTENANCE_TTL_OK);
+      $valeurs = self::parseMaintenance($maint);
+      if (empty($valeurs)) {
+        return; // endpoint présent mais sans échéance exploitable (forfait/modèle) : rien à créer (AC2)
+      }
+      $due = self::calculerRevisionProche($valeurs, $this->seuilAlerteKm(), $this->seuilAlerteJours());
+      if ($due !== null) {
+        $valeurs['service_due'] = $due;
+      }
+      foreach ($valeurs as $logicalId => $valeur) {
+        $cmd = $this->ensureCommand($logicalId); // création paresseuse ici
+        $this->checkAndUpdateCmd($cmd, $valeur);
+      }
+    } catch (\Throwable $e) {
+      // 404 = endpoint non supporté par CE véhicule/forfait (cf. 41-tech.md § 1.3) → throttle LONG (évite
+      // d'interroger un endpoint mort + du bruit de log). Erreur transitoire (5xx/timeout/token/exception
+      // inattendue) → throttle COURT (réessai le jour même, sans storm).
+      $httpCode = ($e instanceof stellantisException) ? $e->getHttpCode() : 0;
+      $apiType = ($e instanceof stellantisException) ? $e->getApiType() : 'error';
+      $ttl = ($httpCode == 404) ? self::MAINTENANCE_TTL_ABSENT : self::MAINTENANCE_TTL_ERREUR;
+      cache::set($cle, time() + $ttl, $ttl);
+      log::add('stellantis', 'info', 'Échéances d\'entretien non récupérées (' . $apiType . ') — poursuite');
+    }
   }
 
   /**
