@@ -65,6 +65,24 @@ class stellantis extends eqLogic {
   // transport, token encore présent mais expiré) d'un état sain. TTL borné → auto-guérison.
   const LINK_ERROR_KEY = 'stellantis::link_error';
 
+  // UC32 — Panneau carte « Mes véhicules » : fournisseur de tuile statique PNG par défaut (sans clé),
+  // surchargeable par la config avancée 'map_tile_url'. Zoom/taille calibrés pour une vignette de widget.
+  const MAP_TILE_URL = 'https://staticmap.openstreetmap.de/staticmap.php';
+  const MAP_ZOOM = 15;
+  const MAP_SIZE = '400x260';
+  // Cache FICHIER (pas cache:: DB, cf. § dédié) : succès 10 min, négative-cache 1 min (évite de retenter
+  // en boucle un fournisseur en panne tout en restant réactif si la position bouge).
+  const MAP_CACHE_TTL = 600;
+  const MAP_CACHE_TTL_ECHEC = 60;
+  // Identifiant obligatoire dans les requêtes (sinon risque de 429/ban du fournisseur tiers, communautaire
+  // et gratuit — cf. downloadToFile/UC61 pour le même souci sur un autre tiers).
+  // ⚠️ Version figée en dur (pas de lecture dynamique de pluginVersion — aucun précédent vérifié dans ce
+  // projet pour une lecture fiable de la version courante depuis le code du plugin lui-même) : PENSER À
+  // LA SYNCHRONISER MANUELLEMENT avec plugin_info/info.json ("pluginVersion") à chaque release.
+  const MAP_USER_AGENT = 'Jeedom-Stellantis/0.1 (+https://github.com/superdcat/JeedomStellantisConnect)';
+  // Anti-DoS mémoire : une tuile PNG 400x260 fait quelques dizaines de Ko, 512 Ko laisse une marge large.
+  const MAP_TUILE_TAILLE_MAX = 524288;
+
   /*     * ***********************Methode static*************************** */
 
   /**
@@ -483,6 +501,9 @@ class stellantis extends eqLogic {
         if (trim((string) $eqLogic->getConfiguration('energy', '')) == '' && $v['energy'] != '') {
           $eqLogic->setConfiguration('energy', $v['energy']);
         }
+        // UC32 : backfill du défaut « visible dans le panneau carte » (création ET équipements existants
+        // qui n'ont jamais reçu cette clé) — posé AVANT l'unique save() ci-dessous (pas de second write).
+        self::assurerVisiblePanelParDefaut($eqLogic);
         $eqLogic->save();
         if ($creation) {
           $crees++;
@@ -597,6 +618,14 @@ class stellantis extends eqLogic {
     }
     foreach ($aCreer as $logicalId) {
       $this->ensureCommand($logicalId);
+    }
+    // UC32 : pose le widget carte sur la commande 'position', SI VIDE uniquement (idempotent — n'écrase
+    // jamais un template choisi manuellement par l'utilisateur, cf. jeedom-widgets-commandes.md § 6).
+    // Un seul save() si au moins un des deux templates a été posé. Logique mutualisée avec install.php
+    // via assurerTemplatePositionParDefaut() (helper partagé, cf. section UC32 plus bas).
+    $cmdPosition = $this->getCmd('info', 'position');
+    if (is_object($cmdPosition) && self::assurerTemplatePositionParDefaut($cmdPosition)) {
+      $cmdPosition->save();
     }
     // UC13 : commande action « Réveiller » (première commande MQTT). Universelle (tout véhicule), mais son
     // exécution vérifie à chaud les pré-requis (OTP activé, CID, démon lancé) — cf. wakeup().
@@ -2900,6 +2929,249 @@ class stellantis extends eqLogic {
       return "les infos essentiel de mon plugin";
    }
    */
+
+  /* * ******************* UC32 — Panneau carte « Mes véhicules » ******************* */
+
+  /**
+   * Backfill du défaut « visible dans le panneau carte » : ne pose la clé QUE si absente (ne réécrase
+   * jamais un choix utilisateur explicite, y compris un décochage à 0). Retourne true si modifié (pour
+   * mutualiser un éventuel save() unique côté appelant). Appelée par syncVehicles() (avant le save() de
+   * la boucle de découverte) ET par install.php::stellantis_update() (backfill des installs antérieures
+   * à UC32) — d'où la visibilité PUBLIQUE malgré son rôle de pure plomberie interne (install.php est un
+   * point d'entrée externe qui ne peut appeler qu'une méthode publique de la classe stellantis, cf.
+   * CLAUDE.md § autoload).
+   */
+  public static function assurerVisiblePanelParDefaut(eqLogic $_eqLogic): bool {
+    if (trim((string) $_eqLogic->getConfiguration('isVisiblePanel', '')) === '') {
+      $_eqLogic->setConfiguration('isVisiblePanel', 1);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Pose le widget carte 'stellantis::stellantisMap' sur la commande info 'position' donnée, SI VIDE
+   * uniquement (idempotent — n'écrase jamais un template choisi manuellement par l'utilisateur, cf.
+   * jeedom-widgets-commandes.md § 6), dashboard ET mobile. Retourne true si modifié (le caller décide du
+   * save() — un seul, mutualisé, jamais fait ICI). Mutualisée entre createCommands() (instance) et
+   * install.php::stellantis_update() (backfill des installs antérieures à UC32) — PUBLIQUE pour la même
+   * raison qu'assurerVisiblePanelParDefaut() (install.php est un point d'entrée externe, cf. CLAUDE.md §
+   * autoload).
+   */
+  public static function assurerTemplatePositionParDefaut(cmd $_cmdPosition): bool {
+    $modifie = false;
+    if ($_cmdPosition->getTemplate('dashboard', '') === '') {
+      $_cmdPosition->setTemplate('dashboard', 'stellantis::stellantisMap');
+      $modifie = true;
+    }
+    if ($_cmdPosition->getTemplate('mobile', '') === '') {
+      $_cmdPosition->setTemplate('mobile', 'stellantis::stellantisMap');
+      $modifie = true;
+    }
+    return $modifie;
+  }
+
+  // Dossier de cache FICHIER des tuiles carte (PAS cache:: DB — des images binaires n'ont rien à faire en
+  // base). Sous-dossier dédié du tmp du plugin (déjà utilisé par le démon pour son .pid, cf. pidFile()) ;
+  // créé paresseusement au besoin (best-effort, @mkdir).
+  private static function dossierCacheTuile(): string {
+    $dossier = jeedom::getTmpFolder('stellantis') . '/maptiles';
+    if (!is_dir($dossier)) {
+      @mkdir($dossier, 0775, true);
+    }
+    return $dossier;
+  }
+
+  // Chemin du fichier de cache (succès) pour l'URL de tuile déjà construite (arrondie lat/lon incluse,
+  // cf. renderStaticMap). Le marqueur d'échec (négative-cache) est ce même chemin suffixé '.fail'.
+  private static function cheminCacheTuile(string $_url): string {
+    return self::dossierCacheTuile() . '/maptile_' . md5($_url) . '.png';
+  }
+
+  // Nettoyage opportuniste (PAS de cron dédié — nombre de véhicules faible) : purge à l'écriture les
+  // fichiers de cache (succès ET marqueurs d'échec) plus vieux que leur TTL respectif.
+  private static function nettoyerCacheTuiles(): void {
+    $fichiers = @glob(self::dossierCacheTuile() . '/maptile_*');
+    if (!is_array($fichiers)) {
+      return;
+    }
+    $maintenant = time();
+    foreach ($fichiers as $fichier) {
+      if (!is_file($fichier)) {
+        continue;
+      }
+      $ttl = (substr($fichier, -5) === '.fail') ? self::MAP_CACHE_TTL_ECHEC : self::MAP_CACHE_TTL;
+      $mtime = @filemtime($fichier);
+      if ($mtime !== false && ($maintenant - $mtime) > $ttl) {
+        @unlink($fichier);
+      }
+    }
+  }
+
+  /**
+   * Formate une coordonnée (latitude/longitude) en notation décimale US à 4 décimales, INDÉPENDANTE de
+   * la locale serveur (LC_NUMERIC). Une simple concaténation/`(string) $float` produirait "48,8566" (au
+   * lieu de "48.8566") sur un Jeedom configuré en locale fr_FR — cassant les URLs de tuile et les liens
+   * OSM/`geo:`. `number_format()` ignore TOUJOURS la locale (elle prend ses séparateurs en paramètres
+   * explicites), contrairement à un cast/concat de float. PUBLIQUE : réutilisée par desktop/php/panel.php
+   * (point d'entrée externe, cf. CLAUDE.md § autoload) pour le même besoin d'affichage/URL.
+   */
+  public static function formaterCoordonnee(float $_valeur): string {
+    return number_format($_valeur, 4, '.', '');
+  }
+
+  /**
+   * Construit l'URL de la tuile statique (PURE, testable indépendamment) : fournisseur par défaut ou
+   * surchargé par la config avancée 'map_tile_url', centré sur lat/lon (déjà arrondis par l'appelant),
+   * avec un repère (marker) sur la position. Contrat query-string best-effort (fournisseur communautaire,
+   * cf. § « À confirmer » de la spec fonctionnelle) : maptype=mapnik, markers=lat,lon,red-pushpin.
+   */
+  public static function construireUrlTuile(float $_lat, float $_lon, int $_zoom, string $_size): string {
+    $base = trim((string) config::byKey('map_tile_url', 'stellantis', self::MAP_TILE_URL));
+    if ($base === '') {
+      $base = self::MAP_TILE_URL;
+    }
+    // Notation décimale US indépendante de la locale (cf. formaterCoordonnee) : sinon LC_NUMERIC=fr_FR
+    // produirait "48,8566" et casserait la query string du fournisseur de tuiles.
+    $centre = self::formaterCoordonnee($_lat) . ',' . self::formaterCoordonnee($_lon);
+    $query = http_build_query(array(
+      'center' => $centre,
+      'zoom' => $_zoom,
+      'size' => $_size,
+      'maptype' => 'mapnik',
+      'markers' => $centre . ',red-pushpin',
+    ));
+    return $base . '?' . $query;
+  }
+
+  /**
+   * Télécharge la tuile statique EN MÉMOIRE (image de quelques dizaines de Ko, pas de flux disque comme
+   * downloadToFile/UC61). Retourne les octets PNG/JPEG bruts, ou null sur tout échec (jamais d'exception :
+   * cette méthode est un simple enrichissement, le repli placeholder est géré par l'appelant).
+   * Durci anti-ban / anti-SSRF : User-Agent identifiant obligatoire, HTTPS strict, PAS de redirection
+   * suivie, timeout court, taille bornée, PAS de header Authorization (serveur tiers public, sans rapport
+   * avec l'API Stellantis — cf. downloadToFile pour la même règle sur l'APK).
+   */
+  private static function telechargerTuile(string $_url): ?string {
+    $scheme = strtolower((string) parse_url($_url, PHP_URL_SCHEME));
+    if ($scheme !== 'https') {
+      log::add('stellantis', 'warning', 'Tuile carte : URL refusée (HTTPS obligatoire)');
+      return null;
+    }
+    $protos = defined('CURLPROTO_HTTPS') ? CURLPROTO_HTTPS : 0;
+    $ch = curl_init();
+    $options = array(
+      CURLOPT_URL => $_url,
+      CURLOPT_HTTPGET => true,
+      CURLOPT_RETURNTRANSFER => true,
+      CURLOPT_HEADER => false,
+      // Anti-SSRF : jamais de redirection suivie (contrairement à downloadToFile — ici l'URL peut venir
+      // d'une config avancée libre, on ne veut pas qu'un 3xx pointe ailleurs sans revalidation de schéma).
+      CURLOPT_FOLLOWLOCATION => false,
+      CURLOPT_CONNECTTIMEOUT => 5,
+      CURLOPT_TIMEOUT => 10,
+      CURLOPT_MAXFILESIZE => self::MAP_TUILE_TAILLE_MAX,
+      CURLOPT_USERAGENT => self::MAP_USER_AGENT,
+      CURLOPT_HTTPHEADER => array('Accept: image/png,image/*;q=0.8'),
+    );
+    if ($protos !== 0) {
+      $options[CURLOPT_PROTOCOLS] = $protos;
+    }
+    curl_setopt_array($ch, $options);
+    $corps = curl_exec($ch);
+    $curlErrno = curl_errno($ch);
+    $curlError = curl_error($ch);
+    $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $contentType = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+    curl_close($ch);
+    if ($corps === false || $curlErrno !== 0) {
+      log::add('stellantis', 'info', 'Tuile carte : erreur de transport cURL #' . $curlErrno . ' : ' . $curlError);
+      return null;
+    }
+    if ($httpCode < 200 || $httpCode >= 300) {
+      log::add('stellantis', 'info', 'Tuile carte : refusée par le fournisseur (HTTP ' . $httpCode . ')');
+      return null;
+    }
+    // Allow-list stricte aux formats raster attendus (PAS un simple préfixe 'image/' générique — ça
+    // laisserait passer 'image/svg+xml', un SVG pouvant embarquer du script/markup). Ne relaie JAMAIS
+    // autre chose (page d'erreur HTML, SVG…) comme si c'était l'image attendue.
+    $typeNormalise = strtolower($contentType);
+    if (strpos($typeNormalise, 'image/png') !== 0 && strpos($typeNormalise, 'image/jpeg') !== 0) {
+      log::add('stellantis', 'info', 'Tuile carte : type de contenu inattendu (' . $contentType . ')');
+      return null;
+    }
+    return (string) $corps;
+  }
+
+  // PNG 1×1 transparent minimal : repli en cas de tuile indisponible/désactivée. Le panel/widget affichent
+  // de toute façon les coordonnées + un lien texte en dur (défense en profondeur, cf. spec fonctionnelle) —
+  // cette image n'est qu'un enrichissement, jamais la seule source d'information.
+  private static function tuilePlaceholder(): string {
+    return (string) base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', true);
+  }
+
+  /**
+   * Rend la tuile carte du véhicule $_eqLogicId, pour le proxy AJAX (widget dashboard) ET pour l'inline
+   * data: URI du panel (même code, cf. § « data: URI vs proxy » de la spec technique). NE LÈVE JAMAIS :
+   * chaque cas attendu (équipement absent/désactivé, droit manquant, position indisponible/invalide,
+   * fournisseur injoignable) retombe sur le placeholder — cette méthode est un simple enrichissement
+   * visuel, jamais une source d'erreur fatale pour l'appelant (endpoint AJAX ou page HTML).
+   * @return array{type:string,body:string}
+   */
+  public static function renderStaticMap(int $_eqLogicId): array {
+    $placeholder = array('type' => 'image/png', 'body' => self::tuilePlaceholder());
+    $eqLogic = eqLogic::byId($_eqLogicId);
+    if (!is_object($eqLogic) || $eqLogic->getEqType_name() !== 'stellantis' || !$eqLogic->getIsEnable()) {
+      return $placeholder;
+    }
+    if (!$eqLogic->hasRight('r')) {
+      return $placeholder;
+    }
+    $cmd = $eqLogic->getCmd('info', 'position');
+    $valeur = is_object($cmd) ? trim((string) $cmd->execCmd()) : '';
+    if ($valeur === '') {
+      return $placeholder;
+    }
+    $parties = explode(',', $valeur);
+    if (count($parties) !== 2 || !is_numeric(trim($parties[0])) || !is_numeric(trim($parties[1]))) {
+      return $placeholder;
+    }
+    $lat = (float) trim($parties[0]);
+    $lon = (float) trim($parties[1]);
+    if (abs($lat) > 90 || abs($lon) > 180) {
+      return $placeholder;
+    }
+    // Arrondi à 4 décimales (~11 m de précision) AVANT de construire la clé de cache ET l'URL : sans ça,
+    // le jitter GPS d'un poll à l'autre changerait la clé à chaque refresh et le cache ne serait jamais
+    // réellement exploité (cf. spec technique).
+    $lat = round($lat, 4);
+    $lon = round($lon, 4);
+    $url = self::construireUrlTuile($lat, $lon, self::MAP_ZOOM, self::MAP_SIZE);
+    $cheminCache = self::cheminCacheTuile($url);
+    $cheminEchec = $cheminCache . '.fail';
+    $mtimeCache = @filemtime($cheminCache);
+    if ($mtimeCache !== false && (time() - $mtimeCache) < self::MAP_CACHE_TTL) {
+      $corps = @file_get_contents($cheminCache);
+      if ($corps !== false && $corps !== '') {
+        return array('type' => 'image/png', 'body' => $corps);
+      }
+    }
+    $mtimeEchec = @filemtime($cheminEchec);
+    if ($mtimeEchec !== false && (time() - $mtimeEchec) < self::MAP_CACHE_TTL_ECHEC) {
+      // Négative-cache : ne retente pas le fournisseur à chaque affichage pendant la fenêtre courte.
+      return $placeholder;
+    }
+    $corps = self::telechargerTuile($url);
+    if ($corps === null) {
+      @file_put_contents($cheminEchec, '1');
+      self::nettoyerCacheTuiles();
+      return $placeholder;
+    }
+    @file_put_contents($cheminCache, $corps);
+    @unlink($cheminEchec);
+    self::nettoyerCacheTuiles();
+    return array('type' => 'image/png', 'body' => $corps);
+  }
 
   /*     * *********************Méthodes d'instance************************* */
 

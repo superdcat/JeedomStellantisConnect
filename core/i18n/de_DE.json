@@ -14,6 +14,9 @@
         "URL de redirection": "Weiterleitungs-URL",
         "redirect_uri OAuth2 (schéma de l'app mobile de la marque, ex. mymap://oauth2redirect/fr)": "OAuth2 redirect_uri (App-Schema der mobilen App der Marke, z. B. mymap://oauth2redirect/fr)",
         "Laisser vide pour utiliser le défaut de la marque": "Leer lassen, um den Standardwert der Marke zu verwenden",
+        "URL du service de tuiles carte (optionnel)": "URL des Karten-Kacheldienstes (optional)",
+        "Laisser vide pour utiliser le service de cartographie par défaut (OpenStreetMap)": "Leer lassen, um den Standard-Kartendienst zu verwenden (OpenStreetMap)",
+        "Laisser vide pour utiliser le service par défaut": "Leer lassen, um den Standarddienst zu verwenden",
         "Extraction automatique": "Automatische Extraktion",
         "Télécharge l'application mobile de la marque sélectionnée (~100 Mo) et en extrait automatiquement le Client ID et le Client Secret, sans installer d'outil externe. Sélectionnez d'abord la marque et le pays.": "Lädt die mobile App der ausgewählten Marke herunter (~100 MB) und extrahiert automatisch die Client-ID und das Client-Secret, ohne ein externes Tool zu installieren. Wählen Sie zuerst die Marke und das Land aus.",
         "Extraire automatiquement": "Automatisch extrahieren",
@@ -74,6 +77,9 @@
         "Plugin non configuré : renseignez la marque, le Client ID et le Client Secret puis sauvegardez": "Plugin nicht konfiguriert: Geben Sie die Marke, die Client-ID und das Client-Secret ein und speichern Sie anschließend",
         "Authentification réussie : le plugin est connecté à votre compte": "Authentifizierung erfolgreich: Das Plugin ist mit Ihrem Konto verbunden",
         "Aucune méthode correspondante à": "Keine passende Methode für"
+    },
+    "plugins/stellantis/core/ajax/stellantisMap.ajax.php": {
+        "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert"
     },
     "plugins/stellantis/core/class/stellantis.class.php": {
         "Plugin non configuré : renseignez et sauvegardez la configuration": "Plugin nicht konfiguriert: Geben Sie die Konfiguration ein und speichern Sie sie",
@@ -209,6 +215,14 @@
         "Position (mise à jour)": "Position (Aktualisierung)",
         "Qualité du signal GPS": "GPS-Signalqualität"
     },
+    "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
+        "Carte de position": "Positionskarte",
+        "Voir sur la carte": "Auf der Karte ansehen"
+    },
+    "plugins/stellantis/core/template/mobile/cmd.info.string.stellantisMap.html": {
+        "Carte de position": "Positionskarte",
+        "Voir sur la carte": "Auf der Karte ansehen"
+    },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert",
         "État de la connexion": "Verbindungsstatus",
@@ -252,6 +266,8 @@
         "Capacité utile de la batterie de traction en kWh — saisie manuelle, sert à estimer l'énergie ajoutée lors d'une charge (laisser vide si inconnue)": "Nutzbare Kapazität der Antriebsbatterie in kWh — manuelle Eingabe, dient zur Schätzung der bei einer Ladung hinzugefügten Energie (leer lassen, falls unbekannt)",
         "Tarif électricité": "Strompreis",
         "Prix du kWh en euros — sert à estimer le coût d'une charge (informatif, laisser vide pour ne pas estimer le coût)": "Preis pro kWh in Euro — dient zur Schätzung der Kosten einer Ladung (informativ, leer lassen, um die Kosten nicht zu schätzen)",
+        "Afficher sur le panneau carte": "Auf dem Kartenpanel anzeigen",
+        "Affiche ce véhicule dans le panneau « Mes véhicules » du menu": "Zeigt dieses Fahrzeug im Menüpanel «Meine Fahrzeuge» an",
         "Informations": "Informationen",
         "Description": "Beschreibung",
         "Ajouter une commande": "Befehl hinzufügen",
@@ -259,6 +275,16 @@
         "Type": "Typ",
         "Etat": "Status",
         "Actions": "Aktionen"
+    },
+    "plugins/stellantis/desktop/php/panel.php": {
+        "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert",
+        "Mes véhicules": "Meine Fahrzeuge",
+        "Aucun véhicule à afficher sur la carte": "Kein Fahrzeug zum Anzeigen auf der Karte",
+        "Les coordonnées sont transmises à OpenStreetMap pour afficher la carte": "Die Koordinaten werden an OpenStreetMap übermittelt, um die Karte anzuzeigen",
+        "Position mise à jour": "Position aktualisiert",
+        "Voir sur la carte": "Auf der Karte ansehen",
+        "Position non disponible": "Position nicht verfügbar",
+        "Vie privée activée ou véhicule non localisé": "Privatsphäre aktiviert oder Fahrzeug nicht geortet"
     },
     "plugins/stellantis/desktop/js/stellantis.js": {
         "Nom de la commande": "Befehlsname",

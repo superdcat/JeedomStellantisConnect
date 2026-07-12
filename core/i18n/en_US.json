@@ -14,6 +14,9 @@
         "URL de redirection": "Redirect URL",
         "redirect_uri OAuth2 (schéma de l'app mobile de la marque, ex. mymap://oauth2redirect/fr)": "OAuth2 redirect_uri (brand's mobile app scheme, e.g. mymap://oauth2redirect/fr)",
         "Laisser vide pour utiliser le défaut de la marque": "Leave empty to use the brand's default",
+        "URL du service de tuiles carte (optionnel)": "Map tile service URL (optional)",
+        "Laisser vide pour utiliser le service de cartographie par défaut (OpenStreetMap)": "Leave empty to use the default mapping service (OpenStreetMap)",
+        "Laisser vide pour utiliser le service par défaut": "Leave empty to use the default service",
         "Extraction automatique": "Automatic extraction",
         "Télécharge l'application mobile de la marque sélectionnée (~100 Mo) et en extrait automatiquement le Client ID et le Client Secret, sans installer d'outil externe. Sélectionnez d'abord la marque et le pays.": "Downloads the mobile app for the selected brand (~100 MB) and automatically extracts the Client ID and Client Secret, without installing any external tool. Select the brand and country first.",
         "Extraire automatiquement": "Extract automatically",
@@ -74,6 +77,9 @@
         "Plugin non configuré : renseignez la marque, le Client ID et le Client Secret puis sauvegardez": "Plugin not configured: enter the brand, the Client ID and the Client Secret then save",
         "Authentification réussie : le plugin est connecté à votre compte": "Authentication successful: the plugin is connected to your account",
         "Aucune méthode correspondante à": "No method matching"
+    },
+    "plugins/stellantis/core/ajax/stellantisMap.ajax.php": {
+        "401 - Accès non autorisé": "401 - Unauthorized access"
     },
     "plugins/stellantis/core/class/stellantis.class.php": {
         "Plugin non configuré : renseignez et sauvegardez la configuration": "Plugin not configured: enter and save the configuration",
@@ -209,6 +215,14 @@
         "Position (mise à jour)": "Position (last update)",
         "Qualité du signal GPS": "GPS signal quality"
     },
+    "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
+        "Carte de position": "Position map",
+        "Voir sur la carte": "View on map"
+    },
+    "plugins/stellantis/core/template/mobile/cmd.info.string.stellantisMap.html": {
+        "Carte de position": "Position map",
+        "Voir sur la carte": "View on map"
+    },
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Unauthorized access",
         "État de la connexion": "Connection status",
@@ -252,6 +266,8 @@
         "Capacité utile de la batterie de traction en kWh — saisie manuelle, sert à estimer l'énergie ajoutée lors d'une charge (laisser vide si inconnue)": "Usable capacity of the traction battery in kWh — manual entry, used to estimate the energy added during a charge (leave empty if unknown)",
         "Tarif électricité": "Electricity rate",
         "Prix du kWh en euros — sert à estimer le coût d'une charge (informatif, laisser vide pour ne pas estimer le coût)": "Price per kWh in euros — used to estimate the cost of a charge (informative, leave empty to skip the cost estimate)",
+        "Afficher sur le panneau carte": "Show on the map panel",
+        "Affiche ce véhicule dans le panneau « Mes véhicules » du menu": "Displays this vehicle in the «My vehicles» menu panel",
         "Informations": "Information",
         "Description": "Description",
         "Ajouter une commande": "Add a command",
@@ -259,6 +275,16 @@
         "Type": "Type",
         "Etat": "State",
         "Actions": "Actions"
+    },
+    "plugins/stellantis/desktop/php/panel.php": {
+        "401 - Accès non autorisé": "401 - Unauthorized access",
+        "Mes véhicules": "My vehicles",
+        "Aucun véhicule à afficher sur la carte": "No vehicle to display on the map",
+        "Les coordonnées sont transmises à OpenStreetMap pour afficher la carte": "The coordinates are sent to OpenStreetMap to display the map",
+        "Position mise à jour": "Position updated",
+        "Voir sur la carte": "View on map",
+        "Position non disponible": "Position not available",
+        "Vie privée activée ou véhicule non localisé": "Privacy enabled or vehicle not located"
     },
     "plugins/stellantis/desktop/js/stellantis.js": {
         "Nom de la commande": "Command name",

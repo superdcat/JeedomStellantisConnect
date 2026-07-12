@@ -28,7 +28,7 @@ Un plugin Jeedom **n'est pas autonome** : il s'installe sous `<jeedom>/plugins/s
 PHP dépend du core Jeedom, atteint via `require_once __DIR__ . '/../../../../core/php/core.inc.php';`.
 Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 
-> **État d'avancement (2026-07-11)** : l'id a été renommé `template` → `stellantis` (classes
+> **État d'avancement (2026-07-12)** : l'id a été renommé `template` → `stellantis` (classes
 > `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP lecture seule COMPLET** : UC01 à
 > UC10 sont implémentées (configuration du plugin, client HTTP REST, authentification OAuth2 PKCE/token,
 > test de connexion, découverte des véhicules, création/synchronisation des équipements, commandes info
@@ -229,8 +229,27 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > `formaterDateApi()` (`strtotime` + garde `=== false` **avant** `date()` — sinon `TypeError` PHP 8 ⇒
 > exception dans `parseStatus`, sans try/catch par champ ⇒ échec de **tout** le refresh du véhicule) ;
 > `extraireFraicheur()` non refactorisé. ⚠️ **Asymétrie eager/lazy assumée** : un véhicule en privacy
-> permanente affiche « Position » (vide) mais jamais les 5 dérivées. Suite =
-> post-MVP (localisation carte/geofencing, entretien…). Cette note est
+> permanente affiche « Position » (vide) mais jamais les 5 dérivées. **Post-MVP : UC32** — **panneau
+> carte « Mes véhicules » & widget carte** (100 % lecture/relai, aucun appel REST/MQTT nouveau) :
+> page-panneau `desktop/php/panel.php` au menu d'accueil (`info.json "display":"panel"`, **toggle natif**
+> `displayDesktopPanel`, aucun interrupteur maison) listant les véhicules `isVisiblePanel` (défaut 1,
+> helper `assurerVisiblePanelParDefaut`, case dans le formulaire eqLogic) sur lesquels l'utilisateur a
+> `hasRight('r')`. Position affichée via une **tuile carte statique PNG** (fournisseur
+> `staticmap.openstreetmap.de`, sans clé, surchargé par la config `map_tile_url`) servie **same-origin**
+> — la CSP Jeedom bloquant toute image externe directe (cf. `jeedom-widgets-commandes.md` § 7). **Deux
+> canaux, une même méthode** `stellantis::renderStaticMap()` (`['type','body']`, **ne lève jamais**) : le
+> **panel** (rendu serveur) embarque la tuile en **`data:` URI inline** ; le **widget dashboard**
+> (`cmd.info.string.stellantisMap`, template posé sur la cmd `position` **si vide** via
+> `assurerTemplatePositionParDefaut`, dashboard+mobile) passe par le **proxy**
+> `core/ajax/stellantisMap.ajax.php` (`isConnect()` non-admin + `hasRight('r')` par véhicule). Fetch tuile
+> **durci** (User-Agent identifiant obligatoire, HTTPS strict, `FOLLOWLOCATION=false`, timeout, taille
+> bornée, `Content-Type` png/jpeg uniquement, jamais de Bearer) + **cache fichier** (coords **arrondies 4
+> décimales**, négative-cache court) pour rester sous le ToS « faible volume » du fournisseur
+> communautaire. **Défense en profondeur** : coordonnées + fraîcheur (`position_updated`) + lien
+> OpenStreetMap/`geo:` **toujours** affichés en texte, la tuile n'étant qu'un enrichissement (repli
+> placeholder). ⚠️ **Piège locale** : lat/lon formatés via `formaterCoordonnee()`
+> (`number_format(…,'.','')`) — un `(string)$float` casserait l'URL sous `LC_NUMERIC=fr_FR`. Suite =
+> post-MVP (trajets/historique, geofencing, entretien…). Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
 
@@ -274,9 +293,19 @@ Disposition Jeedom fixe (type MVC). Pièces principales, toutes nommées d'aprè
   Se termine en incluant le JS du plugin puis le JS générique de page plugin **fourni par le core**
   (`include_file('core', 'plugin.template', 'js')` → asset du core, **à ne pas renommer/modifier**).
 - **`desktop/js/stellantis.js`** — front-end (lignes de commandes, tri, helpers `jeedom.*`).
+- **`desktop/php/panel.php`** — page-panneau **« Mes véhicules »** au menu d'accueil (UC32), `isConnect()`
+  **non-admin** (usage quotidien). Une carte de position par véhicule visible (`isVisiblePanel` +
+  `hasRight('r')`) : tuile inline `data:` URI (via `stellantis::renderStaticMap()`) + coordonnées + lien
+  OpenStreetMap/`geo:`. Enregistrée par `info.json "display"` (toggle natif, cf. `jeedom-panel-page-menu.md`).
 - **`core/ajax/stellantis.ajax.php`** — endpoint AJAX (admin-only) : inclut le core, `isConnect('admin')`,
   `ajax::init()`, aiguillage sur `init('action')` (ex. génération de l'URL OAuth, soumission du `code`,
   test de connexion, synchronisation des véhicules) en branches `if (init('action') == '...')`.
+- **`core/ajax/stellantisMap.ajax.php`** — endpoint AJAX **non-admin** (UC32), **distinct** de
+  `stellantis.ajax.php` : proxy same-origin de la tuile carte pour le **widget dashboard**. `isConnect()`
+  puis délègue à `stellantis::renderStaticMap()` (garde autoload : n'appelle que `stellantis::` ; contrôle
+  fin `hasRight('r')` par véhicule dans la méthode). Réponse binaire PNG.
+- **`core/template/{dashboard,mobile}/cmd.info.string.stellantisMap.html`** — widget carte (UC32) posé
+  sur la commande info `position` (`<img>` → proxy `stellantisMap.ajax.php`). Deux fichiers synchronisés.
 - **`plugin_info/configuration.php`** — formulaire de la page de config plugin (`gotoPluginConf`).
   Champs liés en `class="configKey" data-l1key="<clé>"` (auto-load/save core via
   `config::byKey/save(..., 'stellantis')`).
@@ -312,10 +341,13 @@ Configuration & secrets :
   repli saisie manuelle). **UC12 (OTP)** ajoute : `otp_device` (device OTP provisionné, **chiffré
   `utils::encrypt`**, en config pour survivre à `cache::flush`), `otp_sms_count` (compteur d'activations
   SMS **à vie** 0..20, jamais remis à 0 auto), `otp_sms_pending` (flag « SMS envoyé, activation en
-  attente »). `client_secret` **chiffré**, jamais loggué.
+  attente »). **UC32** ajoute `map_tile_url` (optionnel : override du fournisseur de tuiles carte ; défaut
+  = constante `MAP_TILE_URL` = `staticmap.openstreetmap.de`). `client_secret` **chiffré**, jamais loggué.
 - **Par véhicule** (`configuration` de l'eqLogic) : `id` API, `vin`, `brand`, motorisation, capacités.
   **UC24** ajoute 2 champs **saisis manuellement** (formulaire desktop, éditables) : `battery_capacity`
   (capacité batterie kWh, sert à estimer l'énergie de charge) et `charge_tarif` (prix du kWh €, coût estimé).
+  **UC32** ajoute `isVisiblePanel` (case du formulaire desktop, défaut 1 posé par le plugin — inclut le
+  véhicule dans le panneau carte « Mes véhicules »).
 - **Tokens** OAuth2 (access/refresh) + **remote token OTP** (UC12, clé cache `stellantis::remote_token`,
   **distinct** du token OAuth2 — c'est le mot de passe MQTT, TTL ~890 s) : en cache **chiffré** (classe
   `cache`). ⚠️ `access_token` OAuth2 à durée courte (~15 min) → refresh proactif/réactif.

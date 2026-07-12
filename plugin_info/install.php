@@ -44,6 +44,24 @@ function stellantis_update() {
   } catch (\Throwable $e) {
     log::add('stellantis', 'warning', 'Mise à jour UC23 : masquage autonomy thermique ignoré (' . $e->getMessage() . ')');
   }
+  // UC32 : backfill du panneau carte pour les installs antérieures qui ne re-synchronisent pas
+  // immédiatement (assurerVisiblePanelParDefaut + assurerTemplatePositionParDefaut, helpers partagés
+  // avec createCommands()/syncVehicles() — pas de logique dupliquée ici). Best-effort, idempotent,
+  // borné à eqLogic::byType('stellantis') — un véhicule en erreur n'interrompt pas la boucle (même
+  // convention que le reste du fichier).
+  foreach (eqLogic::byType('stellantis') as $eq) {
+    try {
+      if (stellantis::assurerVisiblePanelParDefaut($eq)) {
+        $eq->save();
+      }
+      $cmdPosition = $eq->getCmd('info', 'position');
+      if (is_object($cmdPosition) && stellantis::assurerTemplatePositionParDefaut($cmdPosition)) {
+        $cmdPosition->save();
+      }
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'warning', 'Mise à jour UC32 : backfill panneau carte ignoré pour un équipement (' . $e->getMessage() . ')');
+    }
+  }
 }
 
 // Fonction exécutée automatiquement après la suppression du plugin

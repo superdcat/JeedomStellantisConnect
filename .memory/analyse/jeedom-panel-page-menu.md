@@ -54,6 +54,15 @@ code du core.)
 - Contenu : la page **réutilise** les commandes existantes (`jeedom.cmd.execute`) et, pour afficher une
   **carte** (tuile véhicule), un endpoint same-origin (cf. `jeedom-widgets-commandes.md` § 7 — la CSP
   interdit une tuile de carte externe directe).
+- **Image externe dans un panel : `data:` URI plutôt que proxy** (confirmé UC32). La page panel étant
+  **rendue côté serveur**, elle peut appeler directement le code PHP qui récupère la ressource externe et
+  **l'embarquer inline** en `data:image/…;base64,…` — autorisé par la CSP (`default-src` inclut `data:`),
+  **sans** aller-retour HTTP vers un endpoint proxy. Le **proxy same-origin** (`core/ajax/*.ajax.php`)
+  reste nécessaire **uniquement** pour un **widget de dashboard** (HTML rendu côté client, qui ne peut pas
+  exécuter de PHP). Dans les deux cas, la même méthode PHP (fetch + validation + cache) est mutualisée
+  (ex. `stellantis::renderStaticMap()` → `['type','body']`, consommée par le panel en `data:` et par le
+  proxy en relai binaire). ⚠️ Un panel rendant N tuiles synchrones = N fetch au chargement à froid →
+  cache serveur (fichier) et coordonnées **arrondies** indispensables (cf. `32-tech.md`).
 
 ## Sources
 - Core : `core/class/plugin.class.php` (`getDisplay()`), `desktop/js/plugin.js` (cases panel).

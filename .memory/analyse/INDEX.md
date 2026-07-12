@@ -11,7 +11,11 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-11 (UC24 : `stellantis-data-model.md` § 2.1 — **suivi de sessions de
+> **Dernière synchro** : 2026-07-12 (UC32 : `jeedom-panel-page-menu.md` § 4 — **image externe dans un
+> panel** : la page panel étant rendue **serveur**, embarquer la tuile carte en **`data:` URI inline**
+> (CSP `data:` OK) évite le proxy ; le **proxy same-origin** ne reste requis que pour un **widget
+> dashboard** (HTML client) ; même méthode PHP mutualisée `renderStaticMap()`, cache fichier + coords
+> arrondies obligatoires — cf. `32-tech.md`). Précédemment 2026-07-11 (UC24 : `stellantis-data-model.md` § 2.1 — **suivi de sessions de
 > charge** : les états terminaux de `charging.status` **persistent** poll après poll (`Disconnected` au
 > repos, `Finished` non débranché) → une machine à états doit agir sur la **transition** `InProgress →
 > terminal` (dernier statut en cache), jamais à chaque poll (sinon spam ~288×/j) ; **pas** de valeur
@@ -92,6 +96,7 @@
 | **Commande action PARAMÉTRÉE** (saisie utilisateur : subType `message`, valeur dans `$_options['message']`) | `jeedom-widgets-commandes.md` § 4 (UC22) |
 | **CSP Jeedom bloque tout média/image EXTERNE** → proxy same-origin (ex. tuile carte) | `jeedom-widgets-commandes.md` § 7 |
 | Ajouter une **PAGE** au menu Jeedom (panel) ; toggle natif `displayDesktopPanel/Mobile` ; page non-admin | `jeedom-panel-page-menu.md` |
+| **Afficher une image externe dans un panel** (carte…) : `data:` URI inline (panel serveur) vs proxy (widget client) | `jeedom-panel-page-menu.md` § 4 |
 
 > Si aucun fichier ne couvre le sujet : ce n'est pas (encore) analysé en interne → passer à la doc
 > externe (`.memory/external/doc/stellantis|jeedom/INDEX.md`), et penser à capitaliser en Étape 12.
@@ -107,4 +112,4 @@
 | `stellantis-implementations-reference.md` | **Où chercher le contrat exact** (pas de doc officielle du protocole consommateur). | `flobz/psa_car_controller` (psa_client.py=OAuth, app_decoder.py=APK, RemoteClient=MQTT, models=data) ; `homeassistant-stellantis-vehicles` (mapping capteurs, cadences) ; `lelas33/plugin_peugeotcars` (API PSA **en PHP**, écueils) ; règle « code de référence = source de vérité du contrat ». |
 | `stellantis-psacc-vs-natif.md` | **Dépendance d'exécution à psa_car_controller (PSACC) vs implémentation native** — comparaison et verdict (2026-07-06). | Fiche PSACC à jour (Flask/Dash port 5000, API locale 17 endpoints GET **sans auth**, SQLite, pip/Docker/add-on HA, deps lourdes Python ≥3.11, GPL-3, v3.7.5 activement maintenu) ; 3 variantes de dépendance (B1 service externe, B2 packagé pip, B3 lib dans notre démon) comparées sur 9 axes ; précédent `plugin_peugeotcars` (pont PSACC, abandonné) ; **verdict : natif confirmé**, PSACC = spec vivante + canari, repli « connecteur B1 optionnel » à réévaluer à l'UC11 ; faits neufs → specs : OAuth durci (#779, notre design MVP/03 = la procédure de secours PSACC), remote token TTL ~890 s + `virtualkey/remoteaccess/token` (UC12), pin `paho-mqtt <2.0` confirmé (UC11/82). |
 | `jeedom-widgets-commandes.md` | Widgets de commande Jeedom (templates dashboard/mobile), vérifié contre la source du core. | `cmd.<type>.<subType>.<nom>.html` + `setTemplate('stellantis::<nom>')` ; tokens (`#id#`/`#logicalId#`/`#eqLogic_id#`/`#uid#`…) ; `#cmd_id[…]#` & `jeedom.cmd.byEqLogicId` **n'existent pas** → résoudre par AJAX **`byEqLogic`** ; **masqué ≠ non-exécutable** ; `jeedom.cmd.execute` (CSRF/droits, `success.result`=retour PHP) ; AJAX plugin admin-only inutilisable au dashboard ; **§ 7 CSP : média/image externe bloqué → proxy same-origin** (ex. tuile carte véhicule). |
-| `jeedom-panel-page-menu.md` | Page de plugin au **menu** Jeedom (panel) & toggle d'affichage natif (ex. carte « Mes véhicules »). | `info.json "display"`/`"mobile"` enregistre une page-panneau ; le core ajoute nativement les cases « Afficher le panneau desktop/mobile » (`displayDesktopPanel`/`displayMobilePanel`, masqué par défaut) → aucun toggle custom ; `plugin::getDisplay()` statique ; page panel = `isConnect()` non-admin + accès par eqLogic `hasRight('r')` + sélection `isVisiblePanel` ; réf. `jeedom/plugin-gsl`. |
+| `jeedom-panel-page-menu.md` | Page de plugin au **menu** Jeedom (panel) & toggle d'affichage natif (ex. carte « Mes véhicules »). | `info.json "display"`/`"mobile"` enregistre une page-panneau ; le core ajoute nativement les cases « Afficher le panneau desktop/mobile » (`displayDesktopPanel`/`displayMobilePanel`, masqué par défaut) → aucun toggle custom ; `plugin::getDisplay()` statique ; page panel = `isConnect()` non-admin + accès par eqLogic `hasRight('r')` + sélection `isVisiblePanel` ; **image externe : `data:` URI inline en panel serveur vs proxy same-origin en widget client (UC32)** ; réf. `jeedom/plugin-gsl`. |

@@ -211,6 +211,20 @@ $iconeConnexion = ($etatConnexion['state'] == 'ok') ? 'fa-check-circle' : (($eta
 									<input type="number" min="0" step="0.01" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="charge_tarif">
 								</div>
 							</div>
+							<!-- UC32 : panneau carte « Mes véhicules » — sélection par véhicule. Défaut (coché) posé par le
+							     plugin (stellantis::assurerVisiblePanelParDefaut) à la création ET au backfill des véhicules
+							     existants. Clé de configuration OBLIGATOIRE dans ce formulaire (sinon effacée au Sauvegarder,
+							     cf. jeedom-eqlogic-sync-persist.md). -->
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Afficher sur le panneau carte}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Affiche ce véhicule dans le panneau « Mes véhicules » du menu}}"></i></sup>
+								</label>
+								<div class="col-sm-6">
+									<label class="checkbox-inline">
+										<input type="checkbox" class="eqLogicAttr" data-l1key="configuration" data-l2key="isVisiblePanel" checked>
+									</label>
+								</div>
+							</div>
 						</div>
 
 						<!-- Partie droite de l'onglet "Équipement" -->

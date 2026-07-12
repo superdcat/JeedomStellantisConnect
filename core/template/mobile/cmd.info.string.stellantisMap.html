@@ -1,0 +1,52 @@
+<!--
+  UC32 — Widget carte de position (mobile). Doit rester SYNCHRONISÉ avec la copie dashboard
+  (core/template/dashboard/cmd.info.string.stellantisMap.html) — même contenu, i18n déclarée séparément
+  pour chaque fichier (cf. jeedom-widgets-commandes.md § 1).
+  Assigné par stellantis::createCommands() sur la commande info 'position' :
+  $cmd->setTemplate('mobile', 'stellantis::stellantisMap'), SI VIDE (idempotent).
+  <img> pointe le proxy same-origin (CSP Jeedom bloque toute image externe directe) : src STATIQUE, PAS
+  de cache-busting (respecte le cache serveur fichier de stellantis::renderStaticMap).
+-->
+<div class="text-center">
+  <img src="plugins/stellantis/core/ajax/stellantisMap.ajax.php?eqLogic_id=#eqLogic_id#" alt="{{Carte de position}}" style="max-width:100%;border-radius:4px;">
+  <div class="small" style="margin-top:4px;">
+    <!-- data-value (attribut HTML, échappé par le parseur du navigateur) plutôt qu'une interpolation JS
+         directe : #value# est aujourd'hui toujours numérique ("lat,lon"), mais si ce template était un
+         jour réutilisé sur une commande string à texte libre, une interpolation directe dans une chaîne
+         JS casserait le contexte. Le texte affiché ci-dessous reste identique (même #value#). -->
+    <span class="stellantisMapValeur" data-value="#value#">#value#</span>
+    <br>
+    <a href="#" class="stellantisMapLien" target="_blank" rel="noopener noreferrer" style="display:none;"><i class="fas fa-external-link-alt"></i> {{Voir sur la carte}}</a>
+  </div>
+</div>
+<script>
+  (function () {
+    var conteneur = document.querySelector('.cmd[data-cmd_uid="#uid#"]');
+    if (!conteneur) {
+      return;
+    }
+    var elementValeur = conteneur.querySelector('.stellantisMapValeur');
+    if (!elementValeur) {
+      return;
+    }
+    // Lecture via attribut DOM échappé (PAS d'interpolation JS directe de #value#, cf. commentaire HTML
+    // ci-dessus). Parsing DÉFENSIF : format inattendu (véhicule sans position, valeur vide…) → lien
+    // simplement masqué.
+    var valeur = elementValeur.getAttribute('data-value') || '';
+    var parties = valeur.split(',');
+    if (parties.length !== 2) {
+      return;
+    }
+    var lat = parseFloat(parties[0]);
+    var lon = parseFloat(parties[1]);
+    if (isNaN(lat) || isNaN(lon)) {
+      return;
+    }
+    var url = 'https://www.openstreetmap.org/?mlat=' + lat + '&mlon=' + lon + '#map=16/' + lat + '/' + lon;
+    var lien = conteneur.querySelector('.stellantisMapLien');
+    if (lien) {
+      lien.setAttribute('href', url);
+      lien.style.display = '';
+    }
+  })();
+</script>

@@ -115,6 +115,14 @@ $otpSmsCount = stellantis::otpSmsCount();
         <input class="configKey form-control" data-l1key="socketport" placeholder="55009"/>
       </div>
     </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{URL du service de tuiles carte (optionnel)}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{Laisser vide pour utiliser le service de cartographie par défaut (OpenStreetMap)}}"></i></sup>
+      </label>
+      <div class="col-md-4">
+        <input class="configKey form-control" data-l1key="map_tile_url" placeholder="{{Laisser vide pour utiliser le service par défaut}}"/>
+      </div>
+    </div>
   </fieldset>
   <fieldset>
     <legend><i class="fas fa-link"></i> {{Connexion au compte}}</legend>
