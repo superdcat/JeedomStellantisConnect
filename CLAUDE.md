@@ -271,8 +271,24 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > absent (session conservée un poll de plus, jamais de trajet perdu sur trou d'odomètre) ; **garde
 > anti-fantôme** distance ≤ 0 ⇒ aucun trajet écrit (flicker `moving`/bruit GPS à l'arrêt) ; **purge du
 > cache AVANT écriture** (idempotence UC24). Estimations documentées : durée à **±cadence** (instant de
-> poll) ; un arrêt > cadence reste un séparateur de trajets. Suite = post-MVP (geofencing, entretien,
-> alertes…). Cette note est
+> poll) ; un arrêt > cadence reste un séparateur de trajets. **Post-MVP : UC34** — **geofencing / zone
+> domicile** (télémétrie localisation dérivée, 100 % lecture/calcul, aucun appel réseau/MQTT nouveau :
+> haversine sur la position UC31 déjà récupérée au cron) : une **zone domicile UNIQUE** en **config plugin**
+> (`home_lat`/`home_lon`/`home_radius`, **partagée par tous les véhicules** — « le domicile » est une notion
+> du foyer, pas du véhicule) produit 2 commandes info **par véhicule** en création paresseuse — `at_home`
+> (binary, `generic_type=PRESENCE`, **historisée** ⇒ déclencheur de scénario, AC) et `home_distance` (m,
+> **non historisée**, cf. confidentialité ci-dessous). Calcul best-effort `stellantis::suivreGeofencing()`
+> (try/catch, ne lève jamais), appelé en dernier dans `refreshTelemetry()` après `suivreTrajet()` ; helper
+> pur `distanceHaversineM()`. **Hystérésis asymétrique** (répond au « À confirmer » de la spec) : seuil
+> d'ENTRÉE = rayon, seuil de SORTIE = rayon + `HOME_HYSTERESIS_M` (50 m), état précédent lu sur la cmd
+> `at_home` **avant** écriture → pas de clignotement au bord. Garde-fous : `home_lat`/`home_lon` bloquants
+> (absents ⇒ geofencing off), `home_radius` défaut 150 m + clamp si ≤ 0, **position absente ⇒ freeze**
+> (privacy/pas de fix ⇒ jamais de faux « parti »). **Confidentialité durcie** (cf.
+> `stellantis-data-model.md` § 2.2) : `home_lat`/`home_lon` **chiffrées au repos** (ajoutées à
+> `$_encryptConfigKey`, protège backups/exports) ; `home_distance` **non historisée** (distance-au-point-fixe
+> historisée + position exposée ⇒ trilatération possible de l'adresse). Restitution = scénarios Jeedom
+> natifs (déclencheur sur changement de `at_home`). Suite = post-MVP (entretien, alertes, supervision…).
+> Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
 
@@ -365,7 +381,10 @@ Configuration & secrets :
   `utils::encrypt`**, en config pour survivre à `cache::flush`), `otp_sms_count` (compteur d'activations
   SMS **à vie** 0..20, jamais remis à 0 auto), `otp_sms_pending` (flag « SMS envoyé, activation en
   attente »). **UC32** ajoute `map_tile_url` (optionnel : override du fournisseur de tuiles carte ; défaut
-  = constante `MAP_TILE_URL` = `staticmap.openstreetmap.de`). `client_secret` **chiffré**, jamais loggué.
+  = constante `MAP_TILE_URL` = `staticmap.openstreetmap.de`). **UC34 (geofencing)** ajoute la **zone
+  domicile partagée** : `home_lat`, `home_lon` (coordonnées du domicile — **chiffrées** via
+  `$_encryptConfigKey`, données perso), `home_radius` (rayon m, défaut 150, non chiffré). `client_secret`
+  **chiffré**, jamais loggué.
 - **Par véhicule** (`configuration` de l'eqLogic) : `id` API, `vin`, `brand`, motorisation, capacités.
   **UC24** ajoute 2 champs **saisis manuellement** (formulaire desktop, éditables) : `battery_capacity`
   (capacité batterie kWh, sert à estimer l'énergie de charge) et `charge_tarif` (prix du kWh €, coût estimé).

@@ -11,7 +11,12 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-12 (UC33 : `stellantis-data-model.md` § 2.3 — **détection de trajet** :
+> **Dernière synchro** : 2026-07-12 (UC34 : `stellantis-data-model.md` § 2.2 — **posture de confidentialité
+> des données de localisation** : (1) clé de config contenant des coordonnées (adresse domicile) → **chiffrer
+> au repos** via `$_encryptConfigKey` (le core chiffre auto les clés de config **plugin** listées, précédent
+> `client_secret` étendu à `home_lat`/`home_lon`) ; (2) **ne pas historiser** une distance dérivée d'un point
+> fixe (`home_distance`) — couplée à la position exposée par UC31, elle permet de **trilatérer** l'adresse ;
+> `at_home` binaire reste historisable — cf. `34-tech.md`). Précédemment 2026-07-12 (UC33 : `stellantis-data-model.md` § 2.3 — **détection de trajet** :
 > `kinetic.moving` est **instantané** (à l'instant du poll → fragmente les trajets à la cadence 5 min sur
 > un simple arrêt), `ignition.type` **persiste** pendant tout le trajet → prédicat « en trajet » robuste
 > `moving==1 OU ignition ∈ {Start,StartUp}` ; distance = delta `odometer.mileage` ; durée à ±cadence ;
@@ -89,6 +94,7 @@
 | **Champs de télémétrie** (SOC, autonomie, charge, position, portes, km, pneus…) → quelles commandes info | `stellantis-data-model.md` |
 | **`charging.status`** : valeurs, états terminaux **persistants** (≠ momentanés), machine à états de **session de charge** (transition, pas par-poll), énergie = Δ SOC × capacité | `stellantis-data-model.md` § 2.1 |
 | **Détection de trajet** : `kinetic.moving` instantané (fragmente à 5 min) vs `ignition.type` persistant → prédicat `moving OU ignition∈{Start,StartUp}` ; distance = delta odomètre ; reconstruction locale (pas d'endpoint trips) | `stellantis-data-model.md` § 2.3 |
+| **Confidentialité localisation** : clé config avec coordonnées → chiffrer (`$_encryptConfigKey`, marche pour la config plugin) ; ne PAS historiser une distance-à-un-point-fixe (trilatération de l'adresse) ; `at_home` binaire OK à historiser | `stellantis-data-model.md` § 2.2 |
 | Création conditionnelle de commandes selon **motorisation** (élec/hybride/thermique) | `stellantis-data-model.md` § 3 |
 | **Où trouver le contrat exact** (endpoint/payload non documenté) : code de référence à lire | `stellantis-implementations-reference.md` |
 | Plugin Jeedom PSA **existant** (PHP) et intégrations HA/openHAB à miner | `stellantis-implementations-reference.md` |

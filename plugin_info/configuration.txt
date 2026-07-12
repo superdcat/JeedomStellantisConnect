@@ -125,6 +125,34 @@ $otpSmsCount = stellantis::otpSmsCount();
     </div>
   </fieldset>
   <fieldset>
+    <legend><i class="fas fa-map-marker-alt"></i> {{Zone domicile (geofencing)}}</legend>
+    <div class="alert alert-info">{{Coordonnées de votre domicile : chaque véhicule exposera une info « Au domicile » (1/0) utilisable dans vos scénarios. Laissez vide pour désactiver.}}</div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{Latitude du domicile}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{Latitude en degrés décimaux (ex. 48.8566). Laissez vide pour désactiver le geofencing.}}"></i></sup>
+      </label>
+      <div class="col-md-4">
+        <input type="number" step="any" class="configKey form-control" data-l1key="home_lat"/>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{Longitude du domicile}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{Longitude en degrés décimaux (ex. 2.3522). Laissez vide pour désactiver le geofencing.}}"></i></sup>
+      </label>
+      <div class="col-md-4">
+        <input type="number" step="any" class="configKey form-control" data-l1key="home_lon"/>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{Rayon (m)}}
+        <sup><i class="fas fa-question-circle tooltips" title="{{Rayon en mètres autour du domicile pour considérer le véhicule « au domicile ». Laissez vide pour utiliser le défaut (150 m).}}"></i></sup>
+      </label>
+      <div class="col-md-4">
+        <input type="number" step="1" class="configKey form-control" data-l1key="home_radius" placeholder="150"/>
+      </div>
+    </div>
+  </fieldset>
+  <fieldset>
     <legend><i class="fas fa-link"></i> {{Connexion au compte}}</legend>
     <div class="form-group">
       <label class="col-md-4 control-label">{{État de la connexion}}</label>

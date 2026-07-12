@@ -134,6 +134,19 @@ Biologic}` — `energy` absent sur Electric).
 - `properties.heading` (0-360°), `.signalQuality` (0-9), `.type` (`Acquire`/`Estimated`), `.createdAt` (RFC3339), `.fixStatus` (`3D`).
 - → `position` (`string "lat,lon"`, `GEOLOC`), `heading`, `position_updated`, `gps_signal`.
 
+> ⚠️ **Posture de confidentialité des données de localisation (établie UC34, 2026-07-12)** — à réappliquer
+> à tout futur UC de localisation (zones supplémentaires, lieux favoris, trajets détaillés…) :
+> 1. **Clé de config contenant des coordonnées (adresse) ⇒ à chiffrer au repos** via
+>    `stellantis::$_encryptConfigKey` (le core chiffre/déchiffre **automatiquement** les clés de config
+>    **plugin** listées, sur `config::save/byKey`, en transparence — précédent `client_secret`, étendu à
+>    `home_lat`/`home_lon` en UC34). Protège les **backups/exports** de config. NE PAS y mettre un simple
+>    rayon (pas une donnée de localisation).
+> 2. **Ne PAS historiser une distance dérivée d'un point fixe** (ex. `home_distance`, distance au domicile) :
+>    couplée à la position (déjà exposée par UC31), une distance-à-un-point-fixe **historisée** permet de
+>    **trilatérer** ce point (l'adresse) avec ≥2-3 relevés → on l'expose en valeur courante mais **sans
+>    `isHistorized`**. `at_home` (binaire, sans coordonnée) reste historisable sans risque (requis pour
+>    servir de déclencheur de scénario). Détail : `.memory/specs/post-mvp/30-localisation-trajets/34-tech.md`.
+
 ### 2.3 Cinétique & odomètre (racine depuis v4.15)
 - `kinetic.moving` (bool) → `moving` ; `kinetic.speed` (km/h), `.acceleration` (m/s²), `.pace`.
 - `odometer.mileage` (float km) → `mileage`.

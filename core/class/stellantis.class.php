@@ -27,8 +27,11 @@ class stellantis extends eqLogic {
   public static $_widgetPossibility = array();
   */
 
-  // Champs de configuration du plugin chiffrés automatiquement par le core (config::save/byKey)
-  public static $_encryptConfigKey = array('client_secret');
+  // Champs de configuration du plugin chiffrés automatiquement par le core (config::save/byKey).
+  // UC34 : home_lat/home_lon chiffrés au repos (données de localisation sensibles — domicile) ; home_radius
+  // délibérément EXCLU (pas une donnée de localisation). Transparent pour suivreGeofencing()/le formulaire
+  // (lu/écrit via config::byKey/save comme n'importe quelle autre clé). Clés neuves ⇒ aucune migration.
+  public static $_encryptConfigKey = array('client_secret', 'home_lat', 'home_lon');
 
   // Table des marques : TLD du serveur d'authentification idpcvs.{tld}, realm B2C et redirect_uri
   // par défaut ({pays} substitué par le code pays configuré). Possédée par cette classe, consommée
@@ -606,6 +609,15 @@ class stellantis extends eqLogic {
       'trip_end'            => array(__('Arrivée (heure)', __FILE__), 'string', '', '', false),
       'trip_start_position' => array(__('Départ (position)', __FILE__), 'string', '', '', false),
       'trip_end_position'   => array(__('Arrivée (position)', __FILE__), 'string', '', '', false),
+      // UC34 : geofencing zone domicile UNIQUE (config PLUGIN home_lat/home_lon/home_radius, partagée par
+      // tous les véhicules ; cf. suivreGeofencing) — dérivé de latitude/longitude (UC31), AUCUN appel réseau
+      // neuf. Création PARESSEUSE (jamais dans createCommands, précédent UC21/23/24/31/33) : naissent au
+      // 1er poll où la zone domicile est configurée ET une position disponible. generic_type='PRESENCE' sur
+      // at_home (précédent charging_plugged, binaire de présence) : meilleur widget natif + déclencheur de
+      // scénario (AC2, historisée). home_distance NON historisée : évite une trace persistante
+      // distance+position exploitable par trilatération (confidentialité du domicile).
+      'at_home'        => array(__('Au domicile', __FILE__), 'binary', 'PRESENCE', '', true),
+      'home_distance'  => array(__('Distance au domicile', __FILE__), 'numeric', '', 'm', false),
     );
   }
 
@@ -820,6 +832,9 @@ class stellantis extends eqLogic {
     // UC33 : suivi des trajets (universel). Best-effort, robuste — ne lève jamais (try/catch interne),
     // posé APRÈS suivreSessionCharge() (robustesse cron, même convention que le suivi de charge).
     $this->suivreTrajet($valeurs, $status);
+    // UC34 : geofencing zone domicile. Best-effort, robuste — ne lève jamais (try/catch interne), posé EN
+    // DERNIER (robustesse cron, même convention que le suivi de charge/trajet UC24/33).
+    $this->suivreGeofencing($valeurs);
   }
 
   // Extrait le tableau d'énergies du /status : energies[] (v4.15+) prioritaire, fallback energy[].
@@ -2934,6 +2949,90 @@ class stellantis extends eqLogic {
       $recap['trip_end_position'] = self::formaterCoordonnee($_endLat) . ',' . self::formaterCoordonnee($_endLon);
     }
     return $recap;
+  }
+
+  /* * ******************* UC34 — Geofencing & alertes de zone ******************* */
+
+  const HOME_RADIUS_DEFAUT = 150; // m — rayon par défaut si config plugin 'home_radius' vide/invalide
+  const HOME_HYSTERESIS_M  = 50;  // m — marge de SORTIE ajoutée au rayon (anti-clignotement au bord, GPS variable)
+
+  /**
+   * UC34 : geofencing zone domicile UNIQUE, en config PLUGIN (home_lat/home_lon/home_radius — partagée
+   * par TOUS les véhicules, décision validée : « le domicile » est une notion du foyer, pas du véhicule,
+   * précédent broker_host/customer_id/map_tile_url). Produit 2 commandes info PAR VÉHICULE (at_home
+   * binaire, home_distance en mètres) dérivées de latitude/longitude déjà collectées par refreshTelemetry()
+   * (UC31, /lastPosition) — AUCUN appel réseau neuf (AC2 satisfait par construction). Best-effort, robuste
+   * — NE LÈVE JAMAIS (try/catch enveloppant + log warning), posé EN DERNIER dans refreshTelemetry() (après
+   * suivreTrajet(), robustesse cron, même convention que le suivi de charge/trajet UC24/33).
+   * Hystérésis ASYMÉTRIQUE (répond au « À confirmer » de la spec fonctionnelle) : seuil d'ENTRÉE = rayon
+   * nominal, seuil de SORTIE = rayon + HOME_HYSTERESIS_M — évite le clignotement au bord de zone malgré un
+   * GPS de précision variable.
+   * ⚠️ Confidentialité : ne JAMAIS loguer les coordonnées domicile ni la position véhicule (seulement
+   * getId() de l'eqLogic si besoin, comme UC24/33).
+   */
+  private function suivreGeofencing(array $_valeurs): void {
+    try {
+      // 1) Zone domicile configurée ? Seuls lat/lon sont BLOQUANTS (absent/non numérique ⇒ geofencing off,
+      // aucune commande créée/mise à jour — pas de faux « au domicile »/« parti » sans zone valide).
+      $homeLat = trim((string) config::byKey('home_lat', 'stellantis'));
+      $homeLon = trim((string) config::byKey('home_lon', 'stellantis'));
+      if (!is_numeric($homeLat) || !is_numeric($homeLon)) {
+        return;
+      }
+      // 2) Rayon : vide ⇒ défaut (silencieux, config volontairement incomplète) ; présent mais invalide
+      // (≤0 / non numérique) ⇒ défaut + log debug (sinon at_home se figerait à 0 en silence sur une config
+      // fautive, advisor #3).
+      $radiusBrut = trim((string) config::byKey('home_radius', 'stellantis'));
+      if ($radiusBrut == '') {
+        $radius = self::HOME_RADIUS_DEFAUT;
+      } elseif (is_numeric($radiusBrut) && (float) $radiusBrut > 0) {
+        $radius = (float) $radiusBrut;
+      } else {
+        $radius = self::HOME_RADIUS_DEFAUT;
+        log::add('stellantis', 'debug', 'Geofencing : rayon domicile configuré invalide, repli sur le défaut (' . self::HOME_RADIUS_DEFAUT . ' m) pour l\'équipement #' . $this->getId());
+      }
+      // 3) Position courante absente/non numérique (privacy active ou pas de fix GPS ce poll-ci) ⇒ on GÈLE
+      // at_home/home_distance (ne fabrique jamais un faux « parti » sur un simple trou de position).
+      if (!isset($_valeurs['latitude']) || !is_numeric($_valeurs['latitude']) || !isset($_valeurs['longitude']) || !is_numeric($_valeurs['longitude'])) {
+        return;
+      }
+      $lat = (float) $_valeurs['latitude'];
+      $lon = (float) $_valeurs['longitude'];
+      // 4) Distance haversine (m), PURE.
+      $distance = self::distanceHaversineM((float) $homeLat, (float) $homeLon, $lat, $lon);
+      // 5) État précédent AVANT d'écrire (advisor #2) : création paresseuse ici (1re fois où la zone est
+      // configurée ET une position est disponible). Cast défensif : cmd neuve ('' /null) ⇒ inconnu = 0
+      // (advisor #5, mirror socCourant()/dernierStatut UC24).
+      $cmd = $this->ensureCommand('at_home');
+      $prec = $cmd->execCmd();
+      $etaitAuDomicile = is_numeric($prec) ? (int) $prec : 0;
+      // 6) Hystérésis asymétrique : sortie « collante » (rayon + marge) si déjà au domicile, entrée au
+      // rayon nominal sinon.
+      if ($etaitAuDomicile === 1) {
+        $nouvelEtat = ($distance <= $radius + self::HOME_HYSTERESIS_M) ? 1 : 0;
+      } else {
+        $nouvelEtat = ($distance <= $radius) ? 1 : 0;
+      }
+      // 7) Écriture (jamais les coordonnées/la distance en clair dans un log, cf. docblock).
+      $this->checkAndUpdateCmd($cmd, $nouvelEtat);
+      $this->checkAndUpdateCmd($this->ensureCommand('home_distance'), (int) round($distance));
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'warning', 'Geofencing : suivi en erreur pour l\'équipement #' . $this->getId() . ' : ' . $e->getMessage());
+    }
+  }
+
+  /**
+   * UC34 : distance haversine entre 2 points (degrés décimaux), en MÈTRES. PUR/STATIQUE (aucun accès
+   * cache/cmd/config) → testable indépendamment, en parallèle de calculerRecapTrajet/calculerRecapSession.
+   */
+  private static function distanceHaversineM(float $_lat1, float $_lon1, float $_lat2, float $_lon2): float {
+    $rayonTerreM = 6371000.0;
+    $dLat = deg2rad($_lat2 - $_lat1);
+    $dLon = deg2rad($_lon2 - $_lon1);
+    $a = sin($dLat / 2) * sin($dLat / 2)
+      + cos(deg2rad($_lat1)) * cos(deg2rad($_lat2)) * sin($dLon / 2) * sin($dLon / 2);
+    $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+    return $rayonTerreM * $c;
   }
 
   /**

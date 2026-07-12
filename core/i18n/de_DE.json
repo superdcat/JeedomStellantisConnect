@@ -17,6 +17,14 @@
         "URL du service de tuiles carte (optionnel)": "URL des Karten-Kacheldienstes (optional)",
         "Laisser vide pour utiliser le service de cartographie par défaut (OpenStreetMap)": "Leer lassen, um den Standard-Kartendienst zu verwenden (OpenStreetMap)",
         "Laisser vide pour utiliser le service par défaut": "Leer lassen, um den Standarddienst zu verwenden",
+        "Zone domicile (geofencing)": "Zuhause-Zone (Geofencing)",
+        "Coordonnées de votre domicile : chaque véhicule exposera une info « Au domicile » (1/0) utilisable dans vos scénarios. Laissez vide pour désactiver.": "Koordinaten Ihres Zuhauses: Jedes Fahrzeug stellt eine Info «Zuhause» (1/0) bereit, die in Ihren Szenarien verwendet werden kann. Leer lassen, um zu deaktivieren.",
+        "Latitude du domicile": "Breitengrad des Zuhauses",
+        "Latitude en degrés décimaux (ex. 48.8566). Laissez vide pour désactiver le geofencing.": "Breitengrad in Dezimalgrad (z. B. 48.8566). Leer lassen, um Geofencing zu deaktivieren.",
+        "Longitude du domicile": "Längengrad des Zuhauses",
+        "Longitude en degrés décimaux (ex. 2.3522). Laissez vide pour désactiver le geofencing.": "Längengrad in Dezimalgrad (z. B. 2.3522). Leer lassen, um Geofencing zu deaktivieren.",
+        "Rayon (m)": "Radius (m)",
+        "Rayon en mètres autour du domicile pour considérer le véhicule « au domicile ». Laissez vide pour utiliser le défaut (150 m).": "Radius in Metern um das Zuhause, ab dem das Fahrzeug als «zu Hause» gilt. Leer lassen, um den Standardwert zu verwenden (150 m).",
         "Extraction automatique": "Automatische Extraktion",
         "Télécharge l'application mobile de la marque sélectionnée (~100 Mo) et en extrait automatiquement le Client ID et le Client Secret, sans installer d'outil externe. Sélectionnez d'abord la marque et le pays.": "Lädt die mobile App der ausgewählten Marke herunter (~100 MB) und extrahiert automatisch die Client-ID und das Client-Secret, ohne ein externes Tool zu installieren. Wählen Sie zuerst die Marke und das Land aus.",
         "Extraire automatiquement": "Automatisch extrahieren",
@@ -221,7 +229,9 @@
         "Départ (heure)": "Abfahrt (Uhrzeit)",
         "Arrivée (heure)": "Ankunft (Uhrzeit)",
         "Départ (position)": "Abfahrt (Position)",
-        "Arrivée (position)": "Ankunft (Position)"
+        "Arrivée (position)": "Ankunft (Position)",
+        "Au domicile": "Zuhause",
+        "Distance au domicile": "Entfernung zum Zuhause"
     },
     "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
         "Carte de position": "Positionskarte",

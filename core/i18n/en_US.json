@@ -17,6 +17,14 @@
         "URL du service de tuiles carte (optionnel)": "Map tile service URL (optional)",
         "Laisser vide pour utiliser le service de cartographie par défaut (OpenStreetMap)": "Leave empty to use the default mapping service (OpenStreetMap)",
         "Laisser vide pour utiliser le service par défaut": "Leave empty to use the default service",
+        "Zone domicile (geofencing)": "Home zone (geofencing)",
+        "Coordonnées de votre domicile : chaque véhicule exposera une info « Au domicile » (1/0) utilisable dans vos scénarios. Laissez vide pour désactiver.": "Coordinates of your home: each vehicle will expose an «At home» (1/0) info usable in your scenarios. Leave empty to disable.",
+        "Latitude du domicile": "Home latitude",
+        "Latitude en degrés décimaux (ex. 48.8566). Laissez vide pour désactiver le geofencing.": "Latitude in decimal degrees (e.g. 48.8566). Leave empty to disable geofencing.",
+        "Longitude du domicile": "Home longitude",
+        "Longitude en degrés décimaux (ex. 2.3522). Laissez vide pour désactiver le geofencing.": "Longitude in decimal degrees (e.g. 2.3522). Leave empty to disable geofencing.",
+        "Rayon (m)": "Radius (m)",
+        "Rayon en mètres autour du domicile pour considérer le véhicule « au domicile ». Laissez vide pour utiliser le défaut (150 m).": "Radius in meters around the home to consider the vehicle «at home». Leave empty to use the default (150 m).",
         "Extraction automatique": "Automatic extraction",
         "Télécharge l'application mobile de la marque sélectionnée (~100 Mo) et en extrait automatiquement le Client ID et le Client Secret, sans installer d'outil externe. Sélectionnez d'abord la marque et le pays.": "Downloads the mobile app for the selected brand (~100 MB) and automatically extracts the Client ID and Client Secret, without installing any external tool. Select the brand and country first.",
         "Extraire automatiquement": "Extract automatically",
@@ -221,7 +229,9 @@
         "Départ (heure)": "Departure (time)",
         "Arrivée (heure)": "Arrival (time)",
         "Départ (position)": "Departure (position)",
-        "Arrivée (position)": "Arrival (position)"
+        "Arrivée (position)": "Arrival (position)",
+        "Au domicile": "At home",
+        "Distance au domicile": "Distance to home"
     },
     "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
         "Carte de position": "Position map",
