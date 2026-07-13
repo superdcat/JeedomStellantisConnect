@@ -234,7 +234,8 @@
         "Distance au domicile": "Entfernung zum Zuhause",
         "Distance avant révision": "Strecke bis zur Inspektion",
         "Jours avant révision": "Tage bis zur Inspektion",
-        "Révision proche": "Inspektion bald fällig"
+        "Révision proche": "Inspektion bald fällig",
+        "Alerte pression pneus": "Reifendruckwarnung"
     },
     "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
         "Carte de position": "Positionskarte",

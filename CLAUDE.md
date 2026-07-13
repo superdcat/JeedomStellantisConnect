@@ -28,7 +28,7 @@ Un plugin Jeedom **n'est pas autonome** : il s'installe sous `<jeedom>/plugins/s
 PHP dépend du core Jeedom, atteint via `require_once __DIR__ . '/../../../../core/php/core.inc.php';`.
 Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 
-> **État d'avancement (2026-07-12)** : l'id a été renommé `template` → `stellantis` (classes
+> **État d'avancement (2026-07-13)** : l'id a été renommé `template` → `stellantis` (classes
 > `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP lecture seule COMPLET** : UC01 à
 > UC10 sont implémentées (configuration du plugin, client HTTP REST, authentification OAuth2 PKCE/token,
 > test de connexion, découverte des véhicules, création/synchronisation des équipements, commandes info
@@ -313,7 +313,32 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > proche » = **scénario Jeedom natif** sur `service_due` (pas de `message::add`). **Leçon transverse
 > capitalisée** (`stellantis-data-model.md` § 3) : un endpoint des modèles Swagger de référence n'est pas
 > une preuve qu'il est exploitable — vérifier qu'il est réellement **lu** par le code de référence avant d'y
-> compter. Suite = post-MVP (pression pneus, alertes véhicule, ouvrants détaillés, supervision…).
+> compter. **Post-MVP : UC42** — **pression des pneus / alertes TPMS** (télémétrie alertes, 100 %
+> lecture/parsing, **1 nouvel appel REST throttlé** `GET /alerts`, aucun MQTT) : la **pression NUMÉRIQUE
+> est absente** de l'API consommateur (confirmé) → seule une **info binaire** `tyre_alert` (historisée,
+> création **paresseuse**, déclencheur de scénario natif — précédent `service_due`/`at_home`), dérivée de
+> `GET /user/vehicles/{id}/alerts` (modèles `Alert`/`AlertsEmbedded`/`AlertMsgEnum`), = OR des **8 types
+> pneus** de l'AlertMsgEnum (`tyreUnderInflation`/`underInflationTyreFault`/`wheelPressureFault`/
+> `adjustTyrePressure`/`*TyreNotMonitored`, comparaison **insensible à la casse**). Parser **pur**
+> `parseAlertes()` (seul endroit des chemins JSON `/alerts`, multi-shape `_embedded.alerts` → `alerts` →
+> racine) **GÉNÉRIQUE** (renvoie la liste des types actifs, pas que pneus) + helper **pur**
+> `calculerAlertePneu()` (0/1, jamais `null` ⇒ émis à **chaque** succès `/alerts`, satisfait AC3
+> « absence ⇒ 0 »). Orchestration `suivreAlertes()` (best-effort, `catch \Throwable`, ne lève jamais,
+> appelée **en dernier** dans `refreshTelemetry()` après `suivreMaintenance()`) : throttle différencié
+> réutilisé d'UC41 — **1 h nominal** (alertes plus dynamiques que l'entretien), **7 j sur HTTP 403/404**
+> (forfait/véhicule sans alertes), **3 h transitoire** ; court-circuit `rateLimitRemaining()>0`. ⚠️
+> **Sémantique fail-closed** : une entrée `/alerts` sans clé `active` exploitable est **ignorée** (jamais
+> comptée active) — sur un endpoint à shape runtime non vérifiée, ne jamais conclure « alerte active » par
+> défaut (faux positif « crie au loup ») ; log `debug` (via `aseptiser()`) pour confirmer la vraie
+> sémantique en recette. **Pas de commande par roue** (les seuls types positionnels sont
+> `*TyreNotMonitored` = capteur non surveillé, ≠ sous-gonflage ; les vraies alertes de pression n'ont
+> aucune position). **Inversion de dépendance UC42/UC43 assumée** (UC43 pas encore implémentée) :
+> `parseAlertes()`/`suivreAlertes()` sont le **socle qu'UC43 doit ÉTENDRE** (catalogue complet des ~80
+> types + `alerts_count`), jamais dupliquer — consigne inscrite dans le docblock **et**
+> `43-alertes-vehicule.md`. **Leçon (`stellantis-data-model.md` § 3)** : `/alerts` **non plus** n'est lu
+> par les références (comme `/maintenance`) → best-effort ; mais `AlertsEmbedded` **existe** (≠
+> `maintenance_embedded` manquant) ⇒ le wrapper `_embedded.alerts` est **plus certain**. Suite = post-MVP
+> (alertes véhicule, ouvrants détaillés, supervision…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.

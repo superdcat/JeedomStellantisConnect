@@ -215,6 +215,18 @@ Biologic}` — `energy` absent sur Electric).
   éclairage. → UC42/43.
   > ⚠️ **La pression pneus NUMÉRIQUE est ABSENTE de `/status`** : seules des **alertes booléennes** via
   > `/alerts` existent. UC42 doit mapper des binaires, pas des valeurs en bar.
+  > ✅ **Contrat confirmé UC42 (2026-07-13)** vs doc B2C + `psa_car_controller/api_spec.md` : modèles
+  > `Alert`/`Alerts`/**`AlertsEmbedded`**/`AlertMsgEnum` → wrapper HAL `_embedded.alerts[]` (le modèle
+  > `AlertsEmbedded` **existe** côté référence, contrairement à `maintenance_embedded` — shape **plus
+  > certaine** qu'en UC41, mais **même** posture best-effort/lazy/throttle car **ni `psa_car_controller`
+  > ni HA ne LISENT réellement `/alerts`** — cf. « leçon transverse » ci-dessous). UC42 livre une seule
+  > info binaire `tyre_alert` (OR **insensible à la casse** des 8 types pneus, création paresseuse,
+  > historisée) dérivée d'un lecteur `/alerts` **générique et autonome** (`parseAlertes()` renvoie tous
+  > les types actifs, `suivreAlertes()` porte fetch+throttle 1 h/7 j-403|404/3 h) : **UC43 doit ÉTENDRE ce
+  > socle**, jamais recréer un 2ᵉ poller. ⚠️ **Fail-closed** : entrée sans `active` exploitable ⇒ ignorée
+  > (pas de faux positif d'alerte sur endpoint à shape non vérifiée). **Pas de per-roue** (seuls
+  > `*TyreNotMonitored` sont positionnels = capteur non surveillé ≠ sous-gonflage ; les vraies alertes de
+  > pression n'ont aucune position). Détail : `.memory/specs/post-mvp/40-entretien-alertes/42-tech.md`.
 - **`GET /user/vehicles/{id}/maintenance`** : échéance d'entretien → UC41. **Contrat vérifié UC41
   (2026-07-12 vs `psa_car_controller/connected_car_api/models/maintenance_obj.py`)** — champs (modèle
   `MaintenanceObj`) : `mileageBeforeMaintenance` (int km, orthographe **correcte**), **`daysBeforeMaintenace`**

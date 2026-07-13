@@ -628,6 +628,13 @@ class stellantis extends eqLogic {
       'service_distance' => array(__('Distance avant révision', __FILE__), 'numeric', '', 'km', true),
       'service_days'     => array(__('Jours avant révision', __FILE__), 'numeric', '', 'j', true),
       'service_due'      => array(__('Révision proche', __FILE__), 'binary', '', '', true),
+      // UC42 : alertes TPMS (pression pneus). La pression numérique en bar/PSI est ABSENTE de l'API
+      // consommateur (cf. 42-pression-pneus.md) → seule une info BINAIRE globale existe, dérivée de
+      // GET /alerts (endpoint distinct de /maintenance, disponibilité NON garantie, cf. 42-tech.md § 1).
+      // Création PARESSEUSE (jamais dans createCommands, précédent UC21/23/24/31/33/34/41), naît au 1er
+      // /alerts exploitable (suivreAlertes). generic_type='' (pas de constante core TPMS fiable).
+      // HISTORISÉE : déclencheur de scénario natif (précédent service_due UC41 / at_home UC34).
+      'tyre_alert' => array(__('Alerte pression pneus', __FILE__), 'binary', '', '', true),
     );
   }
 
@@ -849,6 +856,10 @@ class stellantis extends eqLogic {
     // jamais (try/catch interne), posé EN DERNIER dans refreshTelemetry() (robustesse cron, même
     // convention que le suivi de charge/trajet/geofencing UC24/33/34).
     $this->suivreMaintenance($apiId);
+    // UC42 : alertes TPMS (endpoint dédié /alerts, throttlé séparément). Best-effort, robuste — ne lève
+    // jamais (try/catch interne), posé EN DERNIER dans refreshTelemetry() (après suivreMaintenance, même
+    // convention robustesse cron que UC24/33/34/41).
+    $this->suivreAlertes($apiId);
   }
 
   // Extrait le tableau d'énergies du /status : energies[] (v4.15+) prioritaire, fallback energy[].
@@ -3171,6 +3182,117 @@ class stellantis extends eqLogic {
       $ttl = ($httpCode == 404) ? self::MAINTENANCE_TTL_ABSENT : self::MAINTENANCE_TTL_ERREUR;
       cache::set($cle, time() + $ttl, $ttl);
       log::add('stellantis', 'info', 'Échéances d\'entretien non récupérées (' . $apiType . ') — poursuite');
+    }
+  }
+
+  /* * ******************* UC42 — Pression des pneus (alertes TPMS) ******************* */
+
+  const ALERTS_NEXT_KEY   = 'stellantis::alerts_next::'; // + eqId (cache) : timestamp de prochaine interrogation /alerts autorisée
+  const ALERTS_TTL_OK     = 3600;    // 1 h  — cadence nominale (donnée à évolution lente côté véhicule, déjà signalée au conducteur au tableau de bord ; cf. 42-tech.md § 5)
+  const ALERTS_TTL_ABSENT = 604800;  // 7 j  — endpoint 403/404 (non supporté par ce véhicule/forfait)
+  const ALERTS_TTL_ERREUR = 10800;   // 3 h  — erreur transitoire (réessai le jour même, sans storm)
+  // Catalogue best-effort des types AlertMsgEnum liés aux pneus (42-tech.md § contrat), EN MINUSCULES
+  // (comparaison insensible à la casse : la casse API réelle est incohérente/non vérifiée, ex.
+  // 'frontright...' vs 'frontLeft...'). Extensible si un dump runtime révèle d'autres types.
+  const TYRE_ALERT_TYPES = array(
+    'tyreunderinflation', 'underinflationtyrefault', 'wheelpressurefault', 'adjusttyrepressure',
+    'frontlefttyrenotmonitored', 'frontrighttyrenotmonitored', 'rearlefttyrenotmonitored', 'rearrighttyrenotmonitored',
+  );
+
+  /**
+   * UC42 : mapping PUR et défensif de la réponse GET /alerts vers la liste des `type` d'alertes ACTIVES
+   * (chaînes brutes, NON filtrées pneus — GÉNÉRIQUE et forward-compatible : UC43 doit RÉUTILISER cette
+   * méthode telle quelle pour son catalogue complet, jamais en écrire une seconde). Shape/champ absent =>
+   * liste vide, jamais d'exception, même contrat que parseStatus()/parseMaintenance(). SEUL endroit portant
+   * les chemins JSON /alerts (cf. 42-tech.md § 2). Parsing multi-shape défensif : _embedded.alerts (shape
+   * HAL probable, modèle AlertsEmbedded de référence) puis 'alerts' puis repli racine=liste.
+   * @return string[] types d'alertes actives (chaînes brutes telles que reçues de l'API)
+   */
+  public static function parseAlertes(array $_resp): array {
+    if (isset($_resp['_embedded']['alerts']) && is_array($_resp['_embedded']['alerts'])) {
+      $liste = $_resp['_embedded']['alerts'];
+    } elseif (isset($_resp['alerts']) && is_array($_resp['alerts'])) {
+      $liste = $_resp['alerts'];
+    } elseif (function_exists('array_is_list') ? array_is_list($_resp) : array_keys($_resp) === range(0, count($_resp) - 1)) {
+      $liste = $_resp; // repli racine=liste
+    } else {
+      $liste = array();
+    }
+    $types = array();
+    foreach ($liste as $a) {
+      if (!is_array($a) || !isset($a['type']) || !is_string($a['type'])) {
+        continue;
+      }
+      // ⚠️ FAIL-CLOSED (décision validée, 42-tech.md § décisions) : 'active' absente ⇒ INACTIVE. Sur un
+      // endpoint dont la shape runtime n'est PAS vérifiée, on ne conclut JAMAIS « alerte active » par
+      // défaut (éviter le faux positif « crie au loup »). Log debug (best-effort, jamais error) pour
+      // confirmer la vraie sémantique en recette.
+      if (!isset($a['active'])) {
+        log::add('stellantis', 'debug', '/alerts : entrée sans valeur active exploitable (type ' . self::aseptiser($a['type'], 60) . ') — ignorée (fail-closed)');
+        continue;
+      }
+      if (!filter_var($a['active'], FILTER_VALIDATE_BOOLEAN)) {
+        continue;
+      }
+      $types[] = $a['type'];
+    }
+    return $types;
+  }
+
+  /**
+   * UC42 : détermine si au moins un type d'alerte pneu est actif. PUR/STATIQUE (aucun accès cache/cmd/
+   * config), en parallèle de calculerRevisionProche/calculerRecapSession/calculerRecapTrajet/
+   * distanceHaversineM. Retourne TOUJOURS 0 ou 1 (jamais null) : sur une réponse /alerts réussie, la valeur
+   * est systématiquement émise (satisfait AC3 « absence d'alerte pneus ⇒ info à 0 »).
+   */
+  private static function calculerAlertePneu(array $_typesActifs): int {
+    foreach ($_typesActifs as $t) {
+      if (in_array(strtolower(trim($t)), self::TYRE_ALERT_TYPES, true)) {
+        return 1;
+      }
+    }
+    return 0;
+  }
+
+  /**
+   * UC42 : interroge l'endpoint dédié GET /alerts (throttlé séparément du /status et de /maintenance,
+   * cadence 1 h nominale) et met à jour tyre_alert (0/1). Best-effort, robuste — NE LÈVE JAMAIS
+   * (try/catch \Throwable enveloppant + log info), posé EN DERNIER dans refreshTelemetry() (après
+   * suivreMaintenance, même convention que le suivi de charge/trajet/geofencing/entretien UC24/33/34/41).
+   * Disponibilité NON garantie (cf. 42-tech.md § 1) : un throttle LONG est posé sur 403/404 pour ne pas
+   * réinterroger un endpoint mort à chaque cycle. Un throttle est TOUJOURS posé (succès + toute branche
+   * catch), sauf le court-circuit rate-limit ci-dessous (lui-même borné) ⇒ aucun retry-storm possible.
+   * Universel (tout véhicule a des pneus — aucune garde de motorisation).
+   *
+   * ⚠️ UC43 doit ÉTENDRE cette méthode (catalogue complet des types d'alerte + commande `alerts_count`),
+   * JAMAIS créer un second poller sur /alerts (sinon deux appels/caches concurrents sur le même endpoint =
+   * budget anti-ban doublé + TTL qui se marchent dessus). parseAlertes() renvoie déjà la liste GÉNÉRIQUE
+   * des types actifs (pas seulement pneus) : UC43 la réutilise telle quelle (cf. 42-tech.md § Architecture).
+   */
+  private function suivreAlertes(string $_apiId): void {
+    $cle = self::ALERTS_NEXT_KEY . $this->getId();
+    if ((int) cache::byKey($cle)->getValue(0) > time()) {
+      return; // throttle actif : rien à faire ce cycle-ci
+    }
+    if (stellantisApi::rateLimitRemaining() > 0) {
+      return; // cooldown anti rate-limit actif : réessai après, SANS poser de throttle alerts (déjà borné par le cooldown lui-même)
+    }
+    try {
+      $resp = stellantisApi::callWithToken('GET', '/user/vehicles/' . $_apiId . '/alerts');
+      cache::set($cle, time() + self::ALERTS_TTL_OK, self::ALERTS_TTL_OK);
+      $typesActifs = self::parseAlertes($resp);
+      $tyre = self::calculerAlertePneu($typesActifs); // 0/1, TOUJOURS émis sur succès (AC3)
+      $cmd = $this->ensureCommand('tyre_alert'); // création paresseuse ici
+      $this->checkAndUpdateCmd($cmd, $tyre);
+    } catch (\Throwable $e) {
+      // 403/404 = endpoint non supporté par CE véhicule/forfait (cf. 42-tech.md § 1) → throttle LONG (évite
+      // d'interroger un endpoint mort + du bruit de log). Erreur transitoire (5xx/timeout/token/exception
+      // inattendue) → throttle COURT (réessai le jour même, sans storm).
+      $httpCode = ($e instanceof stellantisException) ? $e->getHttpCode() : 0;
+      $apiType = ($e instanceof stellantisException) ? $e->getApiType() : 'error';
+      $ttl = ($httpCode == 403 || $httpCode == 404) ? self::ALERTS_TTL_ABSENT : self::ALERTS_TTL_ERREUR;
+      cache::set($cle, time() + $ttl, $ttl);
+      log::add('stellantis', 'info', 'Alertes véhicule non récupérées (' . $apiType . ') — poursuite');
     }
   }
 
