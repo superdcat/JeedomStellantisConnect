@@ -235,7 +235,8 @@
         "Distance avant révision": "Distance to service",
         "Jours avant révision": "Days to service",
         "Révision proche": "Service due soon",
-        "Alerte pression pneus": "Tyre pressure alert"
+        "Alerte pression pneus": "Tyre pressure alert",
+        "Nombre d'alertes actives": "Number of active alerts"
     },
     "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
         "Carte de position": "Position map",

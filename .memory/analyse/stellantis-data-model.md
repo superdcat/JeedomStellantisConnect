@@ -227,6 +227,15 @@ Biologic}` — `energy` absent sur Electric).
   > (pas de faux positif d'alerte sur endpoint à shape non vérifiée). **Pas de per-roue** (seuls
   > `*TyreNotMonitored` sont positionnels = capteur non surveillé ≠ sous-gonflage ; les vraies alertes de
   > pression n'ont aucune position). Détail : `.memory/specs/post-mvp/40-entretien-alertes/42-tech.md`.
+  > ✅ **UC43 livré (2026-07-14)** — inversion de dépendance UC42/UC43 **résolue** : `parseAlertes()`/
+  > `suivreAlertes()` étendus (jamais dupliqués). Catalogue générique = **1 binaire par type rencontré**
+  > (`alert_<slug>`, **création DYNAMIQUE hors table statique** `definitionsCommandes()` car catalogue ~80
+  > types non figé ; nom = libellé brut sécurisé `htmlspecialchars(aseptiser())`, donnée runtime jamais
+  > `__()` ; remise à 0 par énumération `cmd::byEqLogicId(id,'info')` filtrée préfixe, commandes
+  > persistantes) + agrégat **`alerts_count`** (numeric historisée, scénario « ≥ 1 alerte »). ⚠️ Binaires
+  > par type **non historisées** (`isHistorized` = table d'historique, **pas** trigger de scénario) ;
+  > plafond `ALERT_MAX_TYPES=100` (anti-prolifération sur réponse anormale). Détail :
+  > `.memory/specs/post-mvp/40-entretien-alertes/43-tech.md`.
 - **`GET /user/vehicles/{id}/maintenance`** : échéance d'entretien → UC41. **Contrat vérifié UC41
   (2026-07-12 vs `psa_car_controller/connected_car_api/models/maintenance_obj.py`)** — champs (modèle
   `MaintenanceObj`) : `mileageBeforeMaintenance` (int km, orthographe **correcte**), **`daysBeforeMaintenace`**

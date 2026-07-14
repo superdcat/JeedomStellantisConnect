@@ -11,7 +11,14 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-13 (UC42 : `stellantis-data-model.md` § 3 — **pression pneus / alertes
+> **Dernière synchro** : 2026-07-14 (UC43 : `stellantis-data-model.md` § 3 — **alertes véhicule
+> (catalogue générique)** : UC43 **étend** le poller `/alerts` d'UC42 (jamais dupliqué) — **1 binaire par
+> type rencontré** en **création DYNAMIQUE hors table statique** `definitionsCommandes()` (`alert_<slug>`,
+> nom = libellé brut sécurisé donnée runtime jamais `__()` ; remise à 0 par énumération
+> `cmd::byEqLogicId(id,'info')`, commandes persistantes) + agrégat **`alerts_count`** (numeric historisée,
+> scénario « ≥ 1 alerte »). ⚠️ Binaires par type **non historisées** (`isHistorized` = table d'historique,
+> **pas** trigger de scénario) ; plafond `ALERT_MAX_TYPES=100` anti-prolifération — cf. `43-tech.md`).
+> Précédemment 2026-07-13 (UC42 : `stellantis-data-model.md` § 3 — **pression pneus / alertes
 > TPMS** : la pression NUMÉRIQUE est absente de l'API consommateur → seules des **alertes booléennes** via
 > `GET /alerts` (modèles `Alert`/`AlertsEmbedded`/`AlertMsgEnum`, wrapper `_embedded.alerts`) ; contrat
 > confirmé vs doc B2C + `psa_car_controller` mais **endpoint non lu par les réfs** (comme `/maintenance`)
@@ -109,7 +116,7 @@
 | **`charging.status`** : valeurs, états terminaux **persistants** (≠ momentanés), machine à états de **session de charge** (transition, pas par-poll), énergie = Δ SOC × capacité | `stellantis-data-model.md` § 2.1 |
 | **Détection de trajet** : `kinetic.moving` instantané (fragmente à 5 min) vs `ignition.type` persistant → prédicat `moving OU ignition∈{Start,StartUp}` ; distance = delta odomètre ; reconstruction locale (pas d'endpoint trips) | `stellantis-data-model.md` § 2.3 |
 | **Échéance d'entretien / kilométrage** : endpoint `/maintenance`, champs `mileageBeforeMaintenance` / `daysBeforeMaintenace` (**typo réelle de l'API**), disponibilité NON garantie (best-effort/lazy/throttle) ; un endpoint du client Swagger de réf. n'est pas forcément exploitable | `stellantis-data-model.md` § 3 |
-| **Pression pneus / alertes véhicule** : endpoint `/alerts` (`_embedded.alerts`, `AlertMsgEnum`), pression NUMÉRIQUE absente (que des booléens), best-effort/lazy/throttle 1 h, **fail-closed** (`active` absente ⇒ ignorée), pas de per-roue, socle qu'UC43 étend | `stellantis-data-model.md` § 3 |
+| **Pression pneus / alertes véhicule** : endpoint `/alerts` (`_embedded.alerts`, `AlertMsgEnum`), pression NUMÉRIQUE absente (que des booléens), best-effort/lazy/throttle 1 h, **fail-closed** (`active` absente ⇒ ignorée), pas de per-roue ; **UC43 livré** : 1 binaire par type (création dynamique hors table statique) + `alerts_count` agrégé | `stellantis-data-model.md` § 3 |
 | **Confidentialité localisation** : clé config avec coordonnées → chiffrer (`$_encryptConfigKey`, marche pour la config plugin) ; ne PAS historiser une distance-à-un-point-fixe (trilatération de l'adresse) ; `at_home` binaire OK à historiser | `stellantis-data-model.md` § 2.2 |
 | Création conditionnelle de commandes selon **motorisation** (élec/hybride/thermique) | `stellantis-data-model.md` § 3 |
 | **Où trouver le contrat exact** (endpoint/payload non documenté) : code de référence à lire | `stellantis-implementations-reference.md` |

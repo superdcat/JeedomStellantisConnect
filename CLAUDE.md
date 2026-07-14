@@ -337,8 +337,28 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > types + `alerts_count`), jamais dupliquer — consigne inscrite dans le docblock **et**
 > `43-alertes-vehicule.md`. **Leçon (`stellantis-data-model.md` § 3)** : `/alerts` **non plus** n'est lu
 > par les références (comme `/maintenance`) → best-effort ; mais `AlertsEmbedded` **existe** (≠
-> `maintenance_embedded` manquant) ⇒ le wrapper `_embedded.alerts` est **plus certain**. Suite = post-MVP
-> (alertes véhicule, ouvrants détaillés, supervision…).
+> `maintenance_embedded` manquant) ⇒ le wrapper `_embedded.alerts` est **plus certain**. **Post-MVP :
+> UC43** — **alertes véhicule (catalogue générique AdBlue/lave-glace/voyants/révision…)** (télémétrie
+> alertes, 100 % lecture/parsing, **AUCUN appel réseau/MQTT neuf** : **ÉTEND** le poller `/alerts` d'UC42,
+> jamais de 2ᵉ poller/cache) : `parseAlertes()`/`suivreAlertes()` réutilisés **tels quels** (fail-closed,
+> insensibilité à la casse, throttle 1 h/7 j/3 h inchangés). Nouvelle info agrégée **`alerts_count`**
+> (numeric historisée, création paresseuse comme `tyre_alert` — déclencheur de scénario natif « le véhicule
+> a une alerte », `#alerts_count# > 0`, AC2) + **une commande binaire PAR TYPE d'alerte rencontré**
+> (`alert_<slug>`, AC1) en **création DYNAMIQUE hors `definitionsCommandes()`** (catalogue AlertMsgEnum ~80
+> types, variable/non figé) : helper `sluggifierTypeAlerte()` (slug `[a-z0-9_]`), `ensureAlertCommand()`
+> (via `trouverOuInstancierCmd()` + **définition synthétique** `[$nom,'binary']`, nom = **libellé brut
+> sécurisé** `htmlspecialchars(aseptiser($type,60))` — donnée RUNTIME, **jamais** `__()`),
+> `synchroniserCommandesAlertes()` (actifs→1, **plus-actifs→0 par énumération `cmd::byEqLogicId(id,'info')`
+> filtrée préfixe `alert_`** — pas un cache d'état, survit à `cache::flush()` ; commandes **persistantes**,
+> « une par type rencontré »). ⚠️ **Binaires par type NON historisées** (`setIsHistorized(0)`) : `isHistorized`
+> pilote le **stockage en table d'historique**, **pas** le déclenchement de scénario (event cmd) → ne pas
+> gonfler l'historique pour ~80 binaires × N véhicules ; seule `alerts_count` (agrégat unique) est
+> historisée. Garde-fous : **plafond anti-prolifération `ALERT_MAX_TYPES=100`** (troncature + log warning
+> avant création — réponse `/alerts` anormale/compromise ne peut créer un nombre illimité de commandes
+> persistantes) ; écritures de commandes **isolées** dans un `try/catch \Throwable` interne de
+> `suivreAlertes()` (throttle succès posé **avant** — corrige au passage le throttle-poisoning préexistant
+> UC42) ; garde reserved-ids explicite (`alerts_count`/`tyre_alert`). **Inversion de dépendance UC42/UC43
+> RÉSOLUE.** Suite = post-MVP (ouvrants détaillés, supervision…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.

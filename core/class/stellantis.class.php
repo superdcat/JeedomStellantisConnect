@@ -635,6 +635,13 @@ class stellantis extends eqLogic {
       // /alerts exploitable (suivreAlertes). generic_type='' (pas de constante core TPMS fiable).
       // HISTORISÉE : déclencheur de scénario natif (précédent service_due UC41 / at_home UC34).
       'tyre_alert' => array(__('Alerte pression pneus', __FILE__), 'binary', '', '', true),
+      // UC43 : alertes véhicule (AdBlue, lave-glace, voyants, révision…), catalogue GÉNÉRIQUE AlertMsgEnum
+      // (~80 types, variable/non figé) dérivé du MÊME /alerts qu'UC42 (suivreAlertes/parseAlertes, aucun
+      // nouvel appel réseau). 'alerts_count' est l'unique entrée STATIQUE (agrégat) : les binaires PAR TYPE
+      // (alert_<slug>) sont créées DYNAMIQUEMENT hors de cette table (ensureAlertCommand, catalogue non
+      // figé) — cf. synchroniserCommandesAlertes(). Création PARESSEUSE (jamais dans createCommands),
+      // HISTORISÉE : déclencheur de scénario natif « le véhicule a une alerte » (#alerts_count# > 0).
+      'alerts_count' => array(__('Nombre d\'alertes actives', __FILE__), 'numeric', '', '', true),
     );
   }
 
@@ -3185,7 +3192,7 @@ class stellantis extends eqLogic {
     }
   }
 
-  /* * ******************* UC42 — Pression des pneus (alertes TPMS) ******************* */
+  /* * ******************* UC42/UC43 — Alertes véhicule (pression pneus + catalogue générique) ******************* */
 
   const ALERTS_NEXT_KEY   = 'stellantis::alerts_next::'; // + eqId (cache) : timestamp de prochaine interrogation /alerts autorisée
   const ALERTS_TTL_OK     = 3600;    // 1 h  — cadence nominale (donnée à évolution lente côté véhicule, déjà signalée au conducteur au tableau de bord ; cf. 42-tech.md § 5)
@@ -3198,6 +3205,14 @@ class stellantis extends eqLogic {
     'tyreunderinflation', 'underinflationtyrefault', 'wheelpressurefault', 'adjusttyrepressure',
     'frontlefttyrenotmonitored', 'frontrighttyrenotmonitored', 'rearlefttyrenotmonitored', 'rearrighttyrenotmonitored',
   );
+  // UC43 : préfixe logicalId des binaires d'alerte PAR TYPE (création dynamique, catalogue AlertMsgEnum non
+  // figé). ⚠️ Ni 'alerts_count' (pluriel + suffixe '_count') ni 'tyre_alert' (préfixe 'tyre_') ne commencent
+  // par 'alert_' (vérifié caractère par caractère) : jamais capturés par le filtre de remise à 0.
+  const ALERT_CMD_PREFIX = 'alert_';
+  // UC43 (review sécurité) : plafond anti-prolifération — une réponse /alerts anormale (bug amont/API
+  // compromise) ne doit pas créer un nombre illimité de commandes PERSISTANTES. Généreux vs le catalogue
+  // AlertMsgEnum réel (~80 types, cf. 43-tech.md § contrat) : ne borne jamais un usage légitime.
+  const ALERT_MAX_TYPES = 100;
 
   /**
    * UC42 : mapping PUR et défensif de la réponse GET /alerts vers la liste des `type` d'alertes ACTIVES
@@ -3255,19 +3270,133 @@ class stellantis extends eqLogic {
   }
 
   /**
-   * UC42 : interroge l'endpoint dédié GET /alerts (throttlé séparément du /status et de /maintenance,
-   * cadence 1 h nominale) et met à jour tyre_alert (0/1). Best-effort, robuste — NE LÈVE JAMAIS
-   * (try/catch \Throwable enveloppant + log info), posé EN DERNIER dans refreshTelemetry() (après
-   * suivreMaintenance, même convention que le suivi de charge/trajet/geofencing/entretien UC24/33/34/41).
+   * UC43 : assainit un type d'alerte brut (chaîne AlertMsgEnum reçue de l'API) en slug de logicalId
+   * (minuscule, [^a-z0-9]→'_', bornes '_' retirées). PUR/STATIQUE, unique endroit portant cette règle
+   * (réutilisé par ensureAlertCommand() et synchroniserCommandesAlertes() — pas de duplication).
+   * Peut renvoyer '' (type inexploitable : vide ou composé uniquement de caractères non alphanumériques) ;
+   * c'est au CALLER de décider quoi faire d'un slug vide (garde anti-vide, cf. les deux appelants).
+   */
+  private static function sluggifierTypeAlerte(string $_typeBrut): string {
+    return trim(preg_replace('/[^a-z0-9]+/', '_', strtolower(trim($_typeBrut))), '_');
+  }
+
+  /**
+   * UC43 : retourne la commande info binaire dédiée au type d'alerte $_typeBrut (chaîne AlertMsgEnum brute
+   * telle que reçue de l'API), la créant si absente (idempotent). Le catalogue (~80 types, non figé) ne
+   * peut pas être déclaré statiquement dans definitionsCommandes() → création DYNAMIQUE ici, réutilisant
+   * la plomberie commune trouverOuInstancierCmd() avec une définition SYNTHÉTIQUE (pas de duplication du
+   * setEqLogic_id/type/subType/visible, aucun changement de signature du core).
+   * logicalId = ALERT_CMD_PREFIX + slug (sluggifierTypeAlerte()). Garde anti-vide : un type qui s'assainit
+   * en chaîne vide ne crée PAS de commande 'alert_' (type inexploitable) — chemin normalement inatteignable
+   * depuis synchroniserCommandesAlertes() (qui pré-filtre déjà les slugs vides), conservé en défense
+   * (même pattern que trouverOuInstancierCmd() : contrat de retour non-nullable ⇒ échec = exception, pas
+   * un retour partiel silencieux), capturé par le try/catch \Throwable interne de suivreAlertes().
+   * Nom = libellé BRUT sécurisé (aseptiser + htmlspecialchars) — donnée RUNTIME, jamais __() (piège i18n
+   * UC07 : __() n'accepte qu'une chaîne LITTÉRALE, sans quoi l'extracteur i18n ne la capture pas).
+   */
+  private function ensureAlertCommand(string $_typeBrut): stellantisCmd {
+    $slug = self::sluggifierTypeAlerte($_typeBrut);
+    if ($slug == '') {
+      // Type inexploitable (vide/caractères non alphanumériques uniquement) : ne jamais créer 'alert_'.
+      throw new stellantisException('Type d\'alerte inexploitable (slug vide) : ' . htmlspecialchars(self::aseptiser($_typeBrut, 60), ENT_QUOTES, 'UTF-8'));
+    }
+    $logicalId = self::ALERT_CMD_PREFIX . $slug;
+    $nom = htmlspecialchars(self::aseptiser($_typeBrut, 60), ENT_QUOTES, 'UTF-8');
+    $cmd = $this->trouverOuInstancierCmd('info', $logicalId, array($logicalId => array($nom, 'binary')));
+    if ($cmd->getId() != '') {
+      return $cmd; // déjà existante : rien à (re)configurer
+    }
+    $cmd->setGeneric_type('');
+    $cmd->setIsHistorized(0); // binaires PAR TYPE non historisées (isHistorized ≠ trigger de scénario) : cf. 43-tech.md
+    $cmd->save();
+    // Traçabilité recette : mapping type assaini → logicalId à la 1re création (détection de collision d'assainissement).
+    log::add('stellantis', 'info', 'Nouvelle alerte véhicule détectée : ' . $nom . ' (commande ' . $logicalId . ')');
+    return $cmd;
+  }
+
+  /**
+   * UC43 : synchronise les commandes d'alerte PAR TYPE (une binaire par type AlertMsgEnum rencontré) +
+   * l'agrégat 'alerts_count', à partir du $_typesActifs DÉJÀ parsé par parseAlertes() (aucun re-fetch, aucun
+   * re-parse — cf. 43-tech.md § réutilisation UC42). Appelée UNIQUEMENT depuis le bloc d'écriture isolé de la
+   * branche succès de suivreAlertes() (jamais d'accès réseau/cache de throttle ici).
+   * - Actifs → 1 (création paresseuse via ensureAlertCommand), plafonnés à ALERT_MAX_TYPES (review sécurité :
+   *   borne la création de commandes PERSISTANTES si /alerts renvoie un nombre anormal de types distincts).
+   * - Plus actifs → 0 (les commandes PERSISTENT, jamais supprimées — « une par type rencontré »).
+   * - 'alerts_count' = nombre de types DISTINCTS actifs RETENUS (après plafond), émis à chaque succès.
+   */
+  private function synchroniserCommandesAlertes(array $_typesActifs): void {
+    // 1) Ensemble actif dédupliqué par slug (clé slug → type brut), slugs vides ignorés.
+    $actifs = array();
+    foreach ($_typesActifs as $typeBrut) {
+      if (!is_string($typeBrut)) {
+        continue;
+      }
+      $slug = self::sluggifierTypeAlerte($typeBrut);
+      if ($slug == '') {
+        continue;
+      }
+      $actifs[$slug] = $typeBrut;
+    }
+    // Plafond anti-prolifération (review sécurité) : une réponse /alerts anormale (bug amont/API compromise)
+    // ne doit pas créer un nombre illimité de commandes PERSISTANTES. Troncature AVANT toute création — la
+    // suite (création, remise à 0, alerts_count) ne voit plus que les ALERT_MAX_TYPES premiers types.
+    if (count($actifs) > self::ALERT_MAX_TYPES) {
+      log::add('stellantis', 'warning', '/alerts : ' . count($actifs) . ' types actifs > plafond ' . self::ALERT_MAX_TYPES . ' — création limitée aux ' . self::ALERT_MAX_TYPES . ' premiers');
+      $actifs = array_slice($actifs, 0, self::ALERT_MAX_TYPES, true);
+    }
+    // 2) Actifs → 1.
+    foreach ($actifs as $typeBrut) {
+      $cmd = $this->ensureAlertCommand($typeBrut);
+      $this->checkAndUpdateCmd($cmd, 1);
+    }
+    // 3) Plus actifs → 0 (énumération DB, pas un cache d'état : survit à cache::flush(), pas de staleness
+    //    silencieuse). Garde reserved-ids : le préfixe ALERT_CMD_PREFIX exclut déjà 'alerts_count'/'tyre_alert'
+    //    (vérifié caractère par caractère, cf. commentaire de la constante) ; liste explicite ci-dessous en
+    //    plus (belt & suspenders), pour rester sûr même si un futur logicalId réservé venait à changer.
+    $logicalIdsActifs = array();
+    foreach (array_keys($actifs) as $slug) {
+      $logicalIdsActifs[self::ALERT_CMD_PREFIX . $slug] = true;
+    }
+    $commandesInfo = cmd::byEqLogicId($this->getId(), 'info');
+    if (is_array($commandesInfo)) {
+      foreach ($commandesInfo as $cmdInfo) {
+        $lid = $cmdInfo->getLogicalId();
+        if (in_array($lid, array('alerts_count', 'tyre_alert'), true)) {
+          continue; // reserved-ids explicite : jamais touchées ici, déjà exclues par le préfixe ci-dessous
+        }
+        if (strpos($lid, self::ALERT_CMD_PREFIX) !== 0) {
+          continue; // pas une commande d'alerte PAR TYPE
+        }
+        if (isset($logicalIdsActifs[$lid])) {
+          continue; // toujours actif : déjà remis à 1 ci-dessus
+        }
+        $this->checkAndUpdateCmd($cmdInfo, 0); // type revu inactif : retombe à 0 SANS être supprimé
+      }
+    }
+    // 4) Agrégat 'alerts_count' (types DISTINCTS RETENUS après plafond), émis à chaque succès (0 si aucun ⇒ AC2).
+    $this->checkAndUpdateCmd($this->ensureCommand('alerts_count'), count($actifs));
+  }
+
+  /**
+   * UC42/UC43 : interroge l'endpoint dédié GET /alerts (throttlé séparément du /status et de /maintenance,
+   * cadence 1 h nominale) et met à jour tyre_alert (0/1, UC42) + le catalogue complet des alertes par type
+   * et l'agrégat alerts_count (UC43). Best-effort, robuste — NE LÈVE JAMAIS (try/catch \Throwable
+   * enveloppant + log info), posé EN DERNIER dans refreshTelemetry() (après suivreMaintenance, même
+   * convention que le suivi de charge/trajet/geofencing/entretien UC24/33/34/41).
    * Disponibilité NON garantie (cf. 42-tech.md § 1) : un throttle LONG est posé sur 403/404 pour ne pas
    * réinterroger un endpoint mort à chaque cycle. Un throttle est TOUJOURS posé (succès + toute branche
    * catch), sauf le court-circuit rate-limit ci-dessous (lui-même borné) ⇒ aucun retry-storm possible.
    * Universel (tout véhicule a des pneus — aucune garde de motorisation).
    *
-   * ⚠️ UC43 doit ÉTENDRE cette méthode (catalogue complet des types d'alerte + commande `alerts_count`),
-   * JAMAIS créer un second poller sur /alerts (sinon deux appels/caches concurrents sur le même endpoint =
-   * budget anti-ban doublé + TTL qui se marchent dessus). parseAlertes() renvoie déjà la liste GÉNÉRIQUE
-   * des types actifs (pas seulement pneus) : UC43 la réutilise telle quelle (cf. 42-tech.md § Architecture).
+   * ⚠️ Le throttle succès est posé AVANT les écritures de commandes, elles-mêmes isolées dans un
+   * try/catch \Throwable INTERNE (43-tech.md § restructuration) : un aléa d'écriture (DB…) ne doit PAS
+   * étiqueter à tort un succès réseau comme « échec » et écraser le throttle 1 h par le throttle 3 h
+   * (défaut préexistant UC42, corrigé ici en passant). Le catch EXTERNE (403/404 → 7 j, transitoire → 3 h)
+   * ne capture donc plus que les vrais échecs de fetch/parse /alerts.
+   *
+   * parseAlertes() renvoie déjà la liste GÉNÉRIQUE des types actifs (pas seulement pneus), réutilisée TELLE
+   * QUELLE par synchroniserCommandesAlertes() (UC43) — AUCUN second appel/cache sur /alerts (cf. 43-tech.md
+   * § Architecture : interdiction formelle d'un 2e poller, budget anti-ban doublé sinon).
    */
   private function suivreAlertes(string $_apiId): void {
     $cle = self::ALERTS_NEXT_KEY . $this->getId();
@@ -3279,11 +3408,19 @@ class stellantis extends eqLogic {
     }
     try {
       $resp = stellantisApi::callWithToken('GET', '/user/vehicles/' . $_apiId . '/alerts');
+      // Throttle succès posé AVANT les écritures (l'appel /alerts a réussi, quoi qu'il arrive ensuite).
       cache::set($cle, time() + self::ALERTS_TTL_OK, self::ALERTS_TTL_OK);
-      $typesActifs = self::parseAlertes($resp);
-      $tyre = self::calculerAlertePneu($typesActifs); // 0/1, TOUJOURS émis sur succès (AC3)
-      $cmd = $this->ensureCommand('tyre_alert'); // création paresseuse ici
-      $this->checkAndUpdateCmd($cmd, $tyre);
+      try {
+        $typesActifs = self::parseAlertes($resp);
+        // UC42 : tyre_alert (agrégat pneus dédié), TOUJOURS émis sur succès (AC3).
+        $this->checkAndUpdateCmd($this->ensureCommand('tyre_alert'), self::calculerAlertePneu($typesActifs));
+        // UC43 : binaires par type + alerts_count (réutilise le MÊME $typesActifs, aucun re-fetch/re-parse).
+        $this->synchroniserCommandesAlertes($typesActifs);
+      } catch (\Throwable $e2) {
+        // Aléa d'écriture de commande (DB…) : ne PAS toucher au throttle succès déjà posé (le /alerts a
+        // réussi) — sinon un incident local serait mal étiqueté « échec réseau ». Best-effort, poursuite.
+        log::add('stellantis', 'warning', 'Écriture des commandes d\'alerte échouée — poursuite : ' . $e2->getMessage());
+      }
     } catch (\Throwable $e) {
       // 403/404 = endpoint non supporté par CE véhicule/forfait (cf. 42-tech.md § 1) → throttle LONG (évite
       // d'interroger un endpoint mort + du bruit de log). Erreur transitoire (5xx/timeout/token/exception
