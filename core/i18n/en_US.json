@@ -133,6 +133,7 @@
         "il y a %d min": "%d min ago",
         "il y a %d h": "%d h ago",
         "il y a %d j": "%d d ago",
+        "Libellé": "Label",
         "Batterie": "Battery",
         "Autonomie électrique": "Electric range",
         "État de charge": "Charging state",
@@ -310,7 +311,9 @@
         "Nom": "Name",
         "Type": "Type",
         "Etat": "State",
-        "Actions": "Actions"
+        "Actions": "Actions",
+        "Libellé du véhicule": "Vehicle label",
+        "Nom du véhicule tel que défini dans l'application mobile (pré-rempli avec la désignation commerciale, modifiable ; renseigné par la synchronisation)": "Vehicle name as defined in the mobile app (pre-filled with the commercial designation, editable; filled in by the synchronization)"
     },
     "plugins/stellantis/desktop/php/panel.php": {
         "401 - Accès non autorisé": "401 - Unauthorized access",

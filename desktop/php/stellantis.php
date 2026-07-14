@@ -168,6 +168,14 @@ $iconeConnexion = ($etatConnexion['state'] == 'ok') ? 'fa-check-circle' : (($eta
 								</div>
 							</div>
 							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Libellé du véhicule}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Nom du véhicule tel que défini dans l'application mobile (pré-rempli avec la désignation commerciale, modifiable ; renseigné par la synchronisation)}}"></i></sup>
+								</label>
+								<div class="col-sm-6">
+									<input type="text" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="label" readonly>
+								</div>
+							</div>
+							<div class="form-group">
 								<label class="col-sm-4 control-label">{{Motorisation}}
 									<sup><i class="fas fa-question-circle tooltips" title="{{Motorisation détectée (Electric / Thermal / Hybrid) — indicative, affinée par le suivi de statut}}"></i></sup>
 								</label>

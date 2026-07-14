@@ -21,4 +21,8 @@ config et, au besoin, en commandes info — utile pour distinguer plusieurs véh
 - [ ] Le nom par défaut de l'équipement est lisible (marque + modèle).
 
 ## À confirmer
-- Présence d'un libellé commercial fiable dans `/vehicles` (sinon dériver de la marque).
+- ~~Présence d'un libellé commercial fiable dans `/vehicles` (sinon dériver de la marque).~~
+  **Tranché (2026-07-14, cf. `51-tech.md` + `stellantis-data-model.md` § 1)** : l'API n'a NI `model` NI
+  `motorization`. Le seul champ approchant est **`label`** = surnom **renommable dans l'app mobile**
+  (pré-rempli avec la désignation commerciale, mais éditable) → affiché « **Libellé du véhicule** » (pas
+  « Modèle », qui serait trompeur si renommé). Pas de dérivation depuis la marque (marque affichée à part).

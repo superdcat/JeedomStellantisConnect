@@ -500,6 +500,9 @@ class stellantis extends eqLogic {
         $eqLogic->setConfiguration('apiId', $v['id']); // requis pour les appels REST (UC07+), réécrit → self-heal
         $eqLogic->setConfiguration('vin', $v['vin']);
         $eqLogic->setConfiguration('brand', $v['brand']);
+        // UC51 : libellé du véhicule (découverte = autorité, réécrit à chaque sync, comme 'brand' — jamais
+        // conditionné, contrairement à 'energy' qui est raffinée par le /status).
+        $eqLogic->setConfiguration('label', $v['label']);
         // energy : écrit seulement si absent — ne jamais écraser une valeur raffinée par le /status (UC07)
         if (trim((string) $eqLogic->getConfiguration('energy', '')) == '' && $v['energy'] != '') {
           $eqLogic->setConfiguration('energy', $v['energy']);
@@ -560,6 +563,11 @@ class stellantis extends eqLogic {
       'doors_locked'     => array(__('Verrouillage', __FILE__), 'binary', '', '', false),
       'position'         => array(__('Position', __FILE__), 'string', 'GEOLOC', '', false),
       'last_update'      => array(__('Dernière MAJ', __FILE__), 'string', '', '', false),
+      // UC51 : identité du véhicule. Valeur STATIQUE issue de la config 'label' (jamais du /status, qui
+      // n'a ni 'model' ni 'motorization' — cf. 51-tech.md). Non historisée (donnée quasi immuable).
+      // generic_type='' : pas de constante core « libellé/modèle » fiable. Pas de commande 'vin' (décision
+      // produit : éviter d'exposer le VIN sur les widgets dashboard).
+      'label'            => array(__('Libellé', __FILE__), 'string', '', '', false),
       'precond_status'   => array(__('Préconditionnement', __FILE__), 'string', '', '', false),
       // UC18 : retour d'état asynchrone des commandes à distance. Alimentée UNIQUEMENT par le callback
       // démon (traiterRetourCommande) — jamais par parseStatus/refreshTelemetry, donc jamais écrasée par
@@ -696,7 +704,7 @@ class stellantis extends eqLogic {
     // dérivées (latitude/longitude/heading/position_updated/gps_signal) sont créées PARESSEUSEMENT par
     // ensureCommand() au 1er /lastPosition exploitable (même pattern que le détail UC21). Un véhicule en
     // privacy permanente affiche donc 'Position' (vide) mais jamais les 5 autres — pas un oubli.
-    $aCreer = array('mileage', 'doors_locked', 'position', 'last_update', 'precond_status', self::CMD_RESULT_LOGICAL_ID);
+    $aCreer = array('mileage', 'doors_locked', 'position', 'last_update', 'precond_status', 'label', self::CMD_RESULT_LOGICAL_ID);
     if ($motorisation == 'Electric' || $motorisation == 'Hybrid') {
       $aCreer = array_merge($aCreer, array('battery_soc', 'autonomy', 'charging_status', 'charging_plugged'));
     }
@@ -709,6 +717,14 @@ class stellantis extends eqLogic {
     foreach ($aCreer as $logicalId) {
       $this->ensureCommand($logicalId);
     }
+    // UC51 : identité — valeur STATIQUE issue de la config (jamais du /status). Peuplée ici (pas dans
+    // parseStatus) : createCommands() est appelé au sync (après réécriture de la config d'identité) et au
+    // self-heal de motorisation — jamais à chaque cron. Compromis identique à l'affichage config de
+    // brand/energy (rafraîchis seulement à la synchro) : la donnée étant quasi immuable, c'est suffisant.
+    // Neutraliser le libellé (texte libre externe : surnom éditable dans l'app mobile) AVANT de le poser
+    // en valeur de commande info rendue sur le dashboard — même convention que last_command_result (UC18)
+    // et les noms d'alerte (UC43). aseptiser() borne aussi la longueur (anti-DoS d'affichage).
+    $this->checkAndUpdateCmd($this->ensureCommand('label'), htmlspecialchars(self::aseptiser((string) $this->getConfiguration('label', '')), ENT_QUOTES, 'UTF-8'));
     // UC32 : pose le widget carte sur la commande 'position', SI VIDE uniquement (idempotent — n'écrase
     // jamais un template choisi manuellement par l'utilisateur, cf. jeedom-widgets-commandes.md § 6).
     // Un seul save() si au moins un des deux templates a été posé. Logique mutualisée avec install.php

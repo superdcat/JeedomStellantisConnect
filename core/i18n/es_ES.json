@@ -133,6 +133,7 @@
         "il y a %d min": "hace %d min",
         "il y a %d h": "hace %d h",
         "il y a %d j": "hace %d d",
+        "Libellé": "Etiqueta",
         "Batterie": "Batería",
         "Autonomie électrique": "Autonomía eléctrica",
         "État de charge": "Estado de carga",
@@ -310,7 +311,9 @@
         "Nom": "Nombre",
         "Type": "Tipo",
         "Etat": "Estado",
-        "Actions": "Acciones"
+        "Actions": "Acciones",
+        "Libellé du véhicule": "Etiqueta del vehículo",
+        "Nom du véhicule tel que défini dans l'application mobile (pré-rempli avec la désignation commerciale, modifiable ; renseigné par la synchronisation)": "Nombre del vehículo tal como se define en la aplicación móvil (rellenado previamente con la denominación comercial, modificable; rellenado por la sincronización)"
     },
     "plugins/stellantis/desktop/php/panel.php": {
         "401 - Accès non autorisé": "401 - Acceso no autorizado",

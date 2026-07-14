@@ -28,7 +28,7 @@ Un plugin Jeedom **n'est pas autonome** : il s'installe sous `<jeedom>/plugins/s
 PHP dépend du core Jeedom, atteint via `require_once __DIR__ . '/../../../../core/php/core.inc.php';`.
 Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 
-> **État d'avancement (2026-07-13)** : l'id a été renommé `template` → `stellantis` (classes
+> **État d'avancement (2026-07-14)** : l'id a été renommé `template` → `stellantis` (classes
 > `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP lecture seule COMPLET** : UC01 à
 > UC10 sont implémentées (configuration du plugin, client HTTP REST, authentification OAuth2 PKCE/token,
 > test de connexion, découverte des véhicules, création/synchronisation des équipements, commandes info
@@ -372,7 +372,23 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > déclarée dans `definitionsCommandes` sinon `ensureCommand` casse le refresh) ⇒ **jamais de logicalId
 > dynamique émis** (étanche au throw) ; un identifiant inconnu est **compté dans l'agrégat** + loggué
 > `debug` (aseptisé), jamais perdu ni émis ; **fail-closed** sur `state` (seul « Open » ⇒ ouvert) ; gardes
-> défensives `isset/is_array/is_scalar` (`parseStatus` reste pur). Suite = post-MVP (supervision, robustesse…).
+> défensives `isset/is_array/is_scalar` (`parseStatus` reste pur). **Post-MVP : UC51** — **identité du
+> véhicule (VIN, marque, libellé, énergie)** (100 % local, AUCUN appel réseau : exploite le champ `label`
+> déjà remonté par `discoverVehicles()`) : `syncVehicles()` **persiste** désormais la config `label`
+> (autorité découverte, réécrite à chaque sync comme `brand`) ; le formulaire desktop `stellantis.php`
+> l'**affiche** en readonly « **Libellé du véhicule** » (≠ « Modèle » : l'API n'a NI `model` NI
+> `motorization`, `label` est un **surnom renommable dans l'app mobile** — cf. `data-model` § 1, « À
+> confirmer » de la spec 51 clôturé). Ce champ readonly est **obligatoire dans le formulaire** (sinon la
+> clé `label` serait effacée au Sauvegarder). Une commande info string **`label`** (universelle, eager,
+> non historisée) est créée + peuplée dans `createCommands()` depuis la config (valeur **statique** —
+> jamais via `parseStatus` — rafraîchie au sync/self-heal, pas à chaque cron). ⚠️ **Sécurité** : `label`
+> étant le **1er texte VRAIMENT libre et externe** posé en valeur de commande info (rendu par le widget
+> dashboard générique du core), sa valeur est **neutralisée** `htmlspecialchars(self::aseptiser(...))`
+> avant écriture (même convention qu'UC18/UC43 ; cf. `jeedom-cmd-creation-patterns` mémoire) — la config
+> reste brute (input admin peuplé en `.val()`, non interprété HTML). **Pas de commande `vin`** (décision
+> produit : éviter d'exposer le VIN sur les dashboards ; il reste visible en config admin). AC2 (nom par
+> défaut = marque + libellé) était **déjà** satisfait (`setName` MVP06, inchangé). Suite = post-MVP
+> (supervision, robustesse…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
