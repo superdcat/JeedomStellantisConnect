@@ -358,7 +358,21 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > persistantes) ; écritures de commandes **isolées** dans un `try/catch \Throwable` interne de
 > `suivreAlertes()` (throttle succès posé **avant** — corrige au passage le throttle-poisoning préexistant
 > UC42) ; garde reserved-ids explicite (`alerts_count`/`tyre_alert`). **Inversion de dépendance UC42/UC43
-> RÉSOLUE.** Suite = post-MVP (ouvrants détaillés, supervision…).
+> RÉSOLUE.** **Post-MVP : UC44** — **ouvrants détaillés (portes/fenêtres/coffre/capot)** (télémétrie,
+> 100 % lecture/parsing du **même** `/status`, **aucun appel réseau/MQTT neuf**) : mapping
+> `doors_state.opening[n].{identifier,state}` (data-model § 2.4, enum **connu** de 7 valeurs
+> `Driver/Passenger/RearLeft/RearRight/Trunk/RearWindow/RoofWindow`) via le helper **pur**
+> `extraireOuvrants()` (miroir d'`extraireVerrouillage`, intégré en 1 ligne `array_merge` dans
+> `parseStatus()`). ⚠️ **Approche STATIQUE** (≠ UC43 dynamique) car enum petit/connu/signifiant ⇒ 8
+> commandes `door_<id>` **déclarées** dans `definitionsCommandes()` (binary `generic_type OPENING`, **non
+> historisées** = états comme `doors_locked` ; `door_hood`/« Capot » déclaré **par anticipation**, non
+> confirmé côté API) + agrégat **`opening_alert`** (binary `''`, **historisé** = déclencheur de scénario
+> « un ouvrant ouvert », AC2). **Création paresseuse** (jamais dans `createCommands`). Garde-fous :
+> constante `OPENING_IDENTIFIERS` (map identifiant→logicalId, **invariant** : toute valeur DOIT être
+> déclarée dans `definitionsCommandes` sinon `ensureCommand` casse le refresh) ⇒ **jamais de logicalId
+> dynamique émis** (étanche au throw) ; un identifiant inconnu est **compté dans l'agrégat** + loggué
+> `debug` (aseptisé), jamais perdu ni émis ; **fail-closed** sur `state` (seul « Open » ⇒ ouvert) ; gardes
+> défensives `isset/is_array/is_scalar` (`parseStatus` reste pur). Suite = post-MVP (supervision, robustesse…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.

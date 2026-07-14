@@ -642,8 +642,47 @@ class stellantis extends eqLogic {
       // figé) — cf. synchroniserCommandesAlertes(). Création PARESSEUSE (jamais dans createCommands),
       // HISTORISÉE : déclencheur de scénario natif « le véhicule a une alerte » (#alerts_count# > 0).
       'alerts_count' => array(__('Nombre d\'alertes actives', __FILE__), 'numeric', '', '', true),
+      // UC44 : ouvrants détaillés (portes/fenêtres/coffre/capot), dérivés du MÊME /status qu'UC07/UC15
+      // (doors_state.opening, aucun nouvel appel réseau). Enum PETIT et CONNU (≠ UC43 dynamique) ⇒ approche
+      // STATIQUE idiomatique, miroir de 'doors_locked' (extraireVerrouillage). Création PARESSEUSE (jamais
+      // dans createCommands, précédent UC21/23/24/31/33/34/41/42/43) : chaque door_<id> naît au 1er /status
+      // qui expose cet ouvrant précis (mapping dans extraireOuvrants). NON historisées (états, cohérent avec
+      // 'doors_locked') : l'historisation par ouvrant reste activable manuellement par l'utilisateur.
+      // generic_type OPENING (convention core « Ouvrant », polarité 1=ouvert à confirmer en recette).
+      'door_driver'      => array(__('Porte conducteur', __FILE__), 'binary', 'OPENING', '', false),
+      'door_passenger'   => array(__('Porte passager', __FILE__), 'binary', 'OPENING', '', false),
+      'door_rear_left'   => array(__('Porte arrière gauche', __FILE__), 'binary', 'OPENING', '', false),
+      'door_rear_right'  => array(__('Porte arrière droite', __FILE__), 'binary', 'OPENING', '', false),
+      'door_trunk'       => array(__('Coffre', __FILE__), 'binary', 'OPENING', '', false),
+      'door_rear_window' => array(__('Fenêtre arrière', __FILE__), 'binary', 'OPENING', '', false),
+      'door_roof_window' => array(__('Toit ouvrant', __FILE__), 'binary', 'OPENING', '', false),
+      // 'hood' NON confirmé côté /status consommateur (cf. 44-tech.md § contrat) : déclaré par anticipation,
+      // coût nul si l'identifiant API n'apparaît jamais (création paresseuse ⇒ aucune commande créée).
+      'door_hood'        => array(__('Capot', __FILE__), 'binary', 'OPENING', '', false),
+      // Agrégat (OR de TOUS les ouvrants, connus+inconnus) : generic_type='' (précédent tyre_alert/
+      // alerts_count — un agrégat n'est pas un ouvrant précis), HISTORISÉ = déclencheur de scénario natif
+      // (précédent service_due/at_home/tyre_alert/alerts_count).
+      'opening_alert' => array(__('Ouvrant ouvert', __FILE__), 'binary', '', '', true),
     );
   }
+
+  // UC44 : map identifiant API doors_state.opening[].identifier (EN MINUSCULES, comparaison insensible à la
+  // casse) => logicalId. ⚠️ INVARIANT (pas d'infra de test unitaire dans le projet — validation CI Jeedom) :
+  // TOUTE valeur DOIT être un logicalId déclaré dans definitionsCommandes() ci-dessus, sinon ensureCommand()
+  // lèverait et casserait tout le refresh du véhicule concerné. Un identifiant absent de cette map est
+  // ignoré comme logicalId (compté seulement dans l'agrégat opening_alert + loggué debug) — cf.
+  // extraireOuvrants(). 'hood'/'bonnet' : spéculatif, capot NON confirmé côté /status (cf. 44-tech.md).
+  const OPENING_IDENTIFIERS = array(
+    'driver'     => 'door_driver',
+    'passenger'  => 'door_passenger',
+    'rearleft'   => 'door_rear_left',
+    'rearright'  => 'door_rear_right',
+    'trunk'      => 'door_trunk',
+    'rearwindow' => 'door_rear_window',
+    'roofwindow' => 'door_roof_window',
+    'hood'       => 'door_hood',   // spéculatif (capot NON confirmé côté /status) — cf. 44-tech.md § contrat
+    'bonnet'     => 'door_hood',   // idem, alias anticipé
+  );
 
   /**
    * Crée (idempotent) les commandes info de CE véhicule selon sa motorisation (config `energy`).
@@ -1014,6 +1053,9 @@ class stellantis extends eqLogic {
     if ($verrouillage !== null) {
       $valeurs['doors_locked'] = $verrouillage;
     }
+    // UC44 : ouvrants détaillés (portes/fenêtres/coffre/capot) + agrégat opening_alert — même objet
+    // doors_state que le verrouillage ci-dessus, sous-clé 'opening' (cf. extraireOuvrants).
+    $valeurs = array_merge($valeurs, self::extraireOuvrants($_status));
     // Préconditionnement (UC15) : orthographe API réelle « preconditionning » (double n, data-model piège 3).
     if (isset($_status['preconditionning']['airConditioning']['status']) && is_scalar($_status['preconditionning']['airConditioning']['status'])) {
       $statutPrecond = preg_replace('/[^A-Za-z]/', '', (string) $_status['preconditionning']['airConditioning']['status']);
@@ -1092,6 +1134,43 @@ class stellantis extends eqLogic {
       return 1;
     }
     return null;
+  }
+
+  /**
+   * UC44 : mapping PUR et défensif de doors_state.opening[] (liste d'ouvrants {identifier, state}) vers
+   * logicalId => 0/1, + agrégat 'opening_alert'. Miroir de extraireVerrouillage() ci-dessus (même style,
+   * même contrat pur/défensif). Shape absente/non-tableau => array() (aucune commande créée, « si
+   * présentes »). Fail-closed sur `state` : SEUL « Open » explicite (insensible casse/espaces) => ouvert ;
+   * tout le reste (Closed, valeur inconnue type « Ajar »…) => 0, jamais de fausse alerte. N'émet QUE des
+   * logicalId STATIQUES déclarés dans definitionsCommandes() via OPENING_IDENTIFIERS (jamais dynamique) :
+   * un identifiant absent de la map est ignoré comme logicalId (compté dans l'agrégat + loggué debug),
+   * étanchéité au throw d'ensureCommand(). 'opening_alert' émis (0 ou 1) dès que doors_state.opening est
+   * un tableau exploitable, même vide (0 tous fermés => AC2).
+   */
+  private static function extraireOuvrants(array $_status): array {
+    if (!isset($_status['doors_state']['opening']) || !is_array($_status['doors_state']['opening'])) {
+      return array(); // ouvrants non exposés par ce modèle => aucune commande (« si présentes »)
+    }
+    $valeurs = array();
+    $auMoinsUnOuvert = false;
+    foreach ($_status['doors_state']['opening'] as $ouvrant) {
+      if (!is_array($ouvrant) || !isset($ouvrant['identifier'], $ouvrant['state'])
+          || !is_scalar($ouvrant['identifier']) || !is_scalar($ouvrant['state'])) {
+        continue; // entrée malformée : ignorée (défensif, jamais de warning PHP)
+      }
+      $ouvert = (strcasecmp(trim((string) $ouvrant['state']), 'Open') == 0);
+      if ($ouvert) {
+        $auMoinsUnOuvert = true; // agrégat sur TOUS les ouvrants (connus + inconnus)
+      }
+      $cle = strtolower(trim((string) $ouvrant['identifier']));
+      if (isset(self::OPENING_IDENTIFIERS[$cle])) {
+        $valeurs[self::OPENING_IDENTIFIERS[$cle]] = $ouvert ? 1 : 0; // logicalId STATIQUE déclaré
+      } else {
+        log::add('stellantis', 'debug', 'Ouvrant non catalogué (identifier ' . self::aseptiser((string) $ouvrant['identifier'], 40) . ') — compté dans opening_alert');
+      }
+    }
+    $valeurs['opening_alert'] = $auMoinsUnOuvert ? 1 : 0;
+    return $valeurs;
   }
 
   /**

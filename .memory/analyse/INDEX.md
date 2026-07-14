@@ -11,7 +11,14 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-14 (UC43 : `stellantis-data-model.md` § 3 — **alertes véhicule
+> **Dernière synchro** : 2026-07-14 (UC44 : `stellantis-data-model.md` § 2.4 — **ouvrants détaillés** :
+> `doors_state.opening[n].{identifier,state}` (enum connu 7 valeurs) → 8 commandes `door_<id>` (binary
+> `OPENING`, non historisées) + agrégat `opening_alert` (historisé). **Approche STATIQUE** (≠ UC43
+> dynamique) car enum petit/connu/labellisé ; helper pur `extraireOuvrants` (miroir `extraireVerrouillage`,
+> 1 ligne dans `parseStatus`, aucun appel réseau neuf) ; invariant map `OPENING_IDENTIFIERS`↔
+> `definitionsCommandes` (jamais de logicalId dynamique, étanche au throw `ensureCommand`) ; fail-closed sur
+> `state` ; « capot » NON dans l'enum (déclaré par anticipation) — cf. `44-tech.md`).
+> Précédemment 2026-07-14 (UC43 : `stellantis-data-model.md` § 3 — **alertes véhicule
 > (catalogue générique)** : UC43 **étend** le poller `/alerts` d'UC42 (jamais dupliqué) — **1 binaire par
 > type rencontré** en **création DYNAMIQUE hors table statique** `definitionsCommandes()` (`alert_<slug>`,
 > nom = libellé brut sécurisé donnée runtime jamais `__()` ; remise à 0 par énumération

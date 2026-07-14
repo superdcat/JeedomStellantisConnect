@@ -171,6 +171,18 @@ Biologic}` — `energy` absent sur Electric).
 - `doors_state.opening[n].identifier` (`Driver`/`Passenger`/`RearLeft`/`RearRight`/`Trunk`/`RearWindow`/`RoofWindow`)
   + `.state` (`Open`/`Closed`) → `door_<id>` (`OPENING`) (UC44).
 
+> ✅ **UC44 livré (2026-07-14)** : mapping des ouvrants via helper **pur** `extraireOuvrants()` (miroir
+> d'`extraireVerrouillage`, 1 ligne `array_merge` dans `parseStatus`). **Approche STATIQUE** (≠ UC43
+> dynamique) — enum **connu** ⇒ 8 commandes `door_<id>` **déclarées** (binary `OPENING`, **non
+> historisées** = états) + agrégat **`opening_alert`** (binary, **historisé**, OR des ouverts →
+> scénario). Constante `OPENING_IDENTIFIERS` (invariant : toute valeur déclarée dans
+> `definitionsCommandes`) ⇒ jamais de logicalId dynamique (étanche au throw `ensureCommand`) ; identifiant
+> inconnu compté dans l'agrégat + log `debug`. **Fail-closed** sur `state` (seul « Open » ⇒ ouvert).
+> ⚠️ **« Capot » PAS dans l'enum confirmé** (7 valeurs) : `door_hood` déclaré par anticipation
+> (`hood`/`bonnet`, spéculatif, coût nul si absent), à confirmer en recette ; shape « champs nommés »
+> (alternative évoquée) NON traitée (seule la shape tableau confirmée l'est). Détail :
+> `.memory/specs/post-mvp/40-entretien-alertes/44-tech.md`.
+
 > ⚠️ **Commande MQTT verrouillage (vérifié UC16, 2026-07-09, `psa_car_controller/psa/RemoteClient.py`
 > `lock_door`)** : service `/Doors` (topic `psa/RemoteServices/from/cid/{CID}/Doors`, même enveloppe
 > `MQTTRequest` que wakeup/charge/précond). Payload `req_parameters` = `{"action": "lock"|"unlock"}`

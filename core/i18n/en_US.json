@@ -236,7 +236,16 @@
         "Jours avant révision": "Days to service",
         "Révision proche": "Service due soon",
         "Alerte pression pneus": "Tyre pressure alert",
-        "Nombre d'alertes actives": "Number of active alerts"
+        "Nombre d'alertes actives": "Number of active alerts",
+        "Porte conducteur": "Driver door",
+        "Porte passager": "Passenger door",
+        "Porte arrière gauche": "Rear left door",
+        "Porte arrière droite": "Rear right door",
+        "Coffre": "Trunk",
+        "Fenêtre arrière": "Rear window",
+        "Toit ouvrant": "Sunroof",
+        "Capot": "Hood",
+        "Ouvrant ouvert": "Door open"
     },
     "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
         "Carte de position": "Position map",
