@@ -11,7 +11,15 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-15 (UC53 : `stellantis-api-architecture.md` § 4.4-4.5 — **cadrage
+> **Dernière synchro** : 2026-07-15 (UC54 : `stellantis-api-architecture.md` § 4.5 — **multi-comptes
+> IMPLÉMENTÉ (slice LECTURE SEULE)** : slots fixes `MAX_ACCOUNTS=3`, slot 1 = config actuelle non suffixée
+> (zéro migration), threading `$slot` dans `getApiConfig`/`callWithToken`/token, **cloisonnement par slot
+> des 6 clés cache niveau-compte** (token/oauth_pending/refresh_quota/ratelimit/link_error/degraded_warn
+> via `cacheKeyForSlot`), `cron`/`syncVehicles` par slot (désactivation filtrée par slot). ⚠️ Contrainte
+> **`preConfig_<clé>` = nom de méthode FIXE** → impose les slots fixes (pas de table dynamique) — cf.
+> mémoire `jeedom-encrypt-config-key`. Pilotage à distance slots ≥2 **hors périmètre** (démon MQTT
+> mono-connexion → commandes = slot 1, garde runtime `execute()`). Cf. `54-tech.md`.
+> Précédemment 2026-07-15 (UC53 : `stellantis-api-architecture.md` § 4.4-4.5 — **cadrage
 > multi-comptes / multi-marques** : 1 plugin Jeedom = 1 config + 1 token global + 1 OTP → **1 compte/1
 > marque** aujourd'hui (la table `BRANDS` rend la marque *sélectionnable*, **pas simultanée** — corrige la
 > sur-affirmation « seul impact table TLD/realm »). Décision pour **UC54** : namespacer par **identifiant

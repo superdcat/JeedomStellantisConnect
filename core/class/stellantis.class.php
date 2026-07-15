@@ -31,7 +31,15 @@ class stellantis extends eqLogic {
   // UC34 : home_lat/home_lon chiffrés au repos (données de localisation sensibles — domicile) ; home_radius
   // délibérément EXCLU (pas une donnée de localisation). Transparent pour suivreGeofencing()/le formulaire
   // (lu/écrit via config::byKey/save comme n'importe quelle autre clé). Clés neuves ⇒ aucune migration.
-  public static $_encryptConfigKey = array('client_secret', 'home_lat', 'home_lon');
+  // UC54 : client_secret_2/_3 (comptes secondaires, mêmes clés suffixées que client_id_2/_3 — cf.
+  // configKeyForSlot()) chiffrés au repos comme client_secret (slot 1).
+  public static $_encryptConfigKey = array('client_secret', 'client_secret_2', 'client_secret_3', 'home_lat', 'home_lon');
+
+  // UC54 — Multi-comptes : nombre de « slots » de compte fixes (1 = compte principal, PILOTAGE À
+  // DISTANCE inclus ; 2..N = comptes secondaires, LECTURE SEULE). Couvre Peugeot + Citroën + 1 marge.
+  // Le slot 1 reste la config globale ACTUELLE (clés NON suffixées) : zéro migration pour les installs
+  // mono-compte existantes (cf. configKeyForSlot()).
+  const MAX_ACCOUNTS = 3;
 
   // Table des marques : TLD du serveur d'authentification idpcvs.{tld}, realm B2C et redirect_uri
   // par défaut ({pays} substitué par le code pays configuré). Possédée par cette classe, consommée
@@ -104,32 +112,74 @@ class stellantis extends eqLogic {
   /*     * ***********************Methode static*************************** */
 
   /**
-   * Retourne la configuration API prête à l'emploi (défauts propres, jamais d'exception).
-   * @param string|null $_brand marque explicite ; null = marque configurée (mono-marque MVP,
-   *                            paramètre prévu pour le multi-marques post-MVP)
+   * UC54 : nom de la clé de config pour le slot $_slot (1 = clé NON suffixée = config globale ACTUELLE,
+   * zéro migration ; 2..N = clé suffixée _N). Unique endroit du nommage des clés de config par slot —
+   * toute nouvelle clé de config PAR COMPTE doit passer par ce helper (jamais de suffixage ad hoc).
    */
-  public static function getApiConfig(?string $_brand = null): array {
-    $brand = ($_brand === null) ? config::byKey('brand', 'stellantis') : $_brand;
+  public static function configKeyForSlot(string $_base, int $_slot): string {
+    return ($_slot <= 1) ? $_base : $_base . '_' . $_slot;
+  }
+
+  /**
+   * UC54 : liste des slots (1..MAX_ACCOUNTS) effectivement configurés (client_id ET client_secret du
+   * slot non vides). Consommée par cron()/syncVehicles()/health() — jamais d'appel réseau.
+   * @return int[]
+   */
+  public static function slotsConfigures(): array {
+    $slots = array();
+    for ($slot = 1; $slot <= self::MAX_ACCOUNTS; $slot++) {
+      if (self::isConfigured($slot)) {
+        $slots[] = $slot;
+      }
+    }
+    return $slots;
+  }
+
+  /**
+   * UC54 : résout le compte (slot) DE $_eq, défensif (valeur de config absente/corrompue/hors bornes →
+   * compte principal). PUBLIQUE (et non privée) : appelée aussi bien en interne (createCommands,
+   * refreshTelemetry, cron — via $this ou l'eqLogic en cours de boucle) que depuis stellantisCmd::execute()
+   * (autre classe du même fichier, cf. garde-fou runtime UC54). Unique endroit de cette résolution —
+   * cohérent avec configKeyForSlot()/stellantisApi::cacheKeyForSlot() (une seule source de vérité par
+   * catégorie de dérivation de slot).
+   */
+  public static function accountSlotDe(eqLogic $_eq): int {
+    $slot = (int) $_eq->getConfiguration('accountSlot', 1);
+    if ($slot < 1 || $slot > self::MAX_ACCOUNTS) {
+      return 1;
+    }
+    return $slot;
+  }
+
+  /**
+   * Retourne la configuration API prête à l'emploi (défauts propres, jamais d'exception).
+   * UC54 : $_slot sélectionne le COMPTE (1 = principal/pilotage à distance, clés non suffixées ;
+   * 2..MAX_ACCOUNTS = comptes secondaires lecture seule, clés suffixées _N — cf. configKeyForSlot()).
+   * @param int $_slot 1..MAX_ACCOUNTS, défaut 1 (préserve tous les appels existants)
+   */
+  public static function getApiConfig(int $_slot = 1): array {
+    $brand = config::byKey(self::configKeyForSlot('brand', $_slot), 'stellantis');
     $brand = strtolower(trim((string) $brand));
     if ($brand == '') {
       $brand = 'peugeot';
     } elseif (!isset(self::BRANDS[$brand])) {
-      log::add('stellantis', 'warning', 'Marque configurée inconnue « ' . $brand . ' », repli sur peugeot');
+      log::add('stellantis', 'warning', 'Marque configurée inconnue « ' . $brand . ' » (compte ' . $_slot . '), repli sur peugeot');
       $brand = 'peugeot';
     }
     $brandConfig = self::BRANDS[$brand];
-    $country = strtolower(trim((string) config::byKey('country', 'stellantis', 'fr')));
+    $country = strtolower(trim((string) config::byKey(self::configKeyForSlot('country', $_slot), 'stellantis', 'fr')));
     if ($country == '') {
       $country = 'fr';
     }
-    $redirectUri = trim((string) config::byKey('redirect_uri', 'stellantis'));
+    $redirectUri = trim((string) config::byKey(self::configKeyForSlot('redirect_uri', $_slot), 'stellantis'));
     if ($redirectUri == '') {
       $redirectUri = str_replace('{pays}', $country, $brandConfig['redirectUri']);
     }
     return array(
+      'slot' => $_slot,
       'brand' => $brand,
-      'clientId' => trim((string) config::byKey('client_id', 'stellantis')),
-      'clientSecret' => trim((string) config::byKey('client_secret', 'stellantis')),
+      'clientId' => trim((string) config::byKey(self::configKeyForSlot('client_id', $_slot), 'stellantis')),
+      'clientSecret' => trim((string) config::byKey(self::configKeyForSlot('client_secret', $_slot), 'stellantis')),
       'country' => $country,
       'realm' => $brandConfig['realm'],
       'authBaseUrl' => 'https://idpcvs.' . $brandConfig['tld'] . '/am/oauth2',
@@ -139,11 +189,13 @@ class stellantis extends eqLogic {
   }
 
   /**
-   * Vrai si les identifiants minimaux (client_id + client_secret) sont renseignés.
+   * Vrai si les identifiants minimaux (client_id + client_secret) sont renseignés POUR CE COMPTE.
+   * @param int $_slot 1..MAX_ACCOUNTS, défaut 1 (préserve tous les appels existants — la garde globale
+   *                   isConfigured() du garde-fou AJAX reste ainsi implicitement « slot 1 »).
    */
-  public static function isConfigured(): bool {
-    return trim((string) config::byKey('client_id', 'stellantis')) != ''
-      && trim((string) config::byKey('client_secret', 'stellantis')) != '';
+  public static function isConfigured(int $_slot = 1): bool {
+    return trim((string) config::byKey(self::configKeyForSlot('client_id', $_slot), 'stellantis')) != ''
+      && trim((string) config::byKey(self::configKeyForSlot('client_secret', $_slot), 'stellantis')) != '';
   }
 
   // Purge des tokens SEULEMENT si la valeur change réellement : le formulaire de config soumet tous
@@ -153,6 +205,7 @@ class stellantis extends eqLogic {
     if ((string) $_value !== (string) config::byKey('client_id', 'stellantis')) {
       stellantisApi::purgeTokenCache();
       // UC12 : le device OTP + remote token sont liés au compte/credentials → devenus incohérents.
+      // OTP/remote token = SLOT 1 UNIQUEMENT (pilotage à distance) : jamais purgés par les hooks _2/_3.
       self::purgeOtp();
     }
     return $_value;
@@ -162,6 +215,36 @@ class stellantis extends eqLogic {
     if ((string) $_value !== (string) config::byKey('brand', 'stellantis')) {
       stellantisApi::purgeTokenCache();
       self::purgeOtp();
+    }
+    return $_value;
+  }
+
+  // UC54 : comptes secondaires (lecture seule) — purge UNIQUEMENT le token OAuth2 DU SLOT concerné.
+  // Jamais purgeOtp() ici : l'OTP/remote token/démon sont attachés au compte PRINCIPAL (slot 1) exclusivement.
+  public static function preConfig_client_id_2($_value) {
+    if ((string) $_value !== (string) config::byKey('client_id_2', 'stellantis')) {
+      stellantisApi::purgeTokenCache(2);
+    }
+    return $_value;
+  }
+
+  public static function preConfig_client_id_3($_value) {
+    if ((string) $_value !== (string) config::byKey('client_id_3', 'stellantis')) {
+      stellantisApi::purgeTokenCache(3);
+    }
+    return $_value;
+  }
+
+  public static function preConfig_brand_2($_value) {
+    if ((string) $_value !== (string) config::byKey('brand_2', 'stellantis')) {
+      stellantisApi::purgeTokenCache(2);
+    }
+    return $_value;
+  }
+
+  public static function preConfig_brand_3($_value) {
+    if ((string) $_value !== (string) config::byKey('brand_3', 'stellantis')) {
+      stellantisApi::purgeTokenCache(3);
     }
     return $_value;
   }
@@ -182,19 +265,22 @@ class stellantis extends eqLogic {
    * Découplé des credentials sauvegardés : marque, pays ET url d'APK viennent du formulaire (repli sur
    * la config si vides), l'admin n'a donc pas besoin de sauvegarder avant. Sur échec, le message
    * renvoie explicitement vers la procédure manuelle (jamais de crash ni d'état partiel).
-   * @param string|null $_brand   marque du formulaire (vide/null → config sauvegardée puis peugeot)
-   * @param string|null $_country code pays 2 lettres (vide/null → config sauvegardée puis fr)
+   * @param string|null $_brand   marque du formulaire (vide/null → config du COMPTE $_slot puis peugeot)
+   * @param string|null $_country code pays 2 lettres (vide/null → config du COMPTE $_slot puis fr)
    * @param string|null $_apkUrl  override d'URL du formulaire (vide/null → config puis défaut marque)
+   * @param int         $_slot    UC54 : compte ciblé par le repli de $_brand/$_country (1..MAX_ACCOUNTS,
+   *                              défaut 1) — n'affecte QUE le repli, jamais sauvegardé.
    */
-  public static function extractCredentialsFromApk(?string $_brand = null, ?string $_country = null, ?string $_apkUrl = null): array {
+  public static function extractCredentialsFromApk(?string $_brand = null, ?string $_country = null, ?string $_apkUrl = null, int $_slot = 1): array {
     // Balayage des orphelins d'une exécution précédente tuée par SIGKILL (OOM, timeout proxy) : le
     // finally ci-dessous ne s'exécute pas dans ce cas → auto-guérison ici (fichiers > 1 h).
     self::purgerApkOrphelins();
     // 1. Résolution/validation de la marque (jamais d'index indéfini) et du pays. Une chaîne vide
-    // (cas réel : le formulaire poste toujours une chaîne, jamais null) retombe sur la config puis défaut.
+    // (cas réel : le formulaire poste toujours une chaîne, jamais null) retombe sur la config du
+    // COMPTE CIBLÉ ($_slot) puis défaut (UC54 : slot 1 par défaut préserve l'appel mono-compte).
     $brand = strtolower(trim((string) $_brand));
     if ($brand == '') {
-      $brand = strtolower(trim((string) config::byKey('brand', 'stellantis')));
+      $brand = strtolower(trim((string) config::byKey(self::configKeyForSlot('brand', $_slot), 'stellantis')));
     }
     if ($brand == '') {
       $brand = 'peugeot';
@@ -204,7 +290,7 @@ class stellantis extends eqLogic {
     }
     $country = strtolower(trim((string) $_country));
     if ($country == '') {
-      $country = strtolower(trim((string) config::byKey('country', 'stellantis', 'fr')));
+      $country = strtolower(trim((string) config::byKey(self::configKeyForSlot('country', $_slot), 'stellantis', 'fr')));
     }
     if ($country == '') {
       $country = 'fr';
@@ -346,9 +432,10 @@ class stellantis extends eqLogic {
    * Test de connexion bout-en-bout (credentials + token + API) via un appel léger.
    * Retourne TOUJOURS ['ok' => bool, 'count' => int, 'message' => string] — consommable
    * aussi bien par l'AJAX que par un appelant interne (cron).
+   * UC54 : $_slot cible le compte testé (1..MAX_ACCOUNTS, défaut 1 — préserve l'appel mono-compte).
    */
-  public static function testConnection(): array {
-    if (!self::isConfigured()) {
+  public static function testConnection(int $_slot = 1): array {
+    if (!self::isConfigured($_slot)) {
       return array(
         'ok' => false,
         'count' => 0,
@@ -365,7 +452,7 @@ class stellantis extends eqLogic {
     }
     cache::set('stellantis::test_cooldown', '1', 15);
     try {
-      $reponse = stellantisApi::callWithToken('GET', '/user/vehicles');
+      $reponse = stellantisApi::callWithToken('GET', '/user/vehicles', array(), $_slot);
     } catch (stellantisException $e) {
       // 404 « No vehicle found » : compte valide sans véhicule, pas une erreur de connexion
       if ($e->getApiType() == 'no_vehicle') {
@@ -382,19 +469,20 @@ class stellantis extends eqLogic {
   }
 
   /**
-   * Récupère et normalise la liste des véhicules du compte.
+   * Récupère et normalise la liste des véhicules du compte $_slot.
    * Retourne une liste de ['id','vin','brand','label','energy'] — energy en vocabulaire projet
    * normalisé (Electric|Thermal|Hybrid|''), cf. analyse data-model § 1. Compte vide → [].
    * Laisse remonter stellantisException (les appelants mappent les erreurs).
+   * UC54 : $_slot (1..MAX_ACCOUNTS, défaut 1) — préserve l'appel mono-compte existant.
    * @throws stellantisException
    */
-  public static function discoverVehicles(): array {
+  public static function discoverVehicles(int $_slot = 1): array {
     try {
-      $reponse = stellantisApi::callWithToken('GET', '/user/vehicles');
+      $reponse = stellantisApi::callWithToken('GET', '/user/vehicles', array(), $_slot);
     } catch (stellantisException $e) {
       // 404 « No vehicle found » : compte valide sans véhicule, pas une erreur
       if ($e->getApiType() == 'no_vehicle') {
-        log::add('stellantis', 'info', 'Découverte : 0 véhicule sur le compte');
+        log::add('stellantis', 'info', 'Découverte : 0 véhicule sur le compte ' . $_slot);
         return array();
       }
       throw $e;
@@ -435,7 +523,7 @@ class stellantis extends eqLogic {
       log::add('stellantis', 'warning', 'Réponse /user/vehicles paginée détectée : seuls les '
         . count($vehicules) . ' premiers véhicules sont pris en compte (pagination non gérée, à signaler)');
     }
-    log::add('stellantis', 'info', 'Découverte : ' . count($vehicules) . ' véhicule(s) sur le compte');
+    log::add('stellantis', 'info', 'Découverte : ' . count($vehicules) . ' véhicule(s) sur le compte ' . $_slot);
     return $vehicules;
   }
 
@@ -475,100 +563,153 @@ class stellantis extends eqLogic {
   }
 
   /**
-   * Synchronise les véhicules du compte avec les équipements Jeedom (idempotent, clé logicalId = VIN).
-   * Crée les équipements manquants, met à jour les champs techniques des existants SANS écraser la
-   * personnalisation utilisateur (nom, objet parent, activation), désactive ceux disparus du compte.
-   * Retourne TOUJOURS ['ok','created','updated','disabled','reactivables','message'] — stellantisException
-   * mappée en interne (pas de levée), comme testConnection(). Appelée par l'action AJAX 'sync'.
+   * Synchronise les véhicules de TOUS les comptes configurés avec les équipements Jeedom (idempotent,
+   * clé logicalId = VIN). Crée les équipements manquants, met à jour les champs techniques des existants
+   * SANS écraser la personnalisation utilisateur (nom, objet parent, activation), désactive ceux disparus
+   * du compte. Retourne TOUJOURS ['ok','created','updated','disabled','reactivables','message'] —
+   * stellantisException mappée en interne (pas de levée), comme testConnection(). Appelée par l'action
+   * AJAX 'sync' (bouton unique, pas de paramètre — boucle en interne sur slotsConfigures()).
+   * UC54 : chaque compte est synchronisé indépendamment. Un échec de découverte sur un compte ne bloque
+   * pas les autres, et surtout NE DÉSACTIVE JAMAIS les véhicules des comptes en échec ou non parcourus
+   * (corrige le bug de la version mono-compte qui désactivait TOUS les véhicules absents de LA découverte,
+   * quel que soit leur compte).
    */
   public static function syncVehicles(): array {
-    // Cooldown serveur (guardrail anti-ban) : chaque synchro = 1 vrai appel API ; l'anti double-clic JS
-    // est contournable par rejeu POST — même protection que testConnection()
+    // Cooldown serveur (guardrail anti-ban) : chaque synchro = 1 vrai appel API PAR COMPTE ; l'anti
+    // double-clic JS est contournable par rejeu POST — même protection que testConnection(). Cooldown
+    // GLOBAL (1 seul bouton pour tous les comptes) — décision assumée, cf. 54-tech.md.
     if (cache::byKey('stellantis::sync_cooldown')->getValue('') != '') {
       return array('ok' => false, 'created' => 0, 'updated' => 0, 'disabled' => 0, 'reactivables' => 0,
         'message' => __('Une synchronisation vient d\'être effectuée : patientez quelques secondes avant de réessayer', __FILE__));
     }
     cache::set('stellantis::sync_cooldown', '1', 15);
-    try {
-      $vehicules = self::discoverVehicles();
-    } catch (stellantisException $e) {
+
+    $slots = self::slotsConfigures();
+    if (count($slots) == 0) {
       return array('ok' => false, 'created' => 0, 'updated' => 0, 'disabled' => 0, 'reactivables' => 0,
-        'message' => self::messageDepuisException($e));
+        'message' => __('Plugin non configuré : renseignez la marque, le Client ID et le Client Secret puis sauvegardez', __FILE__));
     }
+
     $crees = 0;
     $majs = 0;
-    $reactivables = 0;
-    $vinsDecouverts = array();
-    foreach ($vehicules as $v) {
-      // Robustesse (convention cron) : un véhicule en erreur n'interrompt pas la synchro
-      try {
-        $vinsDecouverts[] = $v['vin'];
-        // byLogicalId retrouve aussi les équipements désactivés (pas de filtre onlyEnable) → pas de doublon
-        $eqLogic = eqLogic::byLogicalId($v['vin'], 'stellantis');
-        $creation = !is_object($eqLogic);
-        if ($creation) {
-          $eqLogic = new stellantis();
-          $eqLogic->setLogicalId($v['vin']);
-          $eqLogic->setEqType_name('stellantis');
-          $eqLogic->setIsEnable(1);
-          $eqLogic->setIsVisible(1);
-          $nom = trim($v['brand'] . ' ' . $v['label']);
-          $eqLogic->setName($nom != '' ? $nom : $v['vin']);
-        } elseif (!$eqLogic->getIsEnable()) {
-          // Véhicule de nouveau présent mais équipement désactivé : on NE réactive PAS automatiquement
-          // (impossible de distinguer désactivation auto vs manuelle) — on signale juste la possibilité
-          $reactivables++;
-        }
-        // Champs techniques : jamais name/object_id/isEnable sur un équipement existant (perso préservée)
-        $eqLogic->setConfiguration('apiId', $v['id']); // requis pour les appels REST (UC07+), réécrit → self-heal
-        $eqLogic->setConfiguration('vin', $v['vin']);
-        $eqLogic->setConfiguration('brand', $v['brand']);
-        // UC51 : libellé du véhicule (découverte = autorité, réécrit à chaque sync, comme 'brand' — jamais
-        // conditionné, contrairement à 'energy' qui est raffinée par le /status).
-        $eqLogic->setConfiguration('label', $v['label']);
-        // energy : écrit seulement si absent — ne jamais écraser une valeur raffinée par le /status (UC07)
-        if (trim((string) $eqLogic->getConfiguration('energy', '')) == '' && $v['energy'] != '') {
-          $eqLogic->setConfiguration('energy', $v['energy']);
-        }
-        // UC32 : backfill du défaut « visible dans le panneau carte » (création ET équipements existants
-        // qui n'ont jamais reçu cette clé) — posé AVANT l'unique save() ci-dessous (pas de second write).
-        self::assurerVisiblePanelParDefaut($eqLogic);
-        $eqLogic->save();
-        if ($creation) {
-          $crees++;
-        } else {
-          $majs++;
-        }
-        // UC52 : image d'équipement (photo modèle best-effort → sinon icône de marque). Best-effort, ne
-        // lève jamais (try/catch interne) : un échec image ne doit pas perturber la synchro (précédent
-        // suivreMaintenance). Appelée au sync uniquement (pas au cron — pas de fetch d'image périodique).
-        self::assurerImageVehicule($eqLogic, $v['brand'], $v['pictures']);
-        // UC07 : créer les commandes info (selon motorisation) puis les peupler via le /status
-        // (best-effort). Après save() (id disponible) et hors postSave → pas de récursion. La boucle
-        // périodique de rafraîchissement est en UC08 ; ici c'est une passe unique au clic Synchroniser.
-        $eqLogic->createCommands();
-        $eqLogic->refreshTelemetry();
-      } catch (Exception $e) {
-        // Jamais de VIN en clair dans les logs (convention CLAUDE.md). Englobe erreur de save ET erreur
-        // API du refreshTelemetry : message générique (l'équipement peut avoir été créé malgré tout).
-        log::add('stellantis', 'warning', 'Synchronisation : erreur sur un véhicule : ' . $e->getMessage());
-      }
-    }
-    // Véhicules disparus du compte → désactiver plutôt que supprimer (cf. UC76)
     $desactives = 0;
-    foreach (eqLogic::byType('stellantis') as $eqExistant) {
-      if (!in_array($eqExistant->getLogicalId(), $vinsDecouverts, true) && $eqExistant->getIsEnable()) {
-        $eqExistant->setIsEnable(0);
-        $eqExistant->save();
-        $desactives++;
+    $reactivables = 0;
+    $erreursSlots = array();
+
+    foreach ($slots as $slot) {
+      $vinsDecouverts = array();
+      try {
+        $vehicules = self::discoverVehicles($slot);
+      } catch (stellantisException $e) {
+        log::add('stellantis', 'warning', 'Synchronisation (compte ' . $slot . ') : découverte échouée : ' . $e->getMessage());
+        $erreursSlots[] = sprintf(__('compte %1$d : %2$s', __FILE__), $slot, self::messageDepuisException($e));
+        // 🔴 Aucune désactivation pour ce slot : un échec réseau/auth d'un compte ne doit jamais faire
+        // disparaître les véhicules d'un AUTRE compte, ni les siens propres (cf. 54-tech.md § sync par compte).
+        continue;
+      }
+      foreach ($vehicules as $v) {
+        // Robustesse (convention cron) : un véhicule en erreur n'interrompt pas la synchro
+        try {
+          $vinsDecouverts[] = $v['vin'];
+          // byLogicalId retrouve aussi les équipements désactivés (pas de filtre onlyEnable) → pas de doublon
+          $eqLogic = eqLogic::byLogicalId($v['vin'], 'stellantis');
+          $creation = !is_object($eqLogic);
+          if ($creation) {
+            $eqLogic = new stellantis();
+            $eqLogic->setLogicalId($v['vin']);
+            $eqLogic->setEqType_name('stellantis');
+            $eqLogic->setIsEnable(1);
+            $eqLogic->setIsVisible(1);
+            $nom = trim($v['brand'] . ' ' . $v['label']);
+            $eqLogic->setName($nom != '' ? $nom : $v['vin']);
+          } else {
+            if (!$eqLogic->getIsEnable()) {
+              // Véhicule de nouveau présent mais équipement désactivé : on NE réactive PAS automatiquement
+              // (impossible de distinguer désactivation auto vs manuelle) — on signale juste la possibilité
+              $reactivables++;
+            }
+            // UC54 : un même VIN redécouvert sur un compte différent de celui déjà enregistré (mauvaise
+            // config / VIN partagé) est journalisé — la découverte du compte COURANT fait autorité (comme 'brand').
+            $slotExistant = (int) $eqLogic->getConfiguration('accountSlot', $slot);
+            if ($slotExistant != $slot) {
+              log::add('stellantis', 'warning', 'Synchronisation : véhicule déjà rattaché au compte ' . $slotExistant
+                . ', redécouvert sur le compte ' . $slot . ' — la découverte de ce compte fait autorité');
+            }
+          }
+          // Champs techniques : jamais name/object_id/isEnable sur un équipement existant (perso préservée)
+          $eqLogic->setConfiguration('apiId', $v['id']); // requis pour les appels REST (UC07+), réécrit → self-heal
+          $eqLogic->setConfiguration('vin', $v['vin']);
+          $eqLogic->setConfiguration('brand', $v['brand']);
+          // UC51 : libellé du véhicule (découverte = autorité, réécrit à chaque sync, comme 'brand' — jamais
+          // conditionné, contrairement à 'energy' qui est raffinée par le /status).
+          $eqLogic->setConfiguration('label', $v['label']);
+          // UC54 : compte de rattachement (découverte = autorité, réécrit à chaque sync, comme 'brand'/'label').
+          // accountSlotLabel = texte lisible pré-calculé (affiché en readonly sur le formulaire eqLogic) :
+          // 3 valeurs FIXES sous notre contrôle (pas une donnée externe) → __() avec chaîne LITTÉRALE légitime.
+          $eqLogic->setConfiguration('accountSlot', $slot);
+          $eqLogic->setConfiguration('accountSlotLabel', ($slot == 1)
+            ? __('Compte principal', __FILE__)
+            : sprintf(__('Compte secondaire %s — lecture seule', __FILE__), $slot));
+          // energy : écrit seulement si absent — ne jamais écraser une valeur raffinée par le /status (UC07)
+          if (trim((string) $eqLogic->getConfiguration('energy', '')) == '' && $v['energy'] != '') {
+            $eqLogic->setConfiguration('energy', $v['energy']);
+          }
+          // UC32 : backfill du défaut « visible dans le panneau carte » (création ET équipements existants
+          // qui n'ont jamais reçu cette clé) — posé AVANT l'unique save() ci-dessous (pas de second write).
+          self::assurerVisiblePanelParDefaut($eqLogic);
+          $eqLogic->save();
+          if ($creation) {
+            $crees++;
+          } else {
+            $majs++;
+          }
+          // UC52 : image d'équipement (photo modèle best-effort → sinon icône de marque). Best-effort, ne
+          // lève jamais (try/catch interne) : un échec image ne doit pas perturber la synchro (précédent
+          // suivreMaintenance). Appelée au sync uniquement (pas au cron — pas de fetch d'image périodique).
+          self::assurerImageVehicule($eqLogic, $v['brand'], $v['pictures']);
+          // UC07 : créer les commandes info (selon motorisation) puis les peupler via le /status
+          // (best-effort). Après save() (id disponible) et hors postSave → pas de récursion. La boucle
+          // périodique de rafraîchissement est en UC08 ; ici c'est une passe unique au clic Synchroniser.
+          // UC54 : createCommands()/refreshTelemetry() routent désormais eux-mêmes par accountSlot.
+          $eqLogic->createCommands();
+          $eqLogic->refreshTelemetry();
+        } catch (Exception $e) {
+          // Jamais de VIN en clair dans les logs (convention CLAUDE.md). Englobe erreur de save ET erreur
+          // API du refreshTelemetry : message générique (l'équipement peut avoir été créé malgré tout).
+          log::add('stellantis', 'warning', 'Synchronisation (compte ' . $slot . ') : erreur sur un véhicule : ' . $e->getMessage());
+        }
+      }
+      // 🔴 Désactivation FILTRÉE PAR COMPTE (corrige le bug historique qui itérait TOUS les véhicules,
+      // toutes marques/comptes confondus) : seuls les véhicules RATTACHÉS À CE COMPTE et absents de SA
+      // découverte sont désactivés. On n'atteint ce point QUE si discoverVehicles($slot) a réussi
+      // ci-dessus (sinon `continue` a déjà sauté au compte suivant) — jamais de désactivation sur un
+      // compte en échec.
+      foreach (eqLogic::byType('stellantis') as $eqExistant) {
+        $slotEq = (int) $eqExistant->getConfiguration('accountSlot', 1);
+        if ($slotEq != $slot) {
+          continue; // pas le compte en cours de traitement : jamais touché ici (traité à son propre tour)
+        }
+        if (!in_array($eqExistant->getLogicalId(), $vinsDecouverts, true) && $eqExistant->getIsEnable()) {
+          $eqExistant->setIsEnable(0);
+          $eqExistant->save();
+          $desactives++;
+        }
       }
     }
-    log::add('stellantis', 'info', 'Synchronisation : ' . $crees . ' créé(s), ' . $majs . ' mis à jour, ' . $desactives . ' désactivé(s)');
+
+    log::add('stellantis', 'info', 'Synchronisation : ' . $crees . ' créé(s), ' . $majs . ' mis à jour, ' . $desactives . ' désactivé(s)'
+      . (count($slots) > 1 ? ' (' . count($slots) . ' compte(s))' : ''));
     $message = sprintf(__('Synchronisation terminée : %1$d créé(s), %2$d mis à jour, %3$d désactivé(s)', __FILE__), $crees, $majs, $desactives);
     if ($reactivables > 0) {
       $message .= ' — ' . sprintf(__('%d véhicule(s) réapparu(s) laissé(s) désactivé(s) : réactivez-les manuellement si besoin', __FILE__), $reactivables);
     }
-    return array('ok' => true, 'created' => $crees, 'updated' => $majs, 'disabled' => $desactives, 'reactivables' => $reactivables, 'message' => $message);
+    if (count($erreursSlots) > 0) {
+      $message .= ' — ' . implode(' ; ', $erreursSlots);
+    }
+    // ok=false SEULEMENT si TOUS les comptes configurés ont échoué (aucune donnée exploitable) — un échec
+    // partiel (ex. compte secondaire hors-ligne) laisse ok=true : la synchro a bien avancé pour le reste.
+    $ok = (count($erreursSlots) < count($slots));
+    return array('ok' => $ok, 'created' => $crees, 'updated' => $majs, 'disabled' => $desactives, 'reactivables' => $reactivables, 'message' => $message);
   }
 
   /* * ******************* UC07 — Commandes info de télémétrie ******************* */
@@ -760,26 +901,33 @@ class stellantis extends eqLogic {
     if (is_object($cmdPosition) && self::assurerTemplatePositionParDefaut($cmdPosition)) {
       $cmdPosition->save();
     }
-    // UC13 : commande action « Réveiller » (première commande MQTT). Universelle (tout véhicule), mais son
-    // exécution vérifie à chaud les pré-requis (OTP activé, CID, démon lancé) — cf. wakeup().
-    $this->ensureActionCommand('wakeup');
-    // UC14 : commandes de charge (start/stop), UNIQUEMENT sur véhicule rechargeable (jamais sur thermique).
-    if ($motorisation == 'Electric' || $motorisation == 'Hybrid') {
-      $this->ensureActionCommand('charge_start');
-      $this->ensureActionCommand('charge_stop');
-      // UC22 : programmation de l'heure de charge différée (HHMM), même périmètre que charge_start/stop.
-      $this->ensureActionCommand('charge_set_time');
+    // UC54 : les commandes ACTION (pilotage à distance) ne sont créées QUE sur le compte PRINCIPAL
+    // (slot 1). Les comptes secondaires (2..MAX_ACCOUNTS) sont LECTURE SEULE par construction — aucune
+    // commande action créée ⇒ rien à exécuter côté stellantisCmd::execute() pour ces véhicules. Un
+    // véhicule qui changerait ensuite de compte (redécouverte, cf. syncVehicles()) reste protégé à
+    // l'exécution par le garde-fou runtime de stellantisCmd::execute() (défense en profondeur).
+    if (self::accountSlotDe($this) == 1) {
+      // UC13 : commande action « Réveiller » (première commande MQTT). Universelle (tout véhicule), mais son
+      // exécution vérifie à chaud les pré-requis (OTP activé, CID, démon lancé) — cf. wakeup().
+      $this->ensureActionCommand('wakeup');
+      // UC14 : commandes de charge (start/stop), UNIQUEMENT sur véhicule rechargeable (jamais sur thermique).
+      if ($motorisation == 'Electric' || $motorisation == 'Hybrid') {
+        $this->ensureActionCommand('charge_start');
+        $this->ensureActionCommand('charge_stop');
+        // UC22 : programmation de l'heure de charge différée (HHMM), même périmètre que charge_start/stop.
+        $this->ensureActionCommand('charge_set_time');
+      }
+      // UC15 : commandes de préconditionnement, UNIVERSELLES (chauffage habitacle pertinent aussi sur thermique).
+      $this->ensureActionCommand('precond_on');
+      $this->ensureActionCommand('precond_off');
+      // UC16 : verrouillage/déverrouillage, UNIVERSELS (les portes existent sur tout véhicule). « unlock »
+      // porte actionConfirm=1 (confirmation core anti-fausse-manip) via definitionsActions.
+      $this->ensureActionCommand('lock');
+      $this->ensureActionCommand('unlock');
+      // UC17 : klaxon / feux (retrouver le véhicule), UNIVERSELS (tout véhicule a klaxon + feux).
+      $this->ensureActionCommand('horn');
+      $this->ensureActionCommand('lights');
     }
-    // UC15 : commandes de préconditionnement, UNIVERSELLES (chauffage habitacle pertinent aussi sur thermique).
-    $this->ensureActionCommand('precond_on');
-    $this->ensureActionCommand('precond_off');
-    // UC16 : verrouillage/déverrouillage, UNIVERSELS (les portes existent sur tout véhicule). « unlock »
-    // porte actionConfirm=1 (confirmation core anti-fausse-manip) via definitionsActions.
-    $this->ensureActionCommand('lock');
-    $this->ensureActionCommand('unlock');
-    // UC17 : klaxon / feux (retrouver le véhicule), UNIVERSELS (tout véhicule a klaxon + feux).
-    $this->ensureActionCommand('horn');
-    $this->ensureActionCommand('lights');
   }
 
   // Table des commandes ACTION (source de vérité, miroir de definitionsCommandes) : logicalId =>
@@ -890,7 +1038,11 @@ class stellantis extends eqLogic {
       log::add('stellantis', 'warning', 'Rafraîchissement ignoré : apiId absent (relancer une synchronisation)');
       return;
     }
-    $status = stellantisApi::callWithToken('GET', '/user/vehicles/' . $apiId . '/status');
+    // UC54 : compte de rattachement DE CE véhicule — route tous les appels REST vers les bons
+    // credentials/realm/token (accountSlotDe() est défensif : valeur de config absente/corrompue/hors
+    // bornes → compte principal).
+    $slot = self::accountSlotDe($this);
+    $status = stellantisApi::callWithToken('GET', '/user/vehicles/' . $apiId . '/status', array(), $slot);
     // Position indisponible si mode privacy actif (cf. data-model § 2.6 / UC75)
     $position = null;
     $privacy = isset($status['privacy']['state']) ? (string) $status['privacy']['state'] : 'None';
@@ -900,7 +1052,7 @@ class stellantis extends eqLogic {
     cache::set('stellantis::privacy::' . $this->getId(), $privacy, 172800);
     if (strcasecmp($privacy, 'None') == 0) {
       try {
-        $position = stellantisApi::callWithToken('GET', '/user/vehicles/' . $apiId . '/lastPosition');
+        $position = stellantisApi::callWithToken('GET', '/user/vehicles/' . $apiId . '/lastPosition', array(), $slot);
       } catch (stellantisException $e) {
         log::add('stellantis', 'info', 'Position non récupérée (' . $e->getApiType() . ') — poursuite sans position');
         $position = null;
@@ -944,11 +1096,11 @@ class stellantis extends eqLogic {
     // UC41 : échéances d'entretien (endpoint dédié, throttlé séparément). Best-effort, robuste — ne lève
     // jamais (try/catch interne), posé EN DERNIER dans refreshTelemetry() (robustesse cron, même
     // convention que le suivi de charge/trajet/geofencing UC24/33/34).
-    $this->suivreMaintenance($apiId);
+    $this->suivreMaintenance($apiId, $slot);
     // UC42 : alertes TPMS (endpoint dédié /alerts, throttlé séparément). Best-effort, robuste — ne lève
     // jamais (try/catch interne), posé EN DERNIER dans refreshTelemetry() (après suivreMaintenance, même
     // convention robustesse cron que UC24/33/34/41).
-    $this->suivreAlertes($apiId);
+    $this->suivreAlertes($apiId, $slot);
   }
 
   // Extrait le tableau d'énergies du /status : energies[] (v4.15+) prioritaire, fallback energy[].
@@ -1289,30 +1441,32 @@ class stellantis extends eqLogic {
   /* * ******************* UC09 — État de connexion & fraîcheur ******************* */
 
   /**
-   * État global du LIEN au compte (auth), dérivé du cache — AUCUN appel réseau (guardrail anti-ban).
+   * État du LIEN à UN COMPTE (auth), dérivé du cache — AUCUN appel réseau (guardrail anti-ban).
    * Retourne ['state' => 'ok'|'unauthenticated'|'error', 'detail' => <message UI déjà traduit>].
-   * Le mode privacy est PAR VÉHICULE (cf. health()), volontairement absent de cet état global qui
-   * reflète le seul lien compte/auth (cf. 09-tech). Consommé par le bandeau page plugin et par health().
+   * Le mode privacy est PAR VÉHICULE (cf. health()), volontairement absent de cet état qui reflète le
+   * seul lien compte/auth (cf. 09-tech). UC54 : factorisé par compte (toutes les clés cache consultées
+   * sont cloisonnées par slot via cacheKeyForSlot) ; consommé par connectionState() (agrégat) et health().
+   * @param int $_slot 1..MAX_ACCOUNTS
    */
-  public static function connectionState(): array {
-    if (!self::isConfigured()) {
+  public static function connectionStateForSlot(int $_slot): array {
+    if (!self::isConfigured($_slot)) {
       return array('state' => 'unauthenticated',
         'detail' => __('Plugin non configuré : renseignez la marque, le Client ID et le Client Secret puis sauvegardez', __FILE__));
     }
     // getTokenInfo()['authenticated'] reste vrai tant qu'un token existe MÊME expiré (pas de contrôle
     // d'expiration pour ce booléen) — l'expiration réelle est couverte par le flag link_error ci-dessous.
-    if (!stellantisApi::getTokenInfo()['authenticated']) {
+    if (!stellantisApi::getTokenInfo($_slot)['authenticated']) {
       return array('state' => 'unauthenticated',
         'detail' => __('Aucune connexion au compte ou session expirée : (ré)authentifiez-vous depuis la configuration du plugin', __FILE__));
     }
     // Backoff 429 (UC10) : cooldown anti rate-limit actif = état error avec le temps restant. Placé
     // AVANT link_error car c'est le signal autoritatif (timing) posé sur tout vrai 429.
-    $resteRateLimit = stellantisApi::rateLimitRemaining();
+    $resteRateLimit = stellantisApi::rateLimitRemaining($_slot);
     if ($resteRateLimit > 0) {
       return array('state' => 'error',
         'detail' => sprintf(__('Trop de requêtes vers l\'API : pause de protection, reprise dans ~%d min', __FILE__), max(1, (int) ceil($resteRateLimit / 60))));
     }
-    $erreur = (string) cache::byKey(self::LINK_ERROR_KEY)->getValue('');
+    $erreur = (string) cache::byKey(stellantisApi::cacheKeyForSlot(self::LINK_ERROR_KEY, $_slot))->getValue('');
     // Ne sert plus qu'au cas « quota local de refresh (REFRESH_QUOTA) épuisé » : celui-ci lève un
     // rate_limited synthétique sans passer par httpRequest, donc SANS armer le cooldown ci-dessus.
     // Ne pas supprimer cette branche en la croyant morte.
@@ -1328,21 +1482,80 @@ class stellantis extends eqLogic {
     return array('state' => 'ok', 'detail' => __('Connecté au compte Stellantis', __FILE__));
   }
 
+  // Rang de gravité d'un état de connexion, pour l'agrégat pire-état de connectionState() : error (le
+  // plus grave) > unauthenticated > ok. Purement utilitaire/interne à cet agrégat.
+  private static function rangEtatConnexion(string $_state): int {
+    if ($_state == 'error') {
+      return 2;
+    }
+    if ($_state == 'unauthenticated') {
+      return 1;
+    }
+    return 0; // 'ok'
+  }
+
+  /**
+   * État global du lien aux comptes CONFIGURÉS, dérivé du cache — AUCUN appel réseau (guardrail anti-ban).
+   * UC54 : agrégat PIRE-ÉTAT de connectionStateForSlot() sur slotsConfigures() — avec un seul compte
+   * configuré (cas mono-compte historique), se comporte STRICTEMENT comme l'ancienne implémentation
+   * (aucune régression). Consommé par le bandeau page plugin et par health().
+   */
+  public static function connectionState(): array {
+    $slots = self::slotsConfigures();
+    if (count($slots) == 0) {
+      return array('state' => 'unauthenticated',
+        'detail' => __('Plugin non configuré : renseignez la marque, le Client ID et le Client Secret puis sauvegardez', __FILE__));
+    }
+    $pire = null;
+    $detailPire = '';
+    $slotsEnDefaut = array();
+    foreach ($slots as $slot) {
+      $etat = self::connectionStateForSlot($slot);
+      if ($etat['state'] != 'ok') {
+        $slotsEnDefaut[] = $slot;
+      }
+      if ($pire === null || self::rangEtatConnexion($etat['state']) > self::rangEtatConnexion($pire)) {
+        $pire = $etat['state'];
+        $detailPire = $etat['detail'];
+      }
+    }
+    // Précise QUELS comptes sont en défaut uniquement en multi-compte (mono-compte : texte inchangé).
+    if (count($slotsEnDefaut) > 0 && count($slots) > 1) {
+      $detailPire .= ' ' . sprintf(__('(compte(s) concerné(s) : %s)', __FILE__), implode(', ', $slotsEnDefaut));
+    }
+    return array('state' => $pire, 'detail' => $detailPire);
+  }
+
   /**
    * Page Santé du plugin. Contrat core (vérifié dans plugin.class.php : method_exists($id, 'health')) :
    * méthode STATIQUE retournant des lignes ['test','result','advice','state' => bool].
-   * Une ligne « Connexion au compte » (état global) puis une ligne de fraîcheur par véhicule activé.
+   * UC54 : une ligne « Connexion au compte principal » (slot 1) puis une ligne « Connexion au compte
+   * secondaire N » par compte secondaire CONFIGURÉ, suivies d'une ligne de fraîcheur par véhicule activé.
    * AUCUN appel réseau : lecture du cache + valeur courante de la commande last_update.
    */
   public static function health(): array {
     $lignes = array();
-    $etat = self::connectionState();
-    $lignes[] = array(
-      'test' => __('Connexion au compte', __FILE__),
-      'result' => $etat['detail'],
-      'advice' => ($etat['state'] == 'ok') ? '' : __('Reconnectez-vous depuis la configuration du plugin', __FILE__),
-      'state' => ($etat['state'] == 'ok'),
-    );
+    $slots = self::slotsConfigures();
+    if (count($slots) == 0) {
+      // Aucun compte configuré : même comportement qu'avant UC54 (une seule ligne, mono-compte non configuré).
+      $etat = self::connectionStateForSlot(1);
+      $lignes[] = array(
+        'test' => __('Connexion au compte principal', __FILE__),
+        'result' => $etat['detail'],
+        'advice' => __('Configurez le compte principal depuis la configuration du plugin', __FILE__),
+        'state' => false,
+      );
+    } else {
+      foreach ($slots as $slot) {
+        $etat = self::connectionStateForSlot($slot);
+        $lignes[] = array(
+          'test' => ($slot == 1) ? __('Connexion au compte principal', __FILE__) : sprintf(__('Connexion au compte secondaire %s', __FILE__), $slot),
+          'result' => $etat['detail'],
+          'advice' => ($etat['state'] == 'ok') ? '' : __('Reconnectez-vous depuis la configuration du plugin', __FILE__),
+          'state' => ($etat['state'] == 'ok'),
+        );
+      }
+    }
     // Pilotage à distance (UC12) : état du remote token OTP. « Non activé » n'est PAS une erreur (le
     // pilotage à distance est optionnel) → state=true dans ce cas ; « expiré » invite à renouveler.
     $otp = self::otpState();
@@ -3278,17 +3491,19 @@ class stellantis extends eqLogic {
    * ⚠️ Catch élargi à \Throwable (et non le seul stellantisException du pseudo-code de 41-tech.md § 4) :
    * garantit le « ne lève jamais » promis par la doc, en cohérence avec suivreSessionCharge/suivreTrajet/
    * suivreGeofencing (UC24/33/34) qui protègent déjà chacune leur propre corps de méthode.
+   * UC54 : $_slot (compte de rattachement DE CE véhicule, passé par refreshTelemetry) route l'appel
+   * REST et le court-circuit rate-limit vers le bon compte (défaut 1 = compte principal, rétro-compat).
    */
-  private function suivreMaintenance(string $_apiId): void {
+  private function suivreMaintenance(string $_apiId, int $_slot = 1): void {
     $cle = self::MAINTENANCE_NEXT_KEY . $this->getId();
     if ((int) cache::byKey($cle)->getValue(0) > time()) {
       return; // throttle actif : rien à faire ce cycle-ci
     }
-    if (stellantisApi::rateLimitRemaining() > 0) {
+    if (stellantisApi::rateLimitRemaining($_slot) > 0) {
       return; // cooldown anti rate-limit actif : réessai après, SANS poser de throttle maintenance (déjà borné par le cooldown lui-même)
     }
     try {
-      $maint = stellantisApi::callWithToken('GET', '/user/vehicles/' . $_apiId . '/maintenance');
+      $maint = stellantisApi::callWithToken('GET', '/user/vehicles/' . $_apiId . '/maintenance', array(), $_slot);
       cache::set($cle, time() + self::MAINTENANCE_TTL_OK, self::MAINTENANCE_TTL_OK);
       $valeurs = self::parseMaintenance($maint);
       if (empty($valeurs)) {
@@ -3519,17 +3734,19 @@ class stellantis extends eqLogic {
    * parseAlertes() renvoie déjà la liste GÉNÉRIQUE des types actifs (pas seulement pneus), réutilisée TELLE
    * QUELLE par synchroniserCommandesAlertes() (UC43) — AUCUN second appel/cache sur /alerts (cf. 43-tech.md
    * § Architecture : interdiction formelle d'un 2e poller, budget anti-ban doublé sinon).
+   * UC54 : $_slot (compte de rattachement DE CE véhicule, passé par refreshTelemetry) route l'appel
+   * REST et le court-circuit rate-limit vers le bon compte (défaut 1 = compte principal, rétro-compat).
    */
-  private function suivreAlertes(string $_apiId): void {
+  private function suivreAlertes(string $_apiId, int $_slot = 1): void {
     $cle = self::ALERTS_NEXT_KEY . $this->getId();
     if ((int) cache::byKey($cle)->getValue(0) > time()) {
       return; // throttle actif : rien à faire ce cycle-ci
     }
-    if (stellantisApi::rateLimitRemaining() > 0) {
+    if (stellantisApi::rateLimitRemaining($_slot) > 0) {
       return; // cooldown anti rate-limit actif : réessai après, SANS poser de throttle alerts (déjà borné par le cooldown lui-même)
     }
     try {
-      $resp = stellantisApi::callWithToken('GET', '/user/vehicles/' . $_apiId . '/alerts');
+      $resp = stellantisApi::callWithToken('GET', '/user/vehicles/' . $_apiId . '/alerts', array(), $_slot);
       // Throttle succès posé AVANT les écritures (l'appel /alerts a réussi, quoi qu'il arrive ensuite).
       cache::set($cle, time() + self::ALERTS_TTL_OK, self::ALERTS_TTL_OK);
       try {
@@ -3562,59 +3779,99 @@ class stellantis extends eqLogic {
    * minute est visitée →
    * toute expression valide finit par être honorée. Cadence par défaut 5 min via CRON_DEFAUT.
    * Lecture REST seule : PAS de wakeup (cf. spec 08 / analyse § 1.4).
+   * UC54 : le priming du token et les garde-fous anti-ban (429/quota) sont désormais PAR COMPTE — un
+   * compte en échec (réseau, auth cassée, cooldown 429…) n'empêche JAMAIS le rafraîchissement des
+   * véhicules des AUTRES comptes (try/catch + continue par slot, jamais de `return` global sur échec
+   * d'un seul compte, sauf s'il n'y a strictement aucun compte configuré).
    */
   public static function cron() {
     $vehicules = eqLogic::byType('stellantis', true); // activés seulement
     if (count($vehicules) == 0) {
-      // Aucun véhicule à suivre : purge un éventuel flag d'erreur résiduel (sinon bloqué en « error »).
-      cache::delete(self::LINK_ERROR_KEY);
-      return;
-    }
-    // Backoff 429 (UC10) : un cooldown anti rate-limit court → on saute TOUTE la passe, sans même primer
-    // le token (zéro appel réseau). C'est le respect du cooldown côté cron (anti-ban).
-    $resteRateLimit = stellantisApi::rateLimitRemaining();
-    if ($resteRateLimit > 0) {
-      log::add('stellantis', 'info', 'Cron : passe sautée, cooldown anti rate-limit actif (~' . $resteRateLimit . ' s restantes)');
-      return;
-    }
-    // Prime le token une seule fois par passe : si le refresh OAuth échoue, inutile que chaque véhicule
-    // retente son propre refreshToken() et épuise le quota anti-ban (REFRESH_QUOTA_MAX) en une passe.
-    try {
-      stellantisApi::getToken();
-      // Lien au compte OK pour cette passe (UC09) : efface tout flag d'erreur antérieur.
-      cache::delete(self::LINK_ERROR_KEY);
-      cache::delete('stellantis::degraded_warn');
-      // UC11 : propager proactivement le token courant au démon MQTT (si lancé et token changé),
-      // sans attendre un rejet réactif du broker. Best-effort, jamais bloquant pour le polling.
-      self::syncDaemonToken();
-    } catch (\Throwable $e) {
-      // link_error ne couvre QUE le priming du token : rate-limit/transport = token présent mais refresh
-      // KO (connectionState resterait faussement « ok » sans ce flag). auth_required supprime déjà le
-      // token → connectionState = unauthenticated (pas de flag). Les échecs /status par véhicule (boucle
-      // ci-dessous) restent hors périmètre de l'état global compte/auth.
-      $type = ($e instanceof stellantisException) ? $e->getApiType() : 'error';
-      if ($type == 'rate_limited' || $type == 'transport') {
-        cache::set(self::LINK_ERROR_KEY, $type, 3600);
-      } else {
-        cache::delete(self::LINK_ERROR_KEY);
+      // Aucun véhicule à suivre : purge un éventuel flag d'erreur résiduel de TOUS les slots (sinon
+      // bloqué en « error »).
+      for ($s = 1; $s <= self::MAX_ACCOUNTS; $s++) {
+        cache::delete(stellantisApi::cacheKeyForSlot(self::LINK_ERROR_KEY, $s));
       }
-      // Mode dégradé (UC10) : auth cassée = les commandes gardent leurs dernières valeurs, aucun appel
-      // véhicule tenté jusqu'à ré-auth. Alerte en warning THROTTLÉE 1×/h (cron chaque minute → sinon on
-      // noie les logs) ; les autres types (transport/rate-limit transitoires) restent en info.
-      if ($type == 'auth_required') {
-        $cleWarn = 'stellantis::degraded_warn';
-        if (cache::byKey($cleWarn)->getValue('') == '') {
-          log::add('stellantis', 'warning', 'Mode dégradé : authentification requise — (ré)authentifiez-vous depuis la configuration du plugin. Les dernières valeurs des commandes sont conservées.');
-          cache::set($cleWarn, '1', 3600);
-        } else {
-          log::add('stellantis', 'debug', 'Cron : authentification requise (warning throttlé) : ' . $e->getMessage());
+      return;
+    }
+    $slots = self::slotsConfigures();
+    if (count($slots) == 0) {
+      // Des véhicules existent mais plus aucun compte n'est configuré (config effacée) : rien à faire.
+      for ($s = 1; $s <= self::MAX_ACCOUNTS; $s++) {
+        cache::delete(stellantisApi::cacheKeyForSlot(self::LINK_ERROR_KEY, $s));
+      }
+      return;
+    }
+    // 1) Priming du token, UNE FOIS PAR COMPTE distinct de la flotte (généralise la mutualisation
+    //    mono-compte « 1×/passe » du MVP) : si le refresh OAuth d'un compte échoue, inutile que chaque
+    //    véhicule de ce compte retente son propre refreshToken() et épuise son quota anti-ban en une passe.
+    $tokenOk = array();
+    foreach ($slots as $slot) {
+      // Backoff 429 (UC10) : un cooldown anti rate-limit court sur CE compte → on saute sa passe, sans
+      // même primer son token (zéro appel réseau) — mais on NE bloque PAS les autres comptes.
+      $resteRateLimit = stellantisApi::rateLimitRemaining($slot);
+      if ($resteRateLimit > 0) {
+        log::add('stellantis', 'info', 'Cron (compte ' . $slot . ') : passe sautée, cooldown anti rate-limit actif (~' . $resteRateLimit . ' s restantes)');
+        $tokenOk[$slot] = false;
+        continue;
+      }
+      try {
+        stellantisApi::getToken(false, null, $slot);
+        // Lien à ce compte OK pour cette passe (UC09) : efface tout flag d'erreur antérieur DE CE SLOT.
+        cache::delete(stellantisApi::cacheKeyForSlot(self::LINK_ERROR_KEY, $slot));
+        cache::delete(stellantisApi::cacheKeyForSlot('stellantis::degraded_warn', $slot));
+        // UC11 : propager proactivement le token courant au démon MQTT (si lancé et token changé), sans
+        // attendre un rejet réactif du broker. SLOT 1 UNIQUEMENT (le démon/pilotage à distance est mono-
+        // compte). Best-effort, jamais bloquant pour le polling.
+        if ($slot == 1) {
+          self::syncDaemonToken();
         }
-      } else {
-        log::add('stellantis', 'info', 'Cron : rafraîchissement ignoré (' . $e->getMessage() . ') — réessai à la prochaine passe');
+        $tokenOk[$slot] = true;
+      } catch (\Throwable $e) {
+        $tokenOk[$slot] = false;
+        // link_error ne couvre QUE le priming du token DE CE COMPTE : rate-limit/transport = token présent
+        // mais refresh KO (connectionState resterait faussement « ok » sans ce flag). auth_required
+        // supprime déjà le token → connectionState = unauthenticated (pas de flag). Les échecs /status par
+        // véhicule (boucle ci-dessous) restent hors périmètre de cet état par compte.
+        $type = ($e instanceof stellantisException) ? $e->getApiType() : 'error';
+        $cleLinkError = stellantisApi::cacheKeyForSlot(self::LINK_ERROR_KEY, $slot);
+        if ($type == 'rate_limited' || $type == 'transport') {
+          cache::set($cleLinkError, $type, 3600);
+        } else {
+          cache::delete($cleLinkError);
+        }
+        // Mode dégradé (UC10) : auth cassée sur CE compte = ses commandes gardent leurs dernières valeurs,
+        // aucun appel véhicule de ce compte tenté jusqu'à ré-auth. Alerte en warning THROTTLÉE 1×/h/compte
+        // (cron chaque minute → sinon on noie les logs) ; les autres types (transport/rate-limit
+        // transitoires) restent en info.
+        if ($type == 'auth_required') {
+          $cleWarn = stellantisApi::cacheKeyForSlot('stellantis::degraded_warn', $slot);
+          if (cache::byKey($cleWarn)->getValue('') == '') {
+            log::add('stellantis', 'warning', 'Mode dégradé (compte ' . $slot . ') : authentification requise — (ré)authentifiez-vous depuis la configuration du plugin. Les dernières valeurs des commandes de ce compte sont conservées.');
+            cache::set($cleWarn, '1', 3600);
+          } else {
+            log::add('stellantis', 'debug', 'Cron (compte ' . $slot . ') : authentification requise (warning throttlé) : ' . $e->getMessage());
+          }
+        } else {
+          log::add('stellantis', 'info', 'Cron (compte ' . $slot . ') : rafraîchissement ignoré (' . $e->getMessage() . ') — réessai à la prochaine passe');
+        }
+        // Pas de `return` ici (contrairement à l'ancienne version mono-compte) : les AUTRES comptes de la
+        // flotte doivent continuer d'être traités.
       }
-      return;
     }
     foreach ($vehicules as $eqLogic) {
+      // UC54 : compte de rattachement DE CE véhicule (accountSlotDe() est défensif : valeur absente/
+      // corrompue/hors bornes → compte principal). Un véhicule dont le compte n'est plus configuré (ou
+      // dont le priming du token a échoué ci-dessus) est SAUTÉ pour cette passe — jamais désactivé (la
+      // désactivation reste l'affaire de syncVehicles(), jamais du cron).
+      $slot = self::accountSlotDe($eqLogic);
+      if (!in_array($slot, $slots, true)) {
+        log::add('stellantis', 'debug', 'Cron : équipement #' . $eqLogic->getId() . ' rattaché à un compte non configuré (' . $slot . '), ignoré pour cette passe');
+        continue;
+      }
+      if (empty($tokenOk[$slot])) {
+        continue;
+      }
       // UC13/UC14 : une commande MQTT (wakeup, charge…) a été acquittée depuis la dernière passe (flag posé
       // par traiterRetourCommande, UC18) → remontée d'état FORCÉE (hors cadence autorefresh), avec les
       // garde-fous 429 de refreshTelemetry(). Consommé une seule fois. Le backoff rate-limit ci-dessus a
@@ -3726,6 +3983,27 @@ class stellantis extends eqLogic {
       return true;
     }
     return false;
+  }
+
+  /**
+   * UC54 : backfill 'accountSlot'/'accountSlotLabel' à 1/« Compte principal » — ne pose les clés QUE si
+   * 'accountSlot' est absent (jamais de régression : un véhicule déjà routé vers un compte secondaire par
+   * une synchro postérieure à cette fonctionnalité n'est jamais touché ici). Retourne true si modifié (le
+   * caller décide du save() unique). Best-effort au sens où getConfiguration()/setConfiguration() ne
+   * lèvent pas ; appelée par install.php::stellantis_update() (backfill des installs mono-compte
+   * antérieures) — même contrat/visibilité publique qu'assurerVisiblePanelParDefaut() (point d'entrée
+   * externe, cf. CLAUDE.md § autoload). syncVehicles() réécrit ces deux clés à CHAQUE synchro (autorité =
+   * découverte, comme 'brand'/'label') donc n'appelle pas ce helper directement.
+   */
+  public static function assurerAccountSlotParDefaut(eqLogic $_eqLogic): bool {
+    if (trim((string) $_eqLogic->getConfiguration('accountSlot', '')) !== '') {
+      return false;
+    }
+    $_eqLogic->setConfiguration('accountSlot', 1);
+    // 3 valeurs FIXES sous notre contrôle (pas une donnée externe) → __() avec chaîne LITTÉRALE légitime
+    // (même convention que syncVehicles()).
+    $_eqLogic->setConfiguration('accountSlotLabel', __('Compte principal', __FILE__));
+    return true;
   }
 
   /**
@@ -4311,6 +4589,16 @@ class stellantisCmd extends cmd {
     if (!is_object($eqLogic)) {
       return;
     }
+    // UC54 : garde-fou runtime (défense en profondeur, en plus du filtrage à la CRÉATION dans
+    // createCommands() : les commandes action ne sont créées que sur le compte principal). Un véhicule
+    // PEUT changer de compte entre deux synchronisations (redécouverte sur un autre slot, cf.
+    // syncVehicles()) : ses commandes action déjà créées resteraient sinon exécutables, avec en plus les
+    // identifiants MQTT/remote token du compte PRINCIPAL (slot 1) appliqués à tort à un véhicule d'un
+    // autre compte. Les commandes info ne sont jamais concernées (test explicite du type).
+    if ($this->getType() == 'action' && stellantis::accountSlotDe($eqLogic) != 1) {
+      log::add('stellantis', 'warning', 'Commande action refusée : équipement #' . $eqLogic->getId() . ' rattaché à un compte secondaire (lecture seule)');
+      throw new stellantisException(__('Le pilotage à distance n\'est disponible que sur le compte principal', __FILE__), 0, 'not_configured');
+    }
     switch ($this->getLogicalId()) {
       case 'wakeup':
         // UC13 : force une remontée d'état fraîche via MQTT (garde-fous cooldown/quota dans wakeup()).
@@ -4453,12 +4741,24 @@ class stellantisApi {
   const REMOTE_TOKEN_MARGE = 120; // refresh proactif quand il reste moins que cette marge
 
   /**
+   * UC54 : nom de la clé de cache niveau-COMPTE pour le slot $_slot (1 = clé NON suffixée = comportement
+   * ACTUEL, zéro migration ; 2..N = clé suffixée ::N). À appeler à CHAQUE accès à une clé de cache
+   * NIVEAU-COMPTE (token, quota de refresh, cooldown rate-limit, link_error, degraded_warn…) — jamais
+   * pour les clés PAR VÉHICULE (déjà suffixées par eqId, indépendantes du compte) ni pour les clés
+   * commandes/OTP/démon (mono-compte slot 1 par construction, cf. 54-tech.md).
+   */
+  public static function cacheKeyForSlot(string $_base, int $_slot): string {
+    return ($_slot <= 1) ? $_base : $_base . '::' . $_slot;
+  }
+
+  /**
    * Appel authentifié à l'API connectedcar v4 : client_id en query (toutes méthodes),
    * Bearer + x-introspect-realm en headers, Accept hal+json.
    * Retourne le JSON décodé tel quel (enveloppe HAL non déballée — à la charge du métier).
+   * UC54 : $_slot sélectionne le COMPTE (credentials/realm) utilisé pour cet appel (défaut 1).
    * @throws stellantisException
    */
-  public static function call(string $_method, string $_path, array $_params = array(), ?string $_accessToken = null): array {
+  public static function call(string $_method, string $_path, array $_params = array(), ?string $_accessToken = null, int $_slot = 1): array {
     $method = strtoupper($_method);
     if (!in_array($method, self::METHODES_AUTORISEES)) {
       throw new stellantisException('Méthode HTTP non autorisée : ' . $method);
@@ -4466,7 +4766,7 @@ class stellantisApi {
     if (!preg_match('#^/[A-Za-z0-9/_-]+$#D', $_path)) {
       throw new stellantisException('Chemin API invalide : ' . $_path);
     }
-    $config = stellantis::getApiConfig();
+    $config = stellantis::getApiConfig($_slot);
     $query = array('client_id' => $config['clientId']);
     $headers = array(
       'Accept: application/hal+json',
@@ -4484,7 +4784,7 @@ class stellantisApi {
       $headers[] = 'Authorization: Bearer ' . $_accessToken;
     }
     $url = $config['apiBaseUrl'] . $_path . '?' . http_build_query($query);
-    return self::httpRequest($method, $url, $headers, $rawBody);
+    return self::httpRequest($method, $url, $headers, $rawBody, false, $_slot);
   }
 
   /*     * ******************* OAuth2 PKCE & cycle de vie du token ******************* */
@@ -4500,16 +4800,17 @@ class stellantisApi {
 
   /**
    * Construit l'URL d'autorisation OAuth2 PKCE et mémorise {verifier, state} en cache chiffré (10 min).
+   * UC54 : $_slot cible le compte pour lequel l'URL est générée (défaut 1 — préserve l'appel mono-compte).
    * @throws stellantisException
    */
-  public static function buildAuthUrl(): string {
-    if (!stellantis::isConfigured()) {
+  public static function buildAuthUrl(int $_slot = 1): string {
+    if (!stellantis::isConfigured($_slot)) {
       throw new stellantisException('Plugin non configuré : renseignez le Client ID et le Client Secret', 0, 'not_configured');
     }
-    $config = stellantis::getApiConfig();
+    $config = stellantis::getApiConfig($_slot);
     $verifier = self::genCodeVerifier();
     $state = bin2hex(random_bytes(16));
-    cache::set(self::OAUTH_PENDING_KEY, utils::encrypt(json_encode(array('verifier' => $verifier, 'state' => $state))), 600);
+    cache::set(self::cacheKeyForSlot(self::OAUTH_PENDING_KEY, $_slot), utils::encrypt(json_encode(array('verifier' => $verifier, 'state' => $state))), 600);
     // RFC3986 : l'espace du scope doit être encodé %20 (pas « + »)
     return $config['authBaseUrl'] . '/authorize?' . http_build_query(array(
       'client_id' => $config['clientId'],
@@ -4526,14 +4827,16 @@ class stellantisApi {
    * Échange le code d'autorisation contre les tokens.
    * Chemin nominal : $_input = URL de redirection complète collée → state toujours vérifié.
    * Chemin dégradé : code brut seul → accepté, state invérifiable (loggué en warning).
+   * UC54 : $_slot cible le compte pour lequel le code est échangé (défaut 1 — préserve l'appel mono-compte).
    * @throws stellantisException
    */
-  public static function exchangeCode(string $_input): void {
+  public static function exchangeCode(string $_input, int $_slot = 1): void {
     $input = trim($_input);
     if ($input == '') {
       throw new stellantisException('Aucun code d\'autorisation fourni', 0, 'auth_required');
     }
-    $pendingBrut = (string) cache::byKey(self::OAUTH_PENDING_KEY)->getValue('');
+    $clePending = self::cacheKeyForSlot(self::OAUTH_PENDING_KEY, $_slot);
+    $pendingBrut = (string) cache::byKey($clePending)->getValue('');
     $pending = ($pendingBrut == '') ? null : json_decode(utils::decrypt($pendingBrut), true);
     if (!is_array($pending) || !isset($pending['verifier']) || !isset($pending['state'])) {
       throw new stellantisException('Demande d\'autorisation absente ou expirée : générez une nouvelle URL', 0, 'auth_required');
@@ -4566,14 +4869,14 @@ class stellantisApi {
       // Ne pas supprimer cette garantie : elle remplace la vérification du state ici.
       log::add('stellantis', 'warning', 'Échange OAuth : state non vérifié (entrée = code seul ; collez plutôt l\'URL de redirection complète)');
     }
-    $config = stellantis::getApiConfig();
+    $config = stellantis::getApiConfig($_slot);
     try {
       $reponse = self::requestToken(array(
         'grant_type' => 'authorization_code',
         'code' => $code,
         'redirect_uri' => $config['redirectUri'],
         'code_verifier' => $pending['verifier'],
-      ));
+      ), $_slot);
     } catch (stellantisException $e) {
       // Un 400/invalid_grant à l'échange = code d'autorisation refusé par l'IdP, quasi toujours
       // parce qu'il est éphémère (expiré/déjà utilisé) ou copié partiellement. Le flow OAuth de PSA
@@ -4587,9 +4890,9 @@ class stellantisApi {
       }
       throw $e;
     }
-    self::storeTokenResponse($reponse, null);
-    cache::delete(self::OAUTH_PENDING_KEY);
-    log::add('stellantis', 'info', 'Authentification OAuth2 réussie, tokens enregistrés');
+    self::storeTokenResponse($reponse, null, $_slot);
+    cache::delete($clePending);
+    log::add('stellantis', 'info', 'Authentification OAuth2 réussie, tokens enregistrés' . ($_slot > 1 ? ' (compte ' . $_slot . ')' : ''));
   }
 
   /**
@@ -4597,10 +4900,12 @@ class stellantisApi {
    * @param bool $_force ignorer la validité du token en cache (après un 401)
    * @param string|null $_failedToken token qui vient d'échouer chez l'appelant : si le cache en
    *                    contient déjà un autre (refresh concurrent), il est rendu sans réseau ni quota
+   * @param int $_slot UC54 : compte ciblé (1..MAX_ACCOUNTS). EN DERNIER param : préserve tous les appels
+   *                    positionnels existants (défaut 1 = comportement mono-compte inchangé).
    * @throws stellantisException
    */
-  public static function getToken(bool $_force = false, ?string $_failedToken = null): string {
-    $token = self::readTokenCache();
+  public static function getToken(bool $_force = false, ?string $_failedToken = null, int $_slot = 1): string {
+    $token = self::readTokenCache($_slot);
     if ($token !== null) {
       if (!$_force && time() < $token['exp'] - self::TOKEN_MARGE) {
         return $token['access_token'];
@@ -4609,119 +4914,124 @@ class stellantisApi {
         return $token['access_token'];
       }
     }
-    $token = self::refreshToken();
+    $token = self::refreshToken($_slot);
     return $token['access_token'];
   }
 
   /**
    * Appel métier authentifié : getToken() + call(), avec refresh réactif et rejeu unique
    * sur token expiré. auth_required remonte tel quel (pas de boucle).
+   * UC54 : $_slot route l'appel (token + credentials + court-circuit rate-limit) vers le bon compte.
    * @throws stellantisException
    */
-  public static function callWithToken(string $_method, string $_path, array $_params = array()): array {
+  public static function callWithToken(string $_method, string $_path, array $_params = array(), int $_slot = 1): array {
     // Backoff 429 (UC10) : court-circuit AVANT getToken() — sinon un token expiré déclencherait un
     // refresh réseau (et consommerait REFRESH_QUOTA) pendant le cooldown. Protège aussi les véhicules
     // #2..N d'une même passe cron (la boucle avale l'erreur par véhicule sans re-tester le cooldown).
-    // Ne pas retirer : c'est une protection fonctionnelle, pas seulement défensive.
-    $reste = self::rateLimitRemaining();
+    // Ne pas retirer : c'est une protection fonctionnelle, pas seulement défensive. Cloisonné PAR COMPTE
+    // (UC54) : un 429 sur le compte A ne doit jamais court-circuiter les appels du compte B.
+    $reste = self::rateLimitRemaining($_slot);
     if ($reste > 0) {
       throw new stellantisException('Appel court-circuité : cooldown anti rate-limit actif (~' . $reste . ' s restantes)', 429, 'rate_limited');
     }
-    $accessToken = self::getToken();
+    $accessToken = self::getToken(false, null, $_slot);
     try {
-      return self::call($_method, $_path, $_params, $accessToken);
+      return self::call($_method, $_path, $_params, $accessToken, $_slot);
     } catch (stellantisException $e) {
       if ($e->getApiType() != 'token_expired') {
         throw $e;
       }
-      $accessToken = self::getToken(true, $accessToken);
-      return self::call($_method, $_path, $_params, $accessToken);
+      $accessToken = self::getToken(true, $accessToken, $_slot);
+      return self::call($_method, $_path, $_params, $accessToken, $_slot);
     }
   }
 
-  // Secondes restantes du cooldown anti rate-limit (0 si aucun). Recalculé depuis le timestamp absolu
-  // stocké → robuste quelle que soit la sémantique d'expiration du cache. Consommé par cron(),
-  // callWithToken() et stellantis::connectionState().
-  public static function rateLimitRemaining(): int {
-    return max(0, (int) cache::byKey(self::RATELIMIT_KEY)->getValue(0) - time());
+  // Secondes restantes du cooldown anti rate-limit DU COMPTE $_slot (0 si aucun). Recalculé depuis le
+  // timestamp absolu stocké → robuste quelle que soit la sémantique d'expiration du cache. Consommé par
+  // cron(), callWithToken() et stellantis::connectionStateForSlot(). UC54 : cloisonné par compte.
+  public static function rateLimitRemaining(int $_slot = 1): int {
+    return max(0, (int) cache::byKey(self::cacheKeyForSlot(self::RATELIMIT_KEY, $_slot))->getValue(0) - time());
   }
 
-  // Pose le cooldown anti rate-limit (timestamp de fin + TTL = durée). Appelé par httpRequest() sur un
-  // vrai HTTP 429 (jamais par le rate_limited SYNTHÉTIQUE du quota de refresh, levé avant le réseau).
-  private static function enterRateLimitCooldown(): void {
-    cache::set(self::RATELIMIT_KEY, time() + self::RATELIMIT_COOLDOWN, self::RATELIMIT_COOLDOWN);
-    log::add('stellantis', 'warning', 'Rate-limit API (HTTP 429) : pause anti-blocage de ' . self::RATELIMIT_COOLDOWN . ' s, appels suspendus');
+  // Pose le cooldown anti rate-limit DU COMPTE $_slot (timestamp de fin + TTL = durée). Appelé par
+  // httpRequest() sur un vrai HTTP 429 (jamais par le rate_limited SYNTHÉTIQUE du quota de refresh, levé
+  // avant le réseau). UC54 : cloisonné par compte (un 429 sur un compte ne gèle pas les autres).
+  private static function enterRateLimitCooldown(int $_slot = 1): void {
+    cache::set(self::cacheKeyForSlot(self::RATELIMIT_KEY, $_slot), time() + self::RATELIMIT_COOLDOWN, self::RATELIMIT_COOLDOWN);
+    log::add('stellantis', 'warning', 'Rate-limit API (HTTP 429) : pause anti-blocage de ' . self::RATELIMIT_COOLDOWN . ' s, appels suspendus' . ($_slot > 1 ? ' (compte ' . $_slot . ')' : ''));
   }
 
-  // Statut non sensible pour l'UI (aucun token exposé)
-  public static function getTokenInfo(): array {
-    $token = self::readTokenCache();
+  // Statut non sensible pour l'UI (aucun token exposé), DU COMPTE $_slot.
+  public static function getTokenInfo(int $_slot = 1): array {
+    $token = self::readTokenCache($_slot);
     if ($token === null) {
       return array('authenticated' => false, 'expiresIn' => null);
     }
     return array('authenticated' => true, 'expiresIn' => max(0, $token['exp'] - time()));
   }
 
-  // Purge tokens + demande d'autorisation en attente (changement de credentials ou de marque)
-  public static function purgeTokenCache(): void {
-    cache::delete(self::TOKEN_CACHE_KEY);
-    cache::delete(self::OAUTH_PENDING_KEY);
-    log::add('stellantis', 'info', 'Tokens purgés (changement de configuration)');
+  // Purge tokens + demande d'autorisation en attente DU COMPTE $_slot (changement de credentials/marque).
+  // UC54 : cloisonné par compte — purger le compte 2 ne touche jamais le token du compte 1/3.
+  public static function purgeTokenCache(int $_slot = 1): void {
+    cache::delete(self::cacheKeyForSlot(self::TOKEN_CACHE_KEY, $_slot));
+    cache::delete(self::cacheKeyForSlot(self::OAUTH_PENDING_KEY, $_slot));
+    log::add('stellantis', 'info', 'Tokens purgés (changement de configuration)' . ($_slot > 1 ? ' (compte ' . $_slot . ')' : ''));
   }
 
   /**
-   * Rafraîchit l'access_token (rotation du refresh_token persistée).
+   * Rafraîchit l'access_token DU COMPTE $_slot (rotation du refresh_token persistée).
    * Concurrence sans mutex : sur invalid_grant, si le refresh_token en cache diffère de celui qui a
    * échoué, un process concurrent a déjà tourné le token → on rend le cache (un seul niveau, pas de
    * boucle). auth_required seulement si le refresh_token mort est bien celui du cache.
    * @throws stellantisException
    */
-  private static function refreshToken(): array {
-    $token = self::readTokenCache();
+  private static function refreshToken(int $_slot = 1): array {
+    $token = self::readTokenCache($_slot);
     if ($token === null || !isset($token['refresh_token']) || $token['refresh_token'] == '') {
       throw new stellantisException('Aucun refresh token : ré-authentification requise', 0, 'auth_required');
     }
-    self::consommerQuotaRefresh();
+    self::consommerQuotaRefresh($_slot);
     try {
       $reponse = self::requestToken(array(
         'grant_type' => 'refresh_token',
         'refresh_token' => $token['refresh_token'],
-      ));
+      ), $_slot);
     } catch (stellantisException $e) {
       if ($e->getApiType() == 'auth_required') {
-        $enCache = self::readTokenCache();
+        $enCache = self::readTokenCache($_slot);
         if ($enCache !== null && isset($enCache['refresh_token']) && $enCache['refresh_token'] !== $token['refresh_token']) {
           log::add('stellantis', 'debug', 'Refresh concurrent détecté : réutilisation du token déjà rafraîchi');
           return $enCache;
         }
-        cache::delete(self::TOKEN_CACHE_KEY);
-        log::add('stellantis', 'warning', 'Refresh token expiré ou révoqué : ré-authentification requise');
+        cache::delete(self::cacheKeyForSlot(self::TOKEN_CACHE_KEY, $_slot));
+        log::add('stellantis', 'warning', 'Refresh token expiré ou révoqué : ré-authentification requise' . ($_slot > 1 ? ' (compte ' . $_slot . ')' : ''));
         throw new stellantisException('Refresh token expiré ou révoqué : ré-authentification requise', $e->getHttpCode(), 'auth_required');
       }
       throw $e;
     }
-    self::storeTokenResponse($reponse, $token['refresh_token']);
-    $nouveau = self::readTokenCache();
-    log::add('stellantis', 'info', 'Token rafraîchi (expire dans ' . ($nouveau['exp'] - time()) . ' s)');
+    self::storeTokenResponse($reponse, $token['refresh_token'], $_slot);
+    $nouveau = self::readTokenCache($_slot);
+    log::add('stellantis', 'info', 'Token rafraîchi (expire dans ' . ($nouveau['exp'] - time()) . ' s)' . ($_slot > 1 ? ' (compte ' . $_slot . ')' : ''));
     return $nouveau;
   }
 
   /**
-   * POST vers l'endpoint token (échange ou refresh) : Authorization Basic + corps form-urlencoded.
+   * POST vers l'endpoint token (échange ou refresh) DU COMPTE $_slot : Authorization Basic + corps
+   * form-urlencoded.
    * @throws stellantisException
    */
-  private static function requestToken(array $_body): array {
-    $config = stellantis::getApiConfig();
+  private static function requestToken(array $_body, int $_slot = 1): array {
+    $config = stellantis::getApiConfig($_slot);
     $headers = array(
       'Authorization: Basic ' . base64_encode($config['clientId'] . ':' . $config['clientSecret']),
       'Content-Type: application/x-www-form-urlencoded',
       'Accept: application/json',
     );
-    return self::httpRequest('POST', $config['authBaseUrl'] . '/access_token', $headers, http_build_query($_body), true);
+    return self::httpRequest('POST', $config['authBaseUrl'] . '/access_token', $headers, http_build_query($_body), true, $_slot);
   }
 
-  // Persiste la réponse token ; conserve l'ancien refresh_token si la réponse n'en fournit pas
-  private static function storeTokenResponse(array $_reponse, ?string $_ancienRefresh): void {
+  // Persiste la réponse token DU COMPTE $_slot ; conserve l'ancien refresh_token si la réponse n'en fournit pas
+  private static function storeTokenResponse(array $_reponse, ?string $_ancienRefresh, int $_slot = 1): void {
     if (!isset($_reponse['access_token']) || $_reponse['access_token'] == '') {
       throw new stellantisException('Réponse token invalide (access_token absent)');
     }
@@ -4733,16 +5043,16 @@ class stellantisApi {
       log::add('stellantis', 'warning', 'expires_in inhabituellement court reçu de l\'IdP : ' . $expiresIn . ' s (plancher 120 s appliqué)');
     }
     $exp = time() + max(120, $expiresIn);
-    cache::set(self::TOKEN_CACHE_KEY, utils::encrypt(json_encode(array(
+    cache::set(self::cacheKeyForSlot(self::TOKEN_CACHE_KEY, $_slot), utils::encrypt(json_encode(array(
       'access_token' => $_reponse['access_token'],
       'refresh_token' => $refresh,
       'exp' => $exp,
     ))), 0);
   }
 
-  // Relit le cache token déchiffré ; null si absent ou illisible
-  private static function readTokenCache(): ?array {
-    $brut = (string) cache::byKey(self::TOKEN_CACHE_KEY)->getValue('');
+  // Relit le cache token déchiffré DU COMPTE $_slot ; null si absent ou illisible
+  private static function readTokenCache(int $_slot = 1): ?array {
+    $brut = (string) cache::byKey(self::cacheKeyForSlot(self::TOKEN_CACHE_KEY, $_slot))->getValue('');
     if ($brut == '') {
       return null;
     }
@@ -4750,9 +5060,11 @@ class stellantisApi {
     return (is_array($token) && isset($token['access_token']) && isset($token['exp'])) ? $token : null;
   }
 
-  // Quota local anti-ban en fenêtre fixe : dépassement → rate_limited SANS appel réseau
-  private static function consommerQuotaRefresh(): void {
-    $quota = json_decode((string) cache::byKey(self::REFRESH_QUOTA_KEY)->getValue(''), true);
+  // Quota local anti-ban en fenêtre fixe, DU COMPTE $_slot : dépassement → rate_limited SANS appel réseau.
+  // UC54 : cloisonné par compte — le quota de refresh du compte A ne gèle jamais le compte B.
+  private static function consommerQuotaRefresh(int $_slot = 1): void {
+    $cle = self::cacheKeyForSlot(self::REFRESH_QUOTA_KEY, $_slot);
+    $quota = json_decode((string) cache::byKey($cle)->getValue(''), true);
     $maintenant = time();
     if (!is_array($quota) || !isset($quota['windowStart']) || $maintenant - $quota['windowStart'] > self::REFRESH_QUOTA_FENETRE) {
       $quota = array('windowStart' => $maintenant, 'count' => 0);
@@ -4761,7 +5073,7 @@ class stellantisApi {
       throw new stellantisException('Quota de rafraîchissement de token atteint (' . self::REFRESH_QUOTA_MAX . ' par 30 min) : réessayez plus tard', 429, 'rate_limited');
     }
     $quota['count']++;
-    cache::set(self::REFRESH_QUOTA_KEY, json_encode($quota), self::REFRESH_QUOTA_FENETRE);
+    cache::set($cle, json_encode($quota), self::REFRESH_QUOTA_FENETRE);
   }
 
   /**
@@ -4770,9 +5082,12 @@ class stellantisApi {
    * @param bool $_reponseSensible réponse pouvant contenir des tokens (endpoint OAuth) : le corps
    *             brut n'est alors jamais loggué ni réinjecté dans le message d'exception — seuls les
    *             champs error/error_description sont relayés
+   * @param int $_slot UC54 : compte concerné par cet appel — sert UNIQUEMENT à armer le bon cooldown
+   *             anti rate-limit (cacheKeyForSlot) sur un vrai 429 ; défaut 1 (préserve les appels
+   *             existants, notamment ceux du canal OTP/remote token qui restent mono-compte).
    * @throws stellantisException
    */
-  private static function httpRequest(string $_method, string $_url, array $_headers = array(), ?string $_rawBody = null, bool $_reponseSensible = false): array {
+  private static function httpRequest(string $_method, string $_url, array $_headers = array(), ?string $_rawBody = null, bool $_reponseSensible = false, int $_slot = 1): array {
     $urlSansQuery = strtok($_url, '?');
     $ch = curl_init();
     curl_setopt_array($ch, array(
@@ -4816,8 +5131,9 @@ class stellantisApi {
     $type = stellantisException::typeFromResponse($httpCode, is_array($decoded) ? $decoded : null);
     // Backoff 429 (UC10) : un vrai rate-limit serveur (métier OU OAuth, les deux passent ici) arme le
     // cooldown avant de lever, quel que soit le chemin d'appel (une seule fois, hors branches ci-dessous).
+    // UC54 : cloisonné PAR COMPTE ($_slot) — un 429 sur un compte n'affecte pas les autres.
     if ($type == 'rate_limited') {
-      self::enterRateLimitCooldown();
+      self::enterRateLimitCooldown($_slot);
     }
     if ($_reponseSensible) {
       // Jamais le corps brut d'une réponse OAuth (peut contenir des artefacts de session/token)

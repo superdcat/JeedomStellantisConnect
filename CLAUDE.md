@@ -425,8 +425,43 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > **identifiant de compte générique** (marque = attribut du compte, clé cache `TOKEN_CACHE_KEY::<accountId>`,
 > cron prime le token 1× par compte distinct) → couvre le multi-marques **et** laisse ouvert « 2 comptes
 > même marque » (choix produit diffé­rable, pas fatalité technique — le refus par clé-marque était
-> circulaire) ; `54-multi-marques.md` recablée en conséquence (écart assumé). Suite = post-MVP
-> (UC54 multi-marques, supervision, robustesse…).
+> circulaire) ; `54-multi-marques.md` recablée en conséquence (écart assumé). **Post-MVP : UC54** —
+> **multi-marques & multi-comptes (SLICE LECTURE SEULE)** : un foyer peut désormais rattacher des
+> véhicules à **plusieurs comptes/marques** dans la même instance. **Slots de comptes FIXES**
+> (`stellantis::MAX_ACCOUNTS=3`) : **slot 1 = la config globale ACTUELLE** (clés `client_id`/
+> `client_secret`/`brand`/`country`/`redirect_uri` NON suffixées, cache token actuel) ⇒ **zéro migration**,
+> installs mono-compte et véhicules existants inchangés ; slots 2..N = clés **suffixées** `_2`/`_3`
+> (`client_secret_2`/`_3` ajoutés à `$_encryptConfigKey`). ⚠️ **Slots fixes imposés par une contrainte
+> core** : `preConfig_<clé>` est un **nom de méthode FIXE** (pas d'itération dynamique) ⇒ pas de table
+> `accounts[id]` dynamique (cf. mémoire `jeedom-encrypt-config-key`). Helpers : `configKeyForSlot($base,
+> $slot)` (nommage config), `stellantisApi::cacheKeyForSlot($base,$slot)` (nommage cache — **retourne la
+> clé NON suffixée si slot≤1**, rétro-compat), `slotsConfigures()` (slots 1..MAX ayant client_id+secret),
+> `accountSlotDe(eqLogic)` (résolution défensive du slot d'un véhicule, hors bornes→1, source unique).
+> **Routage par compte** : chaque eqLogic porte `accountSlot` (défaut 1) ; `getApiConfig(int $slot)` +
+> threading `$slot` (défaut 1) à travers la façade LECTURE+OAuth de `stellantisApi` (`call`,
+> `callWithToken`, `getToken`, `refreshToken`, `requestToken`, `storeTokenResponse`, `readTokenCache`,
+> `getTokenInfo`, `purgeTokenCache`, `buildAuthUrl`, `exchangeCode`, `rateLimitRemaining`,
+> `enterRateLimitCooldown`, quota refresh). **Cloisonnement par slot** des 6 clés cache **niveau-compte**
+> (`TOKEN_CACHE_KEY`, `OAUTH_PENDING_KEY`, `REFRESH_QUOTA_KEY`, `RATELIMIT_KEY`, `LINK_ERROR_KEY`,
+> `degraded_warn`) ⇒ un 429/quota/échec d'auth d'un compte **ne gèle jamais** un autre (les clés déjà
+> suffixées par `eqId` et les clés OTP/démon restent intactes). `syncVehicles()` boucle sur
+> `slotsConfigures()`, tague chaque véhicule de son `accountSlot`, **désactivation FILTRÉE par slot** et
+> **jamais** sur un compte en échec de découverte / non parcouru. `cron()` **restructuré** : priming du
+> token **1× par slot** (try/catch + `continue` par slot, plus de `return` global), `syncDaemonToken()`
+> **slot 1 seulement**, un véhicule d'un slot indisponible/non configuré est **sauté** (jamais désactivé).
+> `connectionState()` = agrégat pire-état des comptes (via `connectionStateForSlot`) ; `health()` = 1 ligne
+> par compte configuré. Hooks `preConfig_client_id_2/_3`, `preConfig_brand_2/_3` (purge du token **du slot
+> concerné**, jamais l'OTP). **UI** (`configuration.txt`→`cp .php`) : section « **Compte principal
+> (pilotage à distance)** » (slot 1, inchangée) + sections repliables « **Compte secondaire N (lecture
+> seule)** » (rendues **seulement si slot 1 configuré**), OAuth 2 étapes + extraction APK + test par slot
+> (JS générique par délégation + `data-slot`), actions AJAX paramétrées par `slot` (borné 1..MAX). eqLogic :
+> champ **hidden `accountSlot`** (`eqLogicAttr`, re-soumis à chaque save — ne pas parier sur `a2o()` pour
+> une clé de routage) + `accountSlotLabel` readonly affiché. ⚠️ **Limite assumée** : pilotage à distance
+> (commandes/OTP/MQTT) sur le **compte principal (slot 1) UNIQUEMENT** — le démon MQTT reste
+> **mono-connexion** (`demond.py` inchangé). `createCommands()` ne crée les commandes **action** que si
+> `accountSlot==1` ; **garde runtime** dans `stellantisCmd::execute()` (commande action + `accountSlot!=1`
+> ⇒ refus « lecture seule »). Le vrai multi-comptes pour les commandes (démon multi-connexions) = futur UC.
+> Suite = post-MVP (supervision, robustesse, livraison…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.
@@ -523,8 +558,16 @@ Configuration & secrets :
   = constante `MAP_TILE_URL` = `staticmap.openstreetmap.de`). **UC34 (geofencing)** ajoute la **zone
   domicile partagée** : `home_lat`, `home_lon` (coordonnées du domicile — **chiffrées** via
   `$_encryptConfigKey`, données perso), `home_radius` (rayon m, défaut 150, non chiffré). `client_secret`
-  **chiffré**, jamais loggué.
+  **chiffré**, jamais loggué. **UC54 (multi-comptes, LECTURE seule)** ajoute des **slots de comptes fixes**
+  (`stellantis::MAX_ACCOUNTS=3`) : le **slot 1 = les clés ci-dessus (NON suffixées)** = compte principal
+  (pilotage à distance) ; les slots 2..N ajoutent les clés **suffixées** `brand_N`/`client_id_N`/
+  `client_secret_N`/`country_N`/`redirect_uri_N` (comptes secondaires **lecture seule**). `client_secret_2`/
+  `client_secret_3` sont dans `$_encryptConfigKey`. Nommage via `configKeyForSlot($base,$slot)` (non suffixé
+  si slot≤1). OTP/CID/broker/démon restent **mono-compte (slot 1)**.
 - **Par véhicule** (`configuration` de l'eqLogic) : `id` API, `vin`, `brand`, motorisation, capacités.
+  **UC54** ajoute `accountSlot` (slot du compte de rattachement, autorité = découverte, défaut 1 ; **champ
+  hidden `eqLogicAttr`** dans le formulaire desktop pour survivre au save — clé de routage critique) +
+  `accountSlotLabel` (libellé lisible readonly).
   **UC24** ajoute 2 champs **saisis manuellement** (formulaire desktop, éditables) : `battery_capacity`
   (capacité batterie kWh, sert à estimer l'énergie de charge) et `charge_tarif` (prix du kWh €, coût estimé).
   **UC32** ajoute `isVisiblePanel` (case du formulaire desktop, défaut 1 posé par le plugin — inclut le

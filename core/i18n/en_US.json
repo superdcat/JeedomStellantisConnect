@@ -1,6 +1,5 @@
 {
     "plugins/stellantis/plugin_info/configuration.php": {
-        "Connexion API Stellantis / PSA": "Stellantis / PSA API connection",
         "Plugin non configuré : renseignez au minimum le Client ID et le Client Secret.": "Plugin not configured: please enter at least the Client ID and Client Secret.",
         "Les identifiants Client ID et Client Secret ne sont pas fournis par Stellantis aux particuliers : ils doivent être extraits de l'application mobile de votre marque (APK) à l'aide d'un outil externe. Consultez la documentation du plugin pour la procédure.": "The Client ID and Client Secret credentials are not provided by Stellantis to individuals: they must be extracted from your brand's mobile application (APK) using an external tool. Refer to the plugin documentation for the procedure.",
         "Marque": "Brand",
@@ -78,13 +77,18 @@
         "Un SMS d'activation va être envoyé au numéro de votre compte. Ce quota est limité (20 par compte à vie) et définitif côté Stellantis. Continuer ?": "An activation SMS will be sent to your account's number. This quota is limited (20 per account for life) and permanent on Stellantis' side. Continue?",
         "Renseignez le code reçu par SMS et le code PIN de votre application mobile": "Enter the code received by SMS and the PIN code of your mobile app",
         "Activation en cours, veuillez patienter…": "Activation in progress, please wait…",
-        "Renouvellement en cours, veuillez patienter…": "Renewal in progress, please wait…"
+        "Renouvellement en cours, veuillez patienter…": "Renewal in progress, please wait…",
+        "Compte principal (pilotage à distance)": "Primary account (remote control)",
+        "Ce compte est en lecture seule : le pilotage à distance (commandes) n'est disponible que sur le compte principal": "This account is read-only: remote control (commands) is only available on the primary account",
+        "Configurez d'abord le compte principal ci-dessus": "First configure the primary account above",
+        "Compte secondaire %s (lecture seule)": "Secondary account %s (read-only)"
     },
     "plugins/stellantis/core/ajax/stellantis.ajax.php": {
         "401 - Accès non autorisé": "401 - Unauthorized access",
         "Plugin non configuré : renseignez la marque, le Client ID et le Client Secret puis sauvegardez": "Plugin not configured: enter the brand, the Client ID and the Client Secret then save",
         "Authentification réussie : le plugin est connecté à votre compte": "Authentication successful: the plugin is connected to your account",
-        "Aucune méthode correspondante à": "No method matching"
+        "Aucune méthode correspondante à": "No method matching",
+        "Ce compte n'est pas configuré : renseignez au minimum le Client ID et le Client Secret puis sauvegardez": "This account is not configured: enter at least the Client ID and Client Secret, then save"
     },
     "plugins/stellantis/core/ajax/stellantisMap.ajax.php": {
         "401 - Accès non autorisé": "401 - Unauthorized access"
@@ -246,7 +250,15 @@
         "Fenêtre arrière": "Rear window",
         "Toit ouvrant": "Sunroof",
         "Capot": "Hood",
-        "Ouvrant ouvert": "Door open"
+        "Ouvrant ouvert": "Door open",
+        "compte %1$d : %2$s": "account %1$d: %2$s",
+        "Compte principal": "Primary account",
+        "Compte secondaire %s — lecture seule": "Secondary account %s — read-only",
+        "(compte(s) concerné(s) : %s)": "(affected account(s): %s)",
+        "Connexion au compte principal": "Primary account connection",
+        "Configurez le compte principal depuis la configuration du plugin": "Configure the primary account from the plugin configuration",
+        "Connexion au compte secondaire %s": "Secondary account %s connection",
+        "Le pilotage à distance n'est disponible que sur le compte principal": "Remote control is only available on the primary account"
     },
     "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
         "Carte de position": "Position map",
@@ -313,7 +325,9 @@
         "Etat": "State",
         "Actions": "Actions",
         "Libellé du véhicule": "Vehicle label",
-        "Nom du véhicule tel que défini dans l'application mobile (pré-rempli avec la désignation commerciale, modifiable ; renseigné par la synchronisation)": "Vehicle name as defined in the mobile app (pre-filled with the commercial designation, editable; filled in by the synchronization)"
+        "Nom du véhicule tel que défini dans l'application mobile (pré-rempli avec la désignation commerciale, modifiable ; renseigné par la synchronisation)": "Vehicle name as defined in the mobile app (pre-filled with the commercial designation, editable; filled in by the synchronization)",
+        "Compte du véhicule": "Vehicle account",
+        "Compte Stellantis auquel ce véhicule est rattaché (renseigné par la synchronisation) — seul le compte principal permet le pilotage à distance": "Stellantis account this vehicle is linked to (filled in by the synchronization) — only the primary account allows remote control"
     },
     "plugins/stellantis/desktop/php/panel.php": {
         "401 - Accès non autorisé": "401 - Unauthorized access",

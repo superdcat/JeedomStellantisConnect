@@ -62,6 +62,19 @@ function stellantis_update() {
       log::add('stellantis', 'warning', 'Mise à jour UC32 : backfill panneau carte ignoré pour un équipement (' . $e->getMessage() . ')');
     }
   }
+  // UC54 : backfill 'accountSlot'/'accountSlotLabel' = 1/« Compte principal » pour les véhicules
+  // antérieurs à la fonctionnalité multi-comptes (jamais de régression — cf.
+  // assurerAccountSlotParDefaut : ne touche jamais un véhicule déjà routé vers un compte). Best-effort,
+  // idempotent, boucle INDÉPENDANTE (un échec ici ne doit pas empêcher les backfills ci-dessus).
+  foreach (eqLogic::byType('stellantis') as $eq) {
+    try {
+      if (stellantis::assurerAccountSlotParDefaut($eq)) {
+        $eq->save();
+      }
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'warning', 'Mise à jour UC54 : backfill compte ignoré pour un équipement (' . $e->getMessage() . ')');
+    }
+  }
 }
 
 // Fonction exécutée automatiquement après la suppression du plugin

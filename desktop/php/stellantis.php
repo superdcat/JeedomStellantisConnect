@@ -183,6 +183,23 @@ $iconeConnexion = ($etatConnexion['state'] == 'ok') ? 'fa-check-circle' : (($eta
 									<input type="text" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="energy" readonly>
 								</div>
 							</div>
+							<!-- UC54 : compte Stellantis de rattachement (1 = principal/pilotage à distance, 2/3 = secondaires
+							     lecture seule). Réécrit à chaque synchronisation comme brand/energy ci-dessus, comme
+							     accountSlotLabel — même pattern readonly. ⚠️ Champ CACHÉ MAIS OBLIGATOIRE : 'accountSlot' (la
+							     clé de ROUTAGE réelle, consommée par accountSlotDe()/refreshTelemetry/createCommands/cron)
+							     doit être re-soumise à chaque Sauvegarder comme vin/apiId/brand/label/energy ci-dessus, sinon
+							     un Sauvegarder sur un véhicule de compte secondaire risquerait de la réinitialiser au compte
+							     principal (comportement de fusion utils::a2o() non vérifié — ne pas s'y fier). Le libellé
+							     lisible (accountSlotLabel) reste affiché séparément, en readonly. -->
+							<input type="hidden" class="eqLogicAttr" data-l1key="configuration" data-l2key="accountSlot">
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Compte du véhicule}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Compte Stellantis auquel ce véhicule est rattaché (renseigné par la synchronisation) — seul le compte principal permet le pilotage à distance}}"></i></sup>
+								</label>
+								<div class="col-sm-6">
+									<input type="text" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="accountSlotLabel" readonly>
+								</div>
+							</div>
 							<!-- Exemple de champ de saisie du cron d'auto-actualisation avec assistant -->
 							<!-- La fonction cron de la classe du plugin doit contenir le code prévu pour que ce champ soit fonctionnel -->
 							<div class="form-group">

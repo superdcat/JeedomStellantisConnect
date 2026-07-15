@@ -31,7 +31,7 @@ $otpSmsCount = stellantis::otpSmsCount();
 ?>
 <form class="form-horizontal">
   <fieldset>
-    <legend><i class="fas fa-key"></i> {{Connexion API Stellantis / PSA}}</legend>
+    <legend><i class="fas fa-key"></i> {{Compte principal (pilotage à distance)}}</legend>
     <?php if (!$stellantisConfigure) { ?>
     <div class="alert alert-warning">{{Plugin non configuré : renseignez au minimum le Client ID et le Client Secret.}}</div>
     <?php } ?>
@@ -186,6 +186,123 @@ $otpSmsCount = stellantis::otpSmsCount();
       </div>
     </div>
   </fieldset>
+  <?php
+  // UC54 — Comptes secondaires (2..MAX_ACCOUNTS), LECTURE SEULE (pas de pilotage à distance : OTP/commandes
+  // restent slot 1 uniquement). Rendus SEULEMENT si le compte principal est déjà configuré (évite le cas
+  // « slot 1 vide, seul un compte secondaire configuré » — cf. 54-tech.md § UI). Bornes dérivées de la
+  // constante stellantis::MAX_ACCOUNTS (jamais de « 2, 3 » en dur : suit la constante si elle évolue).
+  // Boucle plutôt qu'un helper PHP dédié : évite toute déclaration de fonction nommée dans ce fichier
+  // (inclus tel quel, jamais de risque de redéclaration).
+  if ($stellantisConfigure) {
+    foreach (range(2, stellantis::MAX_ACCOUNTS) as $slotN) {
+      $infoTokenSlot = stellantis::isConfigured($slotN) ? stellantisApi::getTokenInfo($slotN) : array('authenticated' => false, 'expiresIn' => null);
+      ?>
+  <fieldset>
+    <legend>
+      <a data-toggle="collapse" href="#stellantis_compteSecondaire<?php echo $slotN; ?>" aria-expanded="false">
+        <i class="fas fa-key"></i> <?php echo sprintf(__('Compte secondaire %s (lecture seule)', __FILE__), $slotN); ?> <i class="fas fa-chevron-down"></i>
+      </a>
+    </legend>
+    <div class="collapse" id="stellantis_compteSecondaire<?php echo $slotN; ?>">
+      <div class="alert alert-info">{{Ce compte est en lecture seule : le pilotage à distance (commandes) n'est disponible que sur le compte principal}}</div>
+      <div class="form-group">
+        <label class="col-md-4 control-label">{{Marque}}
+          <sup><i class="fas fa-question-circle tooltips" title="{{Détermine le serveur d'authentification (idpcvs) et le realm utilisés}}"></i></sup>
+        </label>
+        <div class="col-md-4">
+          <select class="configKey form-control" data-l1key="brand_<?php echo $slotN; ?>">
+            <option value="peugeot">Peugeot</option>
+            <option value="citroen">Citroën</option>
+            <option value="ds">DS</option>
+            <option value="opel">Opel</option>
+            <option value="vauxhall">Vauxhall</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="col-md-4 control-label">{{Client ID}}
+          <sup><i class="fas fa-question-circle tooltips" title="{{Identifiant client OAuth2 de l'application mobile de la marque (extrait via un outil externe)}}"></i></sup>
+        </label>
+        <div class="col-md-4">
+          <input class="configKey form-control" data-l1key="client_id_<?php echo $slotN; ?>"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="col-md-4 control-label">{{Client Secret}}
+          <sup><i class="fas fa-question-circle tooltips" title="{{Secret client OAuth2 (stocké chiffré, jamais affiché en clair)}}"></i></sup>
+        </label>
+        <div class="col-md-4">
+          <input type="password" autocomplete="new-password" class="configKey form-control" data-l1key="client_secret_<?php echo $slotN; ?>"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="col-md-4 control-label">{{Extraction automatique}}</label>
+        <div class="col-md-6">
+          <a class="btn btn-default stellantis_btExtraireApkN" data-slot="<?php echo $slotN; ?>"><i class="fas fa-download"></i> {{Extraire automatiquement}}</a>
+          <div class="help-block">{{Renseigne le Client ID et le Client Secret à partir de l'application mobile de votre marque. En cas d'échec, la saisie manuelle reste possible (voir la documentation du plugin).}}</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="col-md-4 control-label">{{Pays}}
+          <sup><i class="fas fa-question-circle tooltips" title="{{Code pays à 2 lettres (ex. fr) utilisé pour construire l'URL de redirection par défaut}}"></i></sup>
+        </label>
+        <div class="col-md-4">
+          <input class="configKey form-control" data-l1key="country_<?php echo $slotN; ?>" placeholder="fr"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="col-md-4 control-label">{{URL de redirection}}
+          <sup><i class="fas fa-question-circle tooltips" title="{{redirect_uri OAuth2 (schéma de l'app mobile de la marque, ex. mymap://oauth2redirect/fr)}}"></i></sup>
+        </label>
+        <div class="col-md-4">
+          <input class="configKey form-control" data-l1key="redirect_uri_<?php echo $slotN; ?>" placeholder="{{Laisser vide pour utiliser le défaut de la marque}}"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="col-md-4 control-label">{{État de la connexion}}</label>
+        <div class="col-md-6">
+          <?php if ($infoTokenSlot['authenticated']) { ?>
+          <span class="label label-success">{{Connecté au compte}}</span>
+          <?php } else { ?>
+          <span class="label label-warning">{{Non connecté : suivez les deux étapes ci-dessous après avoir sauvegardé la configuration}}</span>
+          <?php } ?>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="col-md-4 control-label">{{1. URL d'autorisation}}
+          <sup><i class="fas fa-question-circle tooltips" title="{{Ouvrez cette URL dans votre navigateur et connectez-vous avec le compte de l'application mobile de votre marque}}"></i></sup>
+        </label>
+        <div class="col-md-6">
+          <a class="btn btn-default stellantis_btGenererAuthUrlN" data-slot="<?php echo $slotN; ?>"><i class="fas fa-key"></i> {{Générer l'URL d'autorisation}}</a>
+          <div class="stellantis_zoneAuthUrlN" style="display:none;margin-top:5px;">
+            <a class="stellantis_lienAuthUrlN" href="#" target="_blank" rel="noopener"><i class="fas fa-external-link-alt"></i> {{Ouvrir la page de connexion de votre marque}}</a>
+            <div class="help-block">{{URL de redirection attendue}} : <code class="stellantis_redirectUriInfoN"></code></div>
+          </div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="col-md-4 control-label">{{2. Code d'autorisation}}
+          <sup><i class="fas fa-question-circle tooltips" title="{{Après connexion, le navigateur affiche une page d'erreur (c'est normal) : copiez l'URL complète (commençant par mymap://... et contenant code=). Si rien n'apparaît, récupérez le paramètre code (36 caractères) dans l'onglet Réseau (F12). Collez-le sans attendre : le code expire vite.}}"></i></sup>
+        </label>
+        <div class="col-md-6">
+          <input class="form-control stellantis_codeAuthN" placeholder="{{Collez l'URL de redirection complète (recommandé) ou le code seul}}"/>
+          <a class="btn btn-success stellantis_btValiderCodeN" data-slot="<?php echo $slotN; ?>" style="margin-top:5px;"><i class="fas fa-check"></i> {{Valider le code}}</a>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="col-md-4 control-label">{{Tester la connexion}}</label>
+        <div class="col-md-6">
+          <a class="btn btn-default stellantis_btTestConnexionN" data-slot="<?php echo $slotN; ?>"><i class="fas fa-plug"></i> {{Tester la connexion}}</a>
+        </div>
+      </div>
+    </div>
+  </fieldset>
+      <?php
+    }
+  } else {
+    ?>
+  <div class="alert alert-info">{{Configurez d'abord le compte principal ci-dessus}}</div>
+  <?php } ?>
   <fieldset>
     <legend><i class="fas fa-satellite-dish"></i> {{Pilotage à distance (activation OTP)}}</legend>
     <div class="alert alert-warning">{{Le pilotage à distance (réveil, charge, verrouillage…) nécessite une activation unique par SMS + le code PIN de votre application mobile. Attention : les quotas sont stricts et définitifs côté Stellantis (6 codes par 24 h, 20 activations SMS par compte à vie). N'activez que lorsque vous êtes prêt.}}</div>
@@ -403,6 +520,131 @@ $otpSmsCount = stellantis::otpSmsCount();
           return;
         }
         $('#div_alert').showAlert({ message: data.result.message, level: data.result.ok ? 'success' : 'danger' });
+      }
+    });
+  });
+  // UC54 — Comptes secondaires (2/3), lecture seule. Handlers GÉNÉRIQUES par délégation + data-slot
+  // (ids non uniques : 2 fieldsets identiques peuvent coexister dans le DOM, contrairement au compte
+  // principal ci-dessus qui garde ses ids fixes). Chaque handler retrouve son fieldset via .closest('.collapse')
+  // pour ne mettre à jour QUE la section du compte concerné.
+  $('body').off('click', '.stellantis_btExtraireApkN').on('click', '.stellantis_btExtraireApkN', function () {
+    var bouton = $(this);
+    var slot = bouton.data('slot');
+    var conteneur = bouton.closest('.collapse');
+    var brand = conteneur.find('.configKey[data-l1key="brand_' + slot + '"]').value();
+    var country = conteneur.find('.configKey[data-l1key="country_' + slot + '"]').value();
+    if (!brand) {
+      $('#div_alert').showAlert({ message: "{{Sélectionnez d'abord la marque de votre véhicule}}", level: 'warning' });
+      return;
+    }
+    bootbox.confirm(
+      "{{Le plugin va télécharger (~100 Mo) et analyser l'application mobile de votre marque, hébergée sur un dépôt communautaire tiers, pour en extraire vos identifiants. Cette API n'est pas officielle. Continuer ?}}",
+      function (resultat) {
+        if (!resultat) {
+          return;
+        }
+        $('#div_alert').showAlert({ message: "{{Téléchargement de l'application mobile en cours (~100 Mo), veuillez patienter…}}", level: 'info' });
+        $.ajax({
+          type: 'POST',
+          url: 'plugins/stellantis/core/ajax/stellantis.ajax.php',
+          data: { action: 'extractCredentials', brand: brand, country: country, slot: slot },
+          dataType: 'json',
+          error: function (request, status, error) {
+            handleAjaxError(request, status, error);
+          },
+          success: function (data) {
+            if (data.state != 'ok') {
+              $('#div_alert').showAlert({ message: data.result, level: 'danger' });
+              return;
+            }
+            if (!data.result.ok) {
+              $('#div_alert').showAlert({ message: data.result.message, level: 'danger' });
+              return;
+            }
+            conteneur.find('.configKey[data-l1key="client_id_' + slot + '"]').value(data.result.client_id);
+            conteneur.find('.configKey[data-l1key="client_secret_' + slot + '"]').value(data.result.client_secret);
+            $('#div_alert').showAlert({ message: data.result.message, level: 'success' });
+          }
+        });
+      }
+    );
+  });
+  $('body').off('click', '.stellantis_btGenererAuthUrlN').on('click', '.stellantis_btGenererAuthUrlN', function () {
+    var bouton = $(this);
+    var slot = bouton.data('slot');
+    var conteneur = bouton.closest('.collapse');
+    $.ajax({
+      type: 'POST',
+      url: 'plugins/stellantis/core/ajax/stellantis.ajax.php',
+      data: { action: 'getAuthUrl', slot: slot },
+      dataType: 'json',
+      error: function (request, status, error) {
+        handleAjaxError(request, status, error);
+      },
+      success: function (data) {
+        if (data.state != 'ok') {
+          $('#div_alert').showAlert({ message: data.result, level: 'danger' });
+          return;
+        }
+        conteneur.find('.stellantis_lienAuthUrlN').attr('href', data.result.url);
+        conteneur.find('.stellantis_redirectUriInfoN').text(data.result.redirectUri);
+        conteneur.find('.stellantis_zoneAuthUrlN').show();
+      }
+    });
+  });
+  $('body').off('click', '.stellantis_btValiderCodeN').on('click', '.stellantis_btValiderCodeN', function () {
+    var bouton = $(this);
+    var slot = bouton.data('slot');
+    var conteneur = bouton.closest('.collapse');
+    var code = conteneur.find('.stellantis_codeAuthN').val().trim();
+    if (code == '') {
+      $('#div_alert').showAlert({ message: "{{Collez d'abord l'URL de redirection (ou le code) dans le champ}}", level: 'warning' });
+      return;
+    }
+    $.ajax({
+      type: 'POST',
+      url: 'plugins/stellantis/core/ajax/stellantis.ajax.php',
+      data: { action: 'submitAuthCode', code: code, slot: slot },
+      dataType: 'json',
+      error: function (request, status, error) {
+        handleAjaxError(request, status, error);
+      },
+      success: function (data) {
+        if (data.state != 'ok') {
+          $('#div_alert').showAlert({ message: data.result, level: 'danger' });
+          return;
+        }
+        conteneur.find('.stellantis_codeAuthN').val('');
+        $('#div_alert').showAlert({ message: data.result, level: 'success' });
+      }
+    });
+  });
+  $('body').off('click', '.stellantis_btTestConnexionN').on('click', '.stellantis_btTestConnexionN', function () {
+    var bouton = $(this);
+    var slot = bouton.data('slot');
+    if (bouton.hasClass('disabled')) {
+      return;
+    }
+    $.ajax({
+      type: 'POST',
+      url: 'plugins/stellantis/core/ajax/stellantis.ajax.php',
+      data: { action: 'testConnection', slot: slot },
+      dataType: 'json',
+      beforeSend: function () {
+        bouton.addClass('disabled');
+      },
+      complete: function () {
+        bouton.removeClass('disabled');
+      },
+      error: function (request, status, error) {
+        handleAjaxError(request, status, error);
+      },
+      success: function (data) {
+        if (data.state != 'ok') {
+          $('#div_alert').showAlert({ message: data.result, level: 'danger' });
+          return;
+        }
+        $('#div_alert').showAlert({ message: data.result.message, level: data.result.ok ? 'success' : 'warning' });
       }
     });
   });

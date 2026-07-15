@@ -1,6 +1,5 @@
 {
     "plugins/stellantis/plugin_info/configuration.php": {
-        "Connexion API Stellantis / PSA": "Stellantis-/PSA-API-Verbindung",
         "Plugin non configuré : renseignez au minimum le Client ID et le Client Secret.": "Plugin nicht konfiguriert: Bitte geben Sie mindestens die Client-ID und das Client-Secret ein.",
         "Les identifiants Client ID et Client Secret ne sont pas fournis par Stellantis aux particuliers : ils doivent être extraits de l'application mobile de votre marque (APK) à l'aide d'un outil externe. Consultez la documentation du plugin pour la procédure.": "Die Anmeldedaten Client-ID und Client-Secret werden von Stellantis nicht an Privatpersonen herausgegeben: Sie müssen mithilfe eines externen Tools aus der mobilen App Ihrer Marke (APK) extrahiert werden. Das Vorgehen finden Sie in der Plugin-Dokumentation.",
         "Marque": "Marke",
@@ -78,13 +77,18 @@
         "Un SMS d'activation va être envoyé au numéro de votre compte. Ce quota est limité (20 par compte à vie) et définitif côté Stellantis. Continuer ?": "Es wird eine Aktivierungs-SMS an die Nummer Ihres Kontos gesendet. Dieses Kontingent ist begrenzt (20 pro Konto auf Lebenszeit) und auf Stellantis-Seite endgültig. Fortfahren?",
         "Renseignez le code reçu par SMS et le code PIN de votre application mobile": "Geben Sie den per SMS erhaltenen Code und den PIN-Code Ihrer mobilen App ein",
         "Activation en cours, veuillez patienter…": "Aktivierung läuft, bitte warten…",
-        "Renouvellement en cours, veuillez patienter…": "Erneuerung läuft, bitte warten…"
+        "Renouvellement en cours, veuillez patienter…": "Erneuerung läuft, bitte warten…",
+        "Compte principal (pilotage à distance)": "Hauptkonto (Fernsteuerung)",
+        "Ce compte est en lecture seule : le pilotage à distance (commandes) n'est disponible que sur le compte principal": "Dieses Konto ist schreibgeschützt: Die Fernsteuerung (Befehle) ist nur beim Hauptkonto verfügbar",
+        "Configurez d'abord le compte principal ci-dessus": "Konfigurieren Sie zuerst das Hauptkonto oben",
+        "Compte secondaire %s (lecture seule)": "Zweitkonto %s (nur Lesezugriff)"
     },
     "plugins/stellantis/core/ajax/stellantis.ajax.php": {
         "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert",
         "Plugin non configuré : renseignez la marque, le Client ID et le Client Secret puis sauvegardez": "Plugin nicht konfiguriert: Geben Sie die Marke, die Client-ID und das Client-Secret ein und speichern Sie anschließend",
         "Authentification réussie : le plugin est connecté à votre compte": "Authentifizierung erfolgreich: Das Plugin ist mit Ihrem Konto verbunden",
-        "Aucune méthode correspondante à": "Keine passende Methode für"
+        "Aucune méthode correspondante à": "Keine passende Methode für",
+        "Ce compte n'est pas configuré : renseignez au minimum le Client ID et le Client Secret puis sauvegardez": "Dieses Konto ist nicht konfiguriert: Geben Sie mindestens die Client-ID und das Client-Secret ein und speichern Sie anschließend"
     },
     "plugins/stellantis/core/ajax/stellantisMap.ajax.php": {
         "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert"
@@ -246,7 +250,15 @@
         "Fenêtre arrière": "Heckscheibe",
         "Toit ouvrant": "Schiebedach",
         "Capot": "Motorhaube",
-        "Ouvrant ouvert": "Tür/Klappe offen"
+        "Ouvrant ouvert": "Tür/Klappe offen",
+        "compte %1$d : %2$s": "Konto %1$d: %2$s",
+        "Compte principal": "Hauptkonto",
+        "Compte secondaire %s — lecture seule": "Zweitkonto %s — nur Lesezugriff",
+        "(compte(s) concerné(s) : %s)": "(betroffene(s) Konto(en): %s)",
+        "Connexion au compte principal": "Verbindung zum Hauptkonto",
+        "Configurez le compte principal depuis la configuration du plugin": "Konfigurieren Sie das Hauptkonto über die Plugin-Konfiguration",
+        "Connexion au compte secondaire %s": "Verbindung zum Zweitkonto %s",
+        "Le pilotage à distance n'est disponible que sur le compte principal": "Die Fernsteuerung ist nur beim Hauptkonto verfügbar"
     },
     "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
         "Carte de position": "Positionskarte",
@@ -313,7 +325,9 @@
         "Etat": "Status",
         "Actions": "Aktionen",
         "Libellé du véhicule": "Fahrzeugbezeichnung",
-        "Nom du véhicule tel que défini dans l'application mobile (pré-rempli avec la désignation commerciale, modifiable ; renseigné par la synchronisation)": "Name des Fahrzeugs, wie in der mobilen App definiert (vorausgefüllt mit der Handelsbezeichnung, änderbar; wird durch die Synchronisierung ausgefüllt)"
+        "Nom du véhicule tel que défini dans l'application mobile (pré-rempli avec la désignation commerciale, modifiable ; renseigné par la synchronisation)": "Name des Fahrzeugs, wie in der mobilen App definiert (vorausgefüllt mit der Handelsbezeichnung, änderbar; wird durch die Synchronisierung ausgefüllt)",
+        "Compte du véhicule": "Fahrzeugkonto",
+        "Compte Stellantis auquel ce véhicule est rattaché (renseigné par la synchronisation) — seul le compte principal permet le pilotage à distance": "Stellantis-Konto, dem dieses Fahrzeug zugeordnet ist (wird durch die Synchronisierung ausgefüllt) — nur das Hauptkonto ermöglicht die Fernsteuerung"
     },
     "plugins/stellantis/desktop/php/panel.php": {
         "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert",

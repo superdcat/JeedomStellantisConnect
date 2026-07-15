@@ -284,6 +284,17 @@ avec le PHP via le **socket Jeedom** (`jeedom_socket`/`jeedom_com`, déjà prés
    l'exposition devient un **choix produit diffé­rable**, non une impossibilité technique (le refus par
    clé-marque était **circulaire**). Écart assumé vs la 1ʳᵉ version de `54-multi-marques.md` (namespaçait
    par marque) → spec 54 mise à jour.
+   **Implémenté (UC54, 2026-07-15) — SLICE LECTURE SEULE** : slots fixes `MAX_ACCOUNTS=3`, **slot 1 =
+   config actuelle (clés NON suffixées, zéro migration)**, slots 2..N suffixés ; threading `$slot`
+   (défaut 1) à travers `getApiConfig`/`callWithToken`/`getToken`/`refreshToken`/… ; **cloisonnement par
+   slot** des 6 clés cache niveau-compte (token, oauth_pending, refresh_quota, ratelimit, link_error,
+   degraded_warn — via `cacheKeyForSlot`) ; `cron()`/`syncVehicles()` par slot (priming 1×/compte,
+   désactivation filtrée par slot). ⚠️ **Contrainte de design découverte** : `preConfig_<clé>` est un
+   **nom de méthode FIXE** (pas d'itération dynamique) → c'est ce qui **impose les slots fixes** (vs table
+   dynamique) — cf. mémoire `jeedom-encrypt-config-key`. **HORS PÉRIMÈTRE (différé)** : pilotage à distance
+   (commandes/OTP/MQTT) pour slots ≥2 — le démon MQTT reste **mono-connexion** (commandes = slot 1
+   uniquement ; slots ≥2 = lecture seule, garde runtime dans `stellantisCmd::execute()`). Un vrai
+   multi-comptes pour les commandes = futur UC (démon multi-connexions).
 
 ---
 
