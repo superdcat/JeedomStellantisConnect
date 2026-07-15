@@ -28,7 +28,7 @@ Un plugin Jeedom **n'est pas autonome** : il s'installe sous `<jeedom>/plugins/s
 PHP dépend du core Jeedom, atteint via `require_once __DIR__ . '/../../../../core/php/core.inc.php';`.
 Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 
-> **État d'avancement (2026-07-14)** : l'id a été renommé `template` → `stellantis` (classes
+> **État d'avancement (2026-07-15)** : l'id a été renommé `template` → `stellantis` (classes
 > `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP lecture seule COMPLET** : UC01 à
 > UC10 sont implémentées (configuration du plugin, client HTTP REST, authentification OAuth2 PKCE/token,
 > test de connexion, découverte des véhicules, création/synchronisation des équipements, commandes info
@@ -387,8 +387,32 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > avant écriture (même convention qu'UC18/UC43 ; cf. `jeedom-cmd-creation-patterns` mémoire) — la config
 > reste brute (input admin peuplé en `.val()`, non interprété HTML). **Pas de commande `vin`** (décision
 > produit : éviter d'exposer le VIN sur les dashboards ; il reste visible en config admin). AC2 (nom par
-> défaut = marque + libellé) était **déjà** satisfait (`setName` MVP06, inchangé). Suite = post-MVP
-> (supervision, robustesse…).
+> défaut = marque + libellé) était **déjà** satisfait (`setName` MVP06, inchangé). **Post-MVP : UC52** —
+> **image / vignette du modèle du véhicule** (image d'équipement eqLogic ; 100 % local + **1
+> téléchargement best-effort au sync**, aucun MQTT, jamais d'appel au cron) : chaque véhicule reçoit une
+> image **cohérente servie same-origin** (jamais d'`<img>` externe → pas de blocage CSP). ⚠️ **Aucune
+> méthode `setImage()`** côté core : mécanisme réel = fichier `data/eqLogic/eqLogic{ID}-{sha512}.{type}` +
+> config `image::sha512`/`image::type` (lues par `getImage()`/`getCustomImage()`), repli natif = icône du
+> plugin. Cascade dans `assurerImageVehicule()` (appelée par `syncVehicles()` après `save()`, best-effort
+> `\Throwable`, **jamais au cron**) : **(1) photo modèle** best-effort depuis le champ `pictures` de
+> `/user/vehicles` — **shape runtime NON vérifiée** (`Url` = stub Swagger vide, jamais lu par les réfs, 3ᵉ
+> instance de la leçon `/maintenance`+`/alerts`) → parsing défensif `extraireUrlImageModele()` (URL https
+> sous `href`/`url`/`_links.self.href` ou chaîne directe) + **log `debug` de la forme brute** pour observer
+> la vraie shape en beta + téléchargement durci `telechargerImageModele()` (calqué `telechargerTuile` UC32 :
+> HTTPS strict, `FOLLOWLOCATION=false`, ≤ 2 Mo, content-type png/jpeg allow-list, **jamais de Bearer**,
+> **validation contenu `getimagesizefromstring`** en défense en profondeur du Content-Type déclaré) ;
+> **(2)** sinon **icône de marque** bundlée `plugin_info/brands/{peugeot,citroen,ds,opel,vauxhall}.png`
+> (badges tintés générés Pillow, **pas de logo déposé** — disclaimer trademark ajouté aux `docs/*/index.md`)
+> via `cheminIconeMarque()` (normalisation accents `mb_strtolower`+`iconv`, « Citroën »→`citroen`) ;
+> **(3)** sinon repli natif icône plugin. **Idempotence & self-heal** : marqueurs config `image::source`
+> (`model`|`brand`) + `image::model_url` évitent le re-download et permettent le self-heal au changement
+> d'URL/marque ; une image **posée manuellement** par l'utilisateur (`source` ∉ {model,brand}) n'est jamais
+> écrasée ; un échec **transitoire** de re-download **préserve** la photo modèle existante (pas de flicker).
+> `poserImageEqLogic()` : ordre **écrire-puis-purger** + glob **ancré sur `-`** ; `preRemove()` purge les
+> fichiers image du véhicule (sinon fuite disque). ⚠️ Les clés `image::*` ne sont **pas** dans le
+> formulaire desktop : elles survivent au « Sauvegarder » car `utils::a2o()` **fusionne** la config clé par
+> clé (nuance la règle « clé absente du form = effacée » — à confirmer en recette). Suite = post-MVP
+> (UC53 multi-véhicules/comptes, UC54 multi-marques, supervision, robustesse…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.

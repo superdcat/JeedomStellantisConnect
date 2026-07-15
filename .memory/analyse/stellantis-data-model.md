@@ -37,6 +37,14 @@ surnom renommable côté app ; `engine` = liste de `{class: Thermic|Electric, en
 Biologic}` — `energy` absent sur Electric).
 `id` ≠ VIN. Stocker `id` (config eqLogic `apiId`) et `vin` (`logicalId`).
 
+> **`pictures` (UC52, 2026-07-15)** : typé `list[Url]` dans `models/vehicle.py`, mais `Url` y est un
+> **stub Swagger VIDE** et **aucune** référence (`psa_car_controller`, HA) ne lit ce champ → **shape
+> runtime NON vérifiée** (3ᵉ instance de la leçon `/maintenance`+`/alerts`). UC52 (photo modèle) le lit
+> en **best-effort à parsing défensif** (URL https sous `href`/`url`/`_links.self.href` ou chaîne
+> directe) + **log `debug` de la forme brute** pour observer la vraie shape en beta. Repli = icône de
+> marque bundlée. Mécanisme d'image eqLogic (pas de `setImage()`, fichier `data/eqLogic/` +
+> `image::sha512`/`image::type`) détaillé dans `50-gestion-vehicules/52-tech.md`.
+
 > **Vocabulaire motorisation normalisé du plugin** (décision UC05, 2026-07-06) :
 > `Electric` / `Thermal` / `Hybrid` / `''` (inconnu) — dérivé par **présence** des classes dans
 > `engine[]` (comparaison insensible à la casse). L'UC07 mappe `energies[].type` du `/status`

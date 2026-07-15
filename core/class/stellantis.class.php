@@ -86,6 +86,21 @@ class stellantis extends eqLogic {
   // Anti-DoS mémoire : une tuile PNG 400x260 fait quelques dizaines de Ko, 512 Ko laisse une marge large.
   const MAP_TUILE_TAILLE_MAX = 524288;
 
+  // UC52 — Image / vignette du modèle : plafond de taille de la photo modèle téléchargée depuis
+  // 'pictures' (2 Mo — largement suffisant pour une vignette véhicule, borne le download best-effort).
+  const IMAGE_MODELE_TAILLE_MAX = 2097152;
+  // Table marque (normalisée sans accent, minuscule, alnum) → fichier asset bundlé dans
+  // plugin_info/brands/. 'ds'/'dsautomobiles' pointent le même fichier (l'API peut renvoyer "DS" ou
+  // "DS AUTOMOBILES" selon les cas — cf. cheminIconeMarque()).
+  const ICONES_MARQUES = array(
+    'peugeot' => 'peugeot.png',
+    'citroen' => 'citroen.png',
+    'ds' => 'ds.png',
+    'dsautomobiles' => 'ds.png',
+    'opel' => 'opel.png',
+    'vauxhall' => 'vauxhall.png',
+  );
+
   /*     * ***********************Methode static*************************** */
 
   /**
@@ -399,12 +414,20 @@ class stellantis extends eqLogic {
       }
       // La validation de forme de l'id pour un usage en path (/user/vehicles/{id}/...) est déléguée
       // à la regex de chemin de stellantisApi::call() — ne pas relâcher cette garantie côté call()
+      // UC52 : log debug de la forme brute de 'pictures' (shape runtime NON vérifiée contre le
+      // Swagger 'Url' — stub vide — ni lue par aucune implémentation de référence, cf. 52-tech.md).
+      // Diagnostic recette/beta uniquement, aseptisé + borné.
+      if (isset($brut['pictures'])) {
+        log::add('stellantis', 'debug', 'Découverte : forme brute pictures = ' . self::aseptiser((string) json_encode($brut['pictures']), 500));
+      }
       $vehicules[] = array(
         'id' => trim((string) $brut['id']),
         'vin' => trim((string) $brut['vin']),
         'brand' => (isset($brut['brand']) && is_scalar($brut['brand'])) ? (string) $brut['brand'] : '',
         'label' => (isset($brut['label']) && is_scalar($brut['label'])) ? (string) $brut['label'] : '',
         'energy' => self::energieDepuisEngine((isset($brut['engine']) && is_array($brut['engine'])) ? $brut['engine'] : array()),
+        // UC52 : shape runtime NON vérifiée (cf. 52-tech.md) → repli défensif tableau vide, jamais fatal.
+        'pictures' => (isset($brut['pictures']) && is_array($brut['pictures'])) ? $brut['pictures'] : array(),
       );
     }
     // Pagination jamais observée dans le code de référence : non gérée, mais détectée (cf. spec 05-tech)
@@ -516,6 +539,10 @@ class stellantis extends eqLogic {
         } else {
           $majs++;
         }
+        // UC52 : image d'équipement (photo modèle best-effort → sinon icône de marque). Best-effort, ne
+        // lève jamais (try/catch interne) : un échec image ne doit pas perturber la synchro (précédent
+        // suivreMaintenance). Appelée au sync uniquement (pas au cron — pas de fetch d'image périodique).
+        self::assurerImageVehicule($eqLogic, $v['brand'], $v['pictures']);
         // UC07 : créer les commandes info (selon motorisation) puis les peupler via le /status
         // (best-effort). Après save() (id disponible) et hors postSave → pas de récursion. La boucle
         // périodique de rafraîchissement est en UC08 ; ici c'est une passe unique au clic Synchroniser.
@@ -3925,6 +3952,274 @@ class stellantis extends eqLogic {
     return array('type' => 'image/png', 'body' => $corps);
   }
 
+  /* * ******************* UC52 — Image / vignette du modèle du véhicule ******************* */
+
+  /**
+   * Assure que l'équipement $_eq a une image cohérente : photo modèle du compte (best-effort, depuis
+   * 'pictures') en priorité, sinon icône de la marque cataloguée, sinon repli NATIF (icône du plugin —
+   * rien à faire ici). Best-effort, NE LÈVE JAMAIS (try/catch interne — précédent suivreMaintenance()/
+   * suivreAlertes()) : un échec d'image ne doit jamais perturber syncVehicles(). Appelée UNIQUEMENT au
+   * clic « Synchroniser » (jamais au cron() — pas de fetch d'image périodique, cf. 52-tech.md).
+   * Respecte une image posée manuellement par l'utilisateur (upload via la page core standard,
+   * 'image::source' ∉ {'model','brand'}) : ne l'écrase jamais.
+   */
+  private static function assurerImageVehicule(eqLogic $_eq, string $_brand, array $_pictures): void {
+    try {
+      $source = trim((string) $_eq->getConfiguration('image::source', ''));
+      $sha512Actuel = trim((string) $_eq->getConfiguration('image::sha512', ''));
+      if ($sha512Actuel !== '' && $source !== 'model' && $source !== 'brand') {
+        // Image personnalisée par l'utilisateur (upload manuel core) : ne jamais l'écraser.
+        return;
+      }
+      // 1) Photo modèle (best-effort, priorité — plus spécifique que l'icône de marque générique)
+      $poseModele = false;
+      $url = self::extraireUrlImageModele($_pictures);
+      if ($url !== null) {
+        if ($source === 'model' && trim((string) $_eq->getConfiguration('image::model_url', '')) === $url) {
+          // Déjà à jour (même URL) : aucun re-download (idempotence + self-heal au changement d'URL).
+          return;
+        }
+        $img = self::telechargerImageModele($url);
+        if ($img !== null && self::poserImageEqLogic($_eq, $img['body'], $img['type'])) {
+          $_eq->setConfiguration('image::source', 'model');
+          $_eq->setConfiguration('image::model_url', $url);
+          $_eq->save();
+          $poseModele = true;
+        }
+        // Échec (download ou écriture) : PAS de cache « known-bad » — re-tenté au prochain sync (manuel
+        // et rare, cooldown 15 s) ; on continue vers le repli marque ci-dessous.
+      }
+      if ($poseModele) {
+        return;
+      }
+      // Échec de (re)téléchargement modèle : si une photo modèle avait déjà été posée avec succès, la
+      // CONSERVER (échec probablement transitoire — timeout, 5xx, URL signée instable) plutôt que de
+      // régresser vers l'icône de marque générique. Le repli marque ne s'applique donc QUE si aucune
+      // photo modèle n'a jamais été posée pour ce véhicule.
+      if ($source === 'model') {
+        return;
+      }
+      // 2) Repli catalogue marque
+      $chemin = self::cheminIconeMarque($_brand);
+      if ($chemin === null) {
+        // Marque non cataloguée : ne rien poser (repli natif = icône du plugin). Ne touche à rien
+        // (ne régresse pas une image 'model'/'brand' déjà posée par un sync précédent).
+        return;
+      }
+      $contenu = @file_get_contents($chemin);
+      if ($contenu === false || $contenu === '') {
+        log::add('stellantis', 'warning', 'Image véhicule : asset de marque illisible (' . basename($chemin) . ')');
+        return;
+      }
+      $sha = sha512($contenu);
+      if ($sha512Actuel === $sha && $source === 'brand') {
+        // Déjà l'icône de marque courante : rien à réécrire (idempotence).
+        return;
+      }
+      if (self::poserImageEqLogic($_eq, $contenu, 'png')) {
+        $_eq->setConfiguration('image::source', 'brand');
+        // Efface une URL modèle périmée (sinon un futur sync sans photo modèle croirait à tort être
+        // encore à jour sur une ancienne URL, cf. garde du bloc 1 ci-dessus).
+        $_eq->setConfiguration('image::model_url', '');
+        $_eq->save();
+      }
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'debug', 'Image véhicule : échec best-effort (' . $e->getMessage() . ')');
+    }
+  }
+
+  /**
+   * Extrait une URL d'image de modèle exploitable depuis le champ 'pictures' brut de /user/vehicles
+   * (PUR — seul endroit du parsing de cette shape NON vérifiée au runtime, cf. 52-tech.md : le type
+   * Swagger 'Url' est un stub vide, aucune implémentation de référence ne lit ce champ). Parsing
+   * défensif : ignore tout élément non exploitable, ne devine pas de « meilleure taille » (shape
+   * inconnue). Retient la PREMIÈRE URL https valide trouvée ; retourne null si rien d'exploitable.
+   */
+  private static function extraireUrlImageModele(array $_pictures): ?string {
+    foreach ($_pictures as $element) {
+      $candidat = null;
+      $cleRetenue = '';
+      if (is_string($element)) {
+        $candidat = $element;
+        $cleRetenue = '(chaîne directe)';
+      } elseif (is_array($element)) {
+        if (isset($element['href']) && is_string($element['href'])) {
+          $candidat = $element['href'];
+          $cleRetenue = 'href';
+        } elseif (isset($element['url']) && is_string($element['url'])) {
+          $candidat = $element['url'];
+          $cleRetenue = 'url';
+        } elseif (isset($element['_links']['self']['href']) && is_string($element['_links']['self']['href'])) {
+          $candidat = $element['_links']['self']['href'];
+          $cleRetenue = '_links.self.href';
+        }
+      }
+      if ($candidat === null || trim($candidat) === '') {
+        continue;
+      }
+      $candidat = trim($candidat);
+      if (strtolower((string) parse_url($candidat, PHP_URL_SCHEME)) === 'https') {
+        log::add('stellantis', 'debug', 'Image modèle : URL retenue depuis pictures, clé ' . $cleRetenue);
+        return $candidat;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Télécharge la photo modèle EN MÉMOIRE (best-effort, calqué sur telechargerTuile()/UC32). Renvoie
+   * ['body'=>string,'type'=>'png'|'jpg'] ou null sur TOUT échec (jamais d'exception — simple
+   * enrichissement, le repli catalogue marque est géré par l'appelant assurerImageVehicule()). Durci
+   * anti-SSRF / anti-fuite token : HTTPS strict, PAS de redirection suivie, timeout court, taille
+   * bornée, User-Agent identifiant, content-type allow-list stricte png/jpeg (jamais SVG — script/
+   * markup), JAMAIS de header Authorization/Bearer (l'URL vient de notre API mais est traitée comme non
+   * fiable, cf. 52-tech.md § Sécurité).
+   */
+  private static function telechargerImageModele(string $_url): ?array {
+    $scheme = strtolower((string) parse_url($_url, PHP_URL_SCHEME));
+    if ($scheme !== 'https') {
+      log::add('stellantis', 'info', 'Image modèle : URL refusée (HTTPS obligatoire)');
+      return null;
+    }
+    $protos = defined('CURLPROTO_HTTPS') ? CURLPROTO_HTTPS : 0;
+    $ch = curl_init();
+    $options = array(
+      CURLOPT_URL => $_url,
+      CURLOPT_HTTPGET => true,
+      CURLOPT_RETURNTRANSFER => true,
+      CURLOPT_HEADER => false,
+      // Anti-SSRF : jamais de redirection suivie (comme telechargerTuile — l'URL est non fiable).
+      CURLOPT_FOLLOWLOCATION => false,
+      CURLOPT_CONNECTTIMEOUT => 5,
+      CURLOPT_TIMEOUT => 15,
+      CURLOPT_MAXFILESIZE => self::IMAGE_MODELE_TAILLE_MAX,
+      CURLOPT_USERAGENT => self::MAP_USER_AGENT,
+      CURLOPT_HTTPHEADER => array('Accept: image/png,image/jpeg'),
+      // Jamais de header Authorization/Bearer (cf. downloadToFile/telechargerTuile : tiers non fiable).
+    );
+    if ($protos !== 0) {
+      $options[CURLOPT_PROTOCOLS] = $protos;
+    }
+    curl_setopt_array($ch, $options);
+    $corps = curl_exec($ch);
+    $curlErrno = curl_errno($ch);
+    $curlError = curl_error($ch);
+    $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $contentType = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+    curl_close($ch);
+    if ($corps === false || $curlErrno !== 0) {
+      log::add('stellantis', 'info', 'Image modèle : erreur de transport cURL #' . $curlErrno . ' : ' . $curlError);
+      return null;
+    }
+    if ($httpCode < 200 || $httpCode >= 300) {
+      log::add('stellantis', 'info', 'Image modèle : refusée par le serveur (HTTP ' . $httpCode . ')');
+      return null;
+    }
+    // Allow-list stricte aux formats raster attendus (type dérivé du content-type, JAMAIS de
+    // l'extension d'URL) : jamais 'image/svg+xml' (SVG pouvant embarquer du script/markup) ni page
+    // d'erreur HTML relayée comme si c'était l'image attendue.
+    $typeNormalise = strtolower($contentType);
+    if (strpos($typeNormalise, 'image/png') === 0) {
+      $type = 'png';
+    } elseif (strpos($typeNormalise, 'image/jpeg') === 0) {
+      $type = 'jpg';
+    } else {
+      log::add('stellantis', 'info', 'Image modèle : type de contenu inattendu (' . $contentType . ')');
+      return null;
+    }
+    // 2e garde (contenu) en défense en profondeur du Content-Type déclaré (1re garde ci-dessus) : un
+    // serveur distant compromis pourrait mentir avec 'Content-Type: image/png' tout en renvoyant du
+    // HTML/JS. getimagesizefromstring() décode les entêtes réels du fichier (magic bytes) — un échec
+    // signifie que ce n'est PAS une image raster valide, jamais persisté sous data/eqLogic/.
+    if (getimagesizefromstring((string) $corps) === false) {
+      log::add('stellantis', 'info', 'Image modèle : contenu non reconnu comme image valide');
+      return null;
+    }
+    return array('body' => (string) $corps, 'type' => $type);
+  }
+
+  /**
+   * Résout le chemin absolu de l'asset marque bundlé (plugin_info/brands/) pour $_brand, ou null si la
+   * marque n'est pas cataloguée ou si le fichier est absent (repli natif icône du plugin dans ce cas,
+   * géré par l'appelant assurerImageVehicule()). PUR/STATIQUE.
+   * ⚠️ Normalisation : minuscule MULTIBYTE (mb_strtolower — un simple strtolower() ne réduit pas un
+   * caractère accentué majuscule comme « Ë », octets non-ASCII laissés tels quels) PUIS suppression des
+   * accents, dans cet ordre, AVANT le sluggage — « Citroën »/« CITROËN »/« citroën » doivent tous
+   * résoudre 'citroen', jamais un slug tronqué par un tréma qui aurait survécu en majuscule (cf.
+   * 52-tech.md). iconv TRANSLIT en primaire ; repli str_replace des accents français courants (déjà en
+   * minuscule à ce stade) si iconv est indisponible/échoue (extension non garantie partout).
+   */
+  private static function cheminIconeMarque(string $_brand): ?string {
+    $normalise = mb_strtolower(trim($_brand), 'UTF-8');
+    $translitere = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $normalise);
+    if (is_string($translitere) && trim($translitere) !== '') {
+      $normalise = $translitere;
+    } else {
+      $accents = array(
+        'à' => 'a', 'â' => 'a', 'ä' => 'a', 'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e',
+        'î' => 'i', 'ï' => 'i', 'ô' => 'o', 'ö' => 'o', 'ù' => 'u', 'û' => 'u', 'ü' => 'u', 'ç' => 'c',
+      );
+      $normalise = strtr($normalise, $accents);
+    }
+    $slug = (string) preg_replace('/[^a-z0-9]/', '', strtolower($normalise));
+    if (!isset(self::ICONES_MARQUES[$slug])) {
+      return null;
+    }
+    // __DIR__ = core/class → 2 niveaux plus haut = racine du plugin.
+    $chemin = dirname(__DIR__, 2) . '/plugin_info/brands/' . self::ICONES_MARQUES[$slug];
+    return file_exists($chemin) ? $chemin : null;
+  }
+
+  /**
+   * Pose (ou remplace) l'image de l'équipement $_eq avec le binaire $_binaire (type 'png'|'jpg') : IL
+   * N'EXISTE AUCUNE méthode setImage() côté core (cf. 52-tech.md) — mécanisme réel du core :
+   * data/eqLogic/eqLogic{ID}-{sha512}.{type} + configuration 'image::sha512'/'image::type' (lues par
+   * eqLogic::getImage()/getCustomImage() ; repli natif = icône du plugin si 'image::sha512' est vide).
+   * Ordre ÉCRIRE-PUIS-PURGER (jamais de fenêtre sans image) : n'écrit QUE le fichier + pose la config ;
+   * le save() est laissé à L'APPELANT (mutualisé avec les autres clés 'image::source'/'image::model_url'
+   * — un seul save(), comme le reste de syncVehicles()). IO défensive, NE LÈVE JAMAIS : renvoie false
+   * sur tout échec (dossier inaccessible, écriture KO) — la synchro continue (log warning).
+   */
+  private static function poserImageEqLogic(eqLogic $_eq, string $_binaire, string $_type): bool {
+    $dir = self::dossierImageEqLogic();
+    if ($dir === '' || !is_dir($dir)) {
+      log::add('stellantis', 'warning', 'Image véhicule : dossier data/eqLogic inaccessible');
+      return false;
+    }
+    $sha = sha512($_binaire);
+    $fichier = 'eqLogic' . $_eq->getId() . '-' . $sha . '.' . $_type;
+    $ok = @file_put_contents($dir . '/' . $fichier, $_binaire);
+    if ($ok === false) {
+      log::add('stellantis', 'warning', 'Image véhicule : échec d\'écriture du fichier image');
+      return false;
+    }
+    $_eq->setConfiguration('image::sha512', $sha);
+    $_eq->setConfiguration('image::type', $_type);
+    // Purge des anciens fichiers de CET équipement, APRÈS l'écriture réussie (jamais de fenêtre sans
+    // image). Glob ANCRÉ sur le séparateur '-' : 'eqLogic12-*' ne doit jamais matcher 'eqLogic123-…'.
+    $anciens = @glob($dir . '/eqLogic' . $_eq->getId() . '-*');
+    if (is_array($anciens)) {
+      foreach ($anciens as $ancien) {
+        if (basename($ancien) !== $fichier) {
+          @unlink($ancien);
+        }
+      }
+    }
+    return true;
+  }
+
+  // Dossier data/eqLogic/ de la racine Jeedom (PAS un dossier du plugin : mécanisme standard du core
+  // pour les images custom d'équipement, cf. 52-tech.md). __DIR__ = core/class → 4 niveaux plus haut =
+  // racine Jeedom. Créé paresseusement si absent (best-effort) ; l'appelant gère l'échec via le retour
+  // de file_put_contents (pas d'exception ici).
+  private static function dossierImageEqLogic(): string {
+    $dir = dirname(__DIR__, 4) . '/data/eqLogic';
+    if (!is_dir($dir)) {
+      @mkdir($dir, 0775, true);
+    }
+    return $dir;
+  }
+
   /*     * *********************Méthodes d'instance************************* */
 
   // Fonction exécutée automatiquement avant la création de l'équipement
@@ -3952,7 +4247,19 @@ class stellantis extends eqLogic {
   }
 
   // Fonction exécutée automatiquement avant la suppression de l'équipement
+  // UC52 : purge best-effort des fichiers image posés par assurerImageVehicule()/poserImageEqLogic()
+  // (sinon fuite disque : les fichiers data/eqLogic/eqLogic{ID}-* d'un équipement supprimé ne sont
+  // sinon JAMAIS nettoyés). getId() reste résolvable à ce stade du cycle de vie. Glob ANCRÉ sur le '-'
+  // séparateur (même garde qu'en poserImageEqLogic — 'eqLogic12-*' ne matche pas 'eqLogic123-…'). Ne
+  // lève jamais (hook de cycle de vie core).
   public function preRemove() {
+    $dir = self::dossierImageEqLogic();
+    $fichiers = @glob($dir . '/eqLogic' . $this->getId() . '-*');
+    if (is_array($fichiers)) {
+      foreach ($fichiers as $fichier) {
+        @unlink($fichier);
+      }
+    }
   }
 
   // Fonction exécutée automatiquement après la suppression de l'équipement

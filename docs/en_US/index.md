@@ -9,6 +9,9 @@ mileage…) via the "connected car" API used by the official mobile applications
 > Stellantis does not provide developer access to individuals: you must retrieve the
 > credentials of your brand's mobile application yourself (see "Getting the credentials" below).
 
+> Brand names and colors (Peugeot, Citroën, DS, Opel, Vauxhall) are mentioned for identification
+> purposes only; this plugin is neither affiliated with nor endorsed by the manufacturers.
+
 ## Plugin configuration
 
 Go to `Plugins → Plugin management → Stellantis Connect → Configuration`. The settings

@@ -11,7 +11,16 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-14 (UC44 : `stellantis-data-model.md` § 2.4 — **ouvrants détaillés** :
+> **Dernière synchro** : 2026-07-15 (UC52 : `stellantis-data-model.md` § 1 — **image/vignette du modèle** :
+> le champ `pictures` de `/user/vehicles` (`list[Url]`, `Url` = stub Swagger vide, jamais lu par les réfs)
+> a une **shape runtime NON vérifiée** (3ᵉ instance de la leçon `/maintenance`+`/alerts`) → photo modèle
+> en **best-effort/parsing défensif + log debug** pour observer la vraie forme, repli icône de marque
+> bundlée. **Mécanisme d'image eqLogic** (contrat core, réutilisable) : **PAS de `setImage()`** →
+> `getImage()`/`getCustomImage()` lit `image::sha512`/`image::type` et sert
+> `data/eqLogic/eqLogic{ID}-{sha512}.{type}`, sinon icône plugin ; poser = écrire fichier +
+> `setConfiguration` + `save`, écrire-puis-purger (glob ancré `-`), nettoyer en `preRemove` ; servi
+> same-origin (pas de CSP) — détail dans `50-gestion-vehicules/52-tech.md`).
+> Précédemment 2026-07-14 (UC44 : `stellantis-data-model.md` § 2.4 — **ouvrants détaillés** :
 > `doors_state.opening[n].{identifier,state}` (enum connu 7 valeurs) → 8 commandes `door_<id>` (binary
 > `OPENING`, non historisées) + agrégat `opening_alert` (historisé). **Approche STATIQUE** (≠ UC43
 > dynamique) car enum petit/connu/labellisé ; helper pur `extraireOuvrants` (miroir `extraireVerrouillage`,
