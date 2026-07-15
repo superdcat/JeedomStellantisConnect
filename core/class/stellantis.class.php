@@ -71,6 +71,7 @@ class stellantis extends eqLogic {
 
   // Expression cron par défaut (véhicule sans « Auto-actualisation » renseignée) : toutes les 5 minutes.
   const CRON_DEFAUT = '*/5 * * * *';
+  const CRON_DEFAUT_STEP = 5; // pas (minutes) de CRON_DEFAUT ('*/5') — sert à la gate de phase anti-rafale UC72
 
   // Flag du dernier échec de lien (UC09), posé/effacé par cron() : distingue un refresh KO (rate-limit/
   // transport, token encore présent mais expiré) d'un état sain. TTL borné → auto-guérison.
@@ -2524,6 +2525,24 @@ class stellantis extends eqLogic {
     log::add('stellantis', 'warning', 'UC19 : démon bloqué après plusieurs échecs d\'authentification MQTT (alerte utilisateur)');
   }
 
+  // UC72 — Alerte utilisateur « rate-limit API (HTTP 429), appels suspendus », PAR COMPTE. PUBLIC (appelée
+  // depuis stellantisApi::enterRateLimitCooldown, classe distincte — précédent stellantisApi→stellantis :
+  // getApiConfig/isConfigured/accountSlotDe). Tag suffixé par slot : un removeAll d'un compte n'efface pas
+  // l'alerte d'un autre. removeAll+add ⇒ au plus un message actif par compte (pas d'empilement). Pas de
+  // throttle-key (contrairement à alerterOtpRequired/alerterDaemonAuthFailed) : le cooldown 429 lui-même
+  // rend l'appel edge-triggered (callWithToken court-circuite avant httpRequest pendant le cooldown, donc
+  // enterRateLimitCooldown ne peut être ré-appelée qu'après expiration réelle du cooldown de ce compte).
+  public static function alerterRateLimit(int $_slot): void {
+    $tag = 'rate_limited_' . $_slot;
+    message::removeAll('stellantis', $tag);
+    if ($_slot > 1) {
+      message::add('stellantis', sprintf(__('Rate-limit de l\'API PSA (HTTP 429) sur le compte secondaire %s : appels temporairement suspendus pour protéger le compte d\'un blocage. Le rafraîchissement reprend automatiquement ensuite.', __FILE__), $_slot), '', $tag);
+    } else {
+      message::add('stellantis', __('Rate-limit de l\'API PSA (HTTP 429) : appels temporairement suspendus pour protéger le compte d\'un blocage. Le rafraîchissement reprend automatiquement ensuite.', __FILE__), '', $tag);
+    }
+    log::add('stellantis', 'warning', 'UC72 : rate-limit API (HTTP 429) → alerte utilisateur' . ($_slot > 1 ? ' (compte ' . $_slot . ')' : ''));
+  }
+
   // Purge le remote token + le device OTP + l'état d'alerte/pending. Appelée sur changement de
   // credentials/marque (device devenu incohérent) et à la désinstallation. NE réinitialise PAS le
   // compteur SMS à vie (sécurité : ne jamais rouvrir un quota potentiellement épuisé côté serveur).
@@ -3847,6 +3866,9 @@ class stellantis extends eqLogic {
    * une expression autorefresh non alignée (ex. « toutes les 7 min ») ne matcherait jamais. Chaque
    * minute est visitée →
    * toute expression valide finit par être honorée. Cadence par défaut 5 min via CRON_DEFAUT.
+   * UC72 : la cadence PAR DÉFAUT (autorefresh vide) ne passe plus par isDue() mais par une gate de phase
+   * déterministe (eqId % 5) — anti-rafale, la flotte ne tombe plus due à la même minute ; isDue() ne
+   * concerne plus que les cadences autorefresh PERSONNALISÉES (opt-out intégral, inchangé).
    * Lecture REST seule : PAS de wakeup (cf. spec 08 / analyse § 1.4).
    * UC54 : le priming du token et les garde-fous anti-ban (429/quota) sont désormais PAR COMPTE — un
    * compte en échec (réseau, auth cassée, cooldown 429…) n'empêche JAMAIS le rafraîchissement des
@@ -3889,6 +3911,9 @@ class stellantis extends eqLogic {
         // Lien à ce compte OK pour cette passe (UC09) : efface tout flag d'erreur antérieur DE CE SLOT.
         cache::delete(stellantisApi::cacheKeyForSlot(self::LINK_ERROR_KEY, $slot));
         cache::delete(stellantisApi::cacheKeyForSlot('stellantis::degraded_warn', $slot));
+        // UC72 : ce compte n'est plus sous cooldown 429 (sinon on serait passé par le `continue` ci-dessus)
+        // ET le priming vient de réussir ⇒ la suspension annoncée est bien terminée : efface l'alerte.
+        message::removeAll('stellantis', 'rate_limited_' . $slot);
         // UC11 : propager proactivement le token courant au démon MQTT (si lancé et token changé), sans
         // attendre un rejet réactif du broker. SLOT 1 UNIQUEMENT (le démon/pilotage à distance est mono-
         // compte). Best-effort, jamais bloquant pour le polling.
@@ -3928,6 +3953,10 @@ class stellantis extends eqLogic {
         // flotte doivent continuer d'être traités.
       }
     }
+    // UC72 : figée UNE SEULE FOIS pour toute la passe (pas par itération) — un /status lent (timeout cURL
+    // 15 s) pourrait sinon faire franchir la minute en cours de passe et donner des décisions de phase
+    // incohérentes entre deux véhicules d'une même flotte.
+    $minuteActuelle = (int) date('i');
     foreach ($vehicules as $eqLogic) {
       // UC54 : compte de rattachement DE CE véhicule (accountSlotDe() est défensif : valeur absente/
       // corrompue/hors bornes → compte principal). Un véhicule dont le compte n'est plus configuré (ou
@@ -3956,23 +3985,38 @@ class stellantis extends eqLogic {
         continue;
       }
       $autorefresh = trim((string) $eqLogic->getConfiguration('autorefresh', ''));
-      $expression = ($autorefresh != '') ? $autorefresh : self::CRON_DEFAUT;
-      try {
-        $cron = new Cron\CronExpression(checkAndFixCron($expression), new Cron\FieldFactory());
-        if (!$cron->isDue()) {
+      if ($autorefresh != '') {
+        // Cadence PERSONNALISÉE (opt-out de l'anti-rafale UC72) : évaluée telle quelle via CronExpression,
+        // INCHANGÉ (cf. docblock de cron() : chaque minute + isDue() exact ⇒ toute expression valide finit
+        // par être honorée).
+        try {
+          $cron = new Cron\CronExpression(checkAndFixCron($autorefresh), new Cron\FieldFactory());
+          if (!$cron->isDue()) {
+            continue;
+          }
+        } catch (\Throwable $e) {
+          // Expression invalide : on NE rafraîchit PAS (le repli agressif contredirait l'anti-ban). Warning
+          // throttlé (1×/h/véhicule) pour ne pas noyer les logs (cron chaque minute) ; détail en debug.
+          $cleWarn = 'stellantis::cron_warn::' . $eqLogic->getId();
+          if (cache::byKey($cleWarn)->getValue('') == '') {
+            // eqLogic #id (jamais getHumanName/logicalId : le nom peut valoir le VIN si brand+label vides, cf. UC06)
+            log::add('stellantis', 'warning', 'Cron : « Auto-actualisation » invalide pour l\'équipement #' . $eqLogic->getId() . ', véhicule non rafraîchi');
+            cache::set($cleWarn, '1', 3600);
+          }
+          log::add('stellantis', 'debug', 'Cron : expression « Auto-actualisation » rejetée pour l\'équipement #' . $eqLogic->getId() . ' : ' . $e->getMessage());
           continue;
         }
-      } catch (\Throwable $e) {
-        // Expression invalide : on NE rafraîchit PAS (le repli agressif contredirait l'anti-ban). Warning
-        // throttlé (1×/h/véhicule) pour ne pas noyer les logs (cron chaque minute) ; détail en debug.
-        $cleWarn = 'stellantis::cron_warn::' . $eqLogic->getId();
-        if (cache::byKey($cleWarn)->getValue('') == '') {
-          // eqLogic #id (jamais getHumanName/logicalId : le nom peut valoir le VIN si brand+label vides, cf. UC06)
-          log::add('stellantis', 'warning', 'Cron : « Auto-actualisation » invalide pour l\'équipement #' . $eqLogic->getId() . ', véhicule non rafraîchi');
-          cache::set($cleWarn, '1', 3600);
+      } else {
+        // Cadence PAR DÉFAUT (5 min, CRON_DEFAUT) + anti-rafale UC72 : décalage de phase déterministe par
+        // véhicule (offset = eqId % CRON_DEFAUT_STEP) pour que la flotte ne tombe plus due à la même
+        // minute (0/5/10…). CRON_DEFAUT_STEP = le pas de CRON_DEFAUT ('*/5'), nommé explicitement pour que
+        // le couplage entre les deux constantes reste visible si CRON_DEFAUT change un jour.
+        // $minuteActuelle est figée pour toute la passe (voir hoist avant la boucle). Invariance fuseau :
+        // tout décalage horaire réel est un multiple de 15 min (≤ Népal +5:45), donc divisible par 5 ⇒
+        // minute % CRON_DEFAUT_STEP est identique quel que soit le fuseau.
+        if ($minuteActuelle % self::CRON_DEFAUT_STEP !== $eqLogic->getId() % self::CRON_DEFAUT_STEP) {
+          continue;
         }
-        log::add('stellantis', 'debug', 'Cron : expression « Auto-actualisation » rejetée pour l\'équipement #' . $eqLogic->getId() . ' : ' . $e->getMessage());
-        continue;
       }
       // Robustesse : un véhicule en erreur (API injoignable, statut illisible…) n'interrompt pas la boucle
       try {
@@ -5028,6 +5072,14 @@ class stellantisApi {
   private static function enterRateLimitCooldown(int $_slot = 1): void {
     cache::set(self::cacheKeyForSlot(self::RATELIMIT_KEY, $_slot), time() + self::RATELIMIT_COOLDOWN, self::RATELIMIT_COOLDOWN);
     log::add('stellantis', 'warning', 'Rate-limit API (HTTP 429) : pause anti-blocage de ' . self::RATELIMIT_COOLDOWN . ' s, appels suspendus' . ($_slot > 1 ? ' (compte ' . $_slot . ')' : ''));
+    // UC72 : alerte utilisateur (AC2 « avec alerte ») — point unique qui voit TOUT 429 (cron, commandes,
+    // OTP). Edge-triggered : le cooldown court-circuite les appels suivants, donc rappelée au plus une
+    // fois par fenêtre. Best-effort (ne doit jamais faire échouer la gestion d'erreur transport).
+    try {
+      stellantis::alerterRateLimit($_slot);
+    } catch (\Throwable $e) {
+      // alerte best-effort : un échec ici ne doit jamais remonter dans httpRequest/handleApiError.
+    }
   }
 
   // Statut non sensible pour l'UI (aucun token exposé), DU COMPTE $_slot.

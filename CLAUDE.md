@@ -476,6 +476,31 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > core (valeur `last_command_result` déjà `aseptiser`+`htmlspecialchars` à l'écriture UC18 ⇒ sûre ; rendu
 > visuel du lien à confirmer en recette). Le « format attendu par le core pour `health()` » (À confirmer
 > de la spec) est **résolu** depuis UC09 (cf. mémoire `jeedom-health-page-contract`).
+> **Post-MVP : UC72** — **rate-limiting & anti-ban** (supervision/robustesse, 100 % local, **AUCUN appel
+> réseau/MQTT neuf** : ne fait que *borner/tracer* les appels existants) : l'audit a confirmé que la
+> quasi-totalité du périmètre anti-ban est **déjà en place** (cooldown 429 global **par compte** fixe
+> 900 s respecté par cron ET commandes ; wakeup cooldown 300 s + quota 5/20 min = **AC3** ; debounce
+> commandes 10 s + quota global ; quota refresh 5/30 min). **Deux ajouts ciblés dans
+> `core/class/stellantis.class.php`** : (1) **anti-rafale du polling** (déplacé depuis UC53) — à la
+> cadence par défaut, la flotte tombait due à la **même minute** (0/5/10…) ⇒ rafale ; désormais **gate de
+> phase déterministe** `((int) date('i')) % CRON_DEFAUT_STEP !== eqId % CRON_DEFAUT_STEP ⇒ continue`
+> (nouvelle const `CRON_DEFAUT_STEP=5`), `$minuteActuelle` **figée 1×/passe** (hoist hors boucle : un
+> `/status` lent ne doit pas faire franchir la minute). **Choix assumé vs l'expression cron `%d-59/5`
+> suggérée par la spec** : gate modulo (invariant fuseau, testable par lecture) car `php` absent en local
+> ⇒ syntaxe cron `A-B/step` non éprouvée (cf. mémoire `jeedom-cron-autorefresh`). `autorefresh`
+> personnalisé = **opt-out intégral** (branche `isDue()` inchangée). Offset 0 (`eqId%5==0`) garde le
+> planning `*/5` exact ; offsets 1-4 décalés (⚠️ `last_update` observable :00/:05→:01/:06… — à signaler au
+> changelog). (2) **Alerte utilisateur sur 429** (**AC2 « avec alerte »**) — nouveau helper
+> `public static alerterRateLimit(int $_slot)` (calqué `alerterOtpRequired`/`alerterDaemonAuthFailed`, tag
+> **suffixé par slot** `rate_limited_<slot>`, `removeAll`+`add` **sans throttle-key** car
+> **edge-triggered** par le cooldown lui-même), appelée depuis le **point unique** `enterRateLimitCooldown()`
+> (best-effort try/catch) qui voit **tout** 429 (cron/commandes/OTP), effacée dans la branche succès du
+> priming. **Backoff exponentiel volontairement écarté** (décision de cadrage, cf. `72-tech.md`) : seuils
+> de ban non documentés (calibrage = supposition), piège de reset identifié (`getToken()` = cache-hit ne
+> prouve pas la joignabilité), ROI faible vs quotas existants ; l'alerte fournit désormais la télémétrie
+> pour concevoir un vrai backoff plus tard, sur preuve. Chemins de rafale **résiduels documentés comme
+> assumés** (hors scope) : `syncVehicles()` (refresh dos-à-dos, cooldown 15 s anti-double-clic seul) et la
+> consommation `CMD_PENDING` du cron (bornée par WAKEUP_QUOTA/debounce).
 > Suite = post-MVP (supervision, robustesse, livraison…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement

@@ -263,7 +263,9 @@
         "Consulter la documentation en ligne": "Online-Dokumentation ansehen",
         "Démon arrêté — pilotage à distance indisponible": "Daemon gestoppt — Fernsteuerung nicht verfügbar",
         "Démarrez le démon depuis la page de configuration du plugin": "Starten Sie den Daemon über die Konfigurationsseite des Plugins",
-        "Dernière commande : %s": "Letzter Befehl: %s"
+        "Dernière commande : %s": "Letzter Befehl: %s",
+        "Rate-limit de l'API PSA (HTTP 429) : appels temporairement suspendus pour protéger le compte d'un blocage. Le rafraîchissement reprend automatiquement ensuite.": "Ratenbegrenzung der PSA-API (HTTP 429): Aufrufe werden vorübergehend ausgesetzt, um das Konto vor einer Sperrung zu schützen. Die Aktualisierung wird danach automatisch fortgesetzt.",
+        "Rate-limit de l'API PSA (HTTP 429) sur le compte secondaire %s : appels temporairement suspendus pour protéger le compte d'un blocage. Le rafraîchissement reprend automatiquement ensuite.": "Ratenbegrenzung der PSA-API (HTTP 429) beim Zweitkonto %s: Aufrufe werden vorübergehend ausgesetzt, um das Konto vor einer Sperrung zu schützen. Die Aktualisierung wird danach automatisch fortgesetzt."
     },
     "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
         "Carte de position": "Positionskarte",
