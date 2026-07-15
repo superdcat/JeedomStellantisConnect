@@ -461,6 +461,21 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > **mono-connexion** (`demond.py` inchangé). `createCommands()` ne crée les commandes **action** que si
 > `accountSlot==1` ; **garde runtime** dans `stellantisCmd::execute()` (commande action + `accountSlot!=1`
 > ⇒ refus « lecture seule »). Le vrai multi-comptes pour les commandes (démon multi-connexions) = futur UC.
+> **Post-MVP : UC71** — **page Santé & fraîcheur complétée** (supervision, 100 % lecture cache/local,
+> **AUCUN appel réseau** — AC2 par construction) : `stellantis::health()` (socle MVP/09, déjà étendu par
+> UC12/UC19/UC54) est **complétée** de 3 lignes — (1) **lien Documentation** (ancre HTML construite via le
+> nouveau helper `docUrl()` qui lit `plugin_info/info.json` et remplace `#language#`, **source unique**,
+> `htmlspecialchars`+`rel="noopener noreferrer"`, ligne omise si illisible) ; (2) **état démon complété** —
+> le cas « OTP actif MAIS démon arrêté » (auparavant silencieux) est signalé `state=false` (branches UC19
+> `connected`/`retrying`/`auth_failed` inchangées) ; (3) **dernier résultat de commande par véhicule**
+> (`last_command_result`, UC18) affiché **avant** le `continue` privacy (un résultat de commande n'est pas
+> une donnée de localisation). ⚠️ Le `state` (couleur vert/rouge) de cette ligne est dérivé d'un
+> **marqueur cache machine NON traduit** — `CMD_STATUS_KEY.$eqId` = `$interp['notify']` posé par
+> `traiterRetourCommande` à côté de la valeur affichée (try/catch DÉDIÉ) — **jamais** du texte affiché
+> (traduit ⇒ un test sur « Échec » casserait en en/de/es). `result`/`advice` sont rendus **HTML** par le
+> core (valeur `last_command_result` déjà `aseptiser`+`htmlspecialchars` à l'écriture UC18 ⇒ sûre ; rendu
+> visuel du lien à confirmer en recette). Le « format attendu par le core pour `health()` » (À confirmer
+> de la spec) est **résolu** depuis UC09 (cf. mémoire `jeedom-health-page-contract`).
 > Suite = post-MVP (supervision, robustesse, livraison…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement

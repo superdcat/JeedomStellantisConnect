@@ -1531,6 +1531,8 @@ class stellantis extends eqLogic {
    * méthode STATIQUE retournant des lignes ['test','result','advice','state' => bool].
    * UC54 : une ligne « Connexion au compte principal » (slot 1) puis une ligne « Connexion au compte
    * secondaire N » par compte secondaire CONFIGURÉ, suivies d'une ligne de fraîcheur par véhicule activé.
+   * UC71 : + ligne lien documentation, + ligne « démon arrêté » (OTP actif mais démon non lancé), +
+   * ligne « dernière commande » par véhicule (last_command_result, colorée via le marqueur CMD_STATUS_KEY).
    * AUCUN appel réseau : lecture du cache + valeur courante de la commande last_update.
    */
   public static function health(): array {
@@ -1568,34 +1570,58 @@ class stellantis extends eqLogic {
       'state' => ($otp != 'expired'),
     );
     // UC19 : état de la connexion démon↔broker (FSM de reconnexion). AUCUN appel réseau (lecture cache
-    // seule, alimentée par handleDaemonMessage). Affichée seulement si le démon tourne ET le pilotage à
-    // distance est actif — sinon c'est du bruit (démon non lancé, ou OTP non activé : rien à signaler ici).
-    if (self::deamon_info()['state'] == 'ok' && $otp == 'active') {
-      $connState = (string) cache::byKey(self::DAEMON_CONN_STATE_KEY)->getValue('');
-      if ($connState == 'auth_failed') {
+    // seule, alimentée par handleDaemonMessage). Affichée seulement si le pilotage à distance est actif —
+    // sinon c'est du bruit (OTP non activé : rien à signaler ici). UC71 : le cas démon arrêté est
+    // désormais signalé lui aussi (auparavant silencieux quand deamon_info()['state'] != 'ok').
+    if ($otp == 'active') {
+      if (self::deamon_info()['state'] == 'ok') {
+        $connState = (string) cache::byKey(self::DAEMON_CONN_STATE_KEY)->getValue('');
+        if ($connState == 'auth_failed') {
+          $lignes[] = array(
+            'test' => __('Connexion du démon (pilotage à distance)', __FILE__),
+            'result' => __('Authentification refusée — reconnexion suspendue', __FILE__),
+            'advice' => __('Réactivez le pilotage à distance (OTP) puis redémarrez le démon', __FILE__),
+            'state' => false,
+          );
+        } elseif ($connState == 'connected') {
+          $lignes[] = array(
+            'test' => __('Connexion du démon (pilotage à distance)', __FILE__),
+            'result' => __('Connecté au broker', __FILE__),
+            'advice' => '',
+            'state' => true,
+          );
+        } elseif ($connState == 'retrying') {
+          $lignes[] = array(
+            'test' => __('Connexion du démon (pilotage à distance)', __FILE__),
+            'result' => __('Reconnexion en cours', __FILE__),
+            'advice' => '',
+            'state' => true,
+          );
+        }
+        // $connState == '' (non initialisé, ex. juste après démarrage) : ligne omise, jamais interprétée
+        // comme un échec (cf. pattern otpState — le vide n'est pas une erreur).
+      } else {
+        // UC71 : démon arrêté alors que le pilotage à distance est activé — problème réel (les commandes
+        // à distance sont indisponibles), à distinguer du cas OTP non activé (rien à signaler, ci-dessus).
         $lignes[] = array(
           'test' => __('Connexion du démon (pilotage à distance)', __FILE__),
-          'result' => __('Authentification refusée — reconnexion suspendue', __FILE__),
-          'advice' => __('Réactivez le pilotage à distance (OTP) puis redémarrez le démon', __FILE__),
+          'result' => __('Démon arrêté — pilotage à distance indisponible', __FILE__),
+          'advice' => __('Démarrez le démon depuis la page de configuration du plugin', __FILE__),
           'state' => false,
         );
-      } elseif ($connState == 'connected') {
-        $lignes[] = array(
-          'test' => __('Connexion du démon (pilotage à distance)', __FILE__),
-          'result' => __('Connecté au broker', __FILE__),
-          'advice' => '',
-          'state' => true,
-        );
-      } elseif ($connState == 'retrying') {
-        $lignes[] = array(
-          'test' => __('Connexion du démon (pilotage à distance)', __FILE__),
-          'result' => __('Reconnexion en cours', __FILE__),
-          'advice' => '',
-          'state' => true,
-        );
       }
-      // $connState == '' (non initialisé, ex. juste après démarrage) : ligne omise, jamais interprétée
-      // comme un échec (cf. pattern otpState — le vide n'est pas une erreur).
+    }
+    // UC71 : lien vers la documentation en ligne (best-effort, source unique plugin_info/info.json).
+    $docUrl = self::docUrl();
+    if ($docUrl !== '') {
+      $lignes[] = array(
+        'test' => __('Documentation', __FILE__),
+        'result' => '<a target="_blank" rel="noopener noreferrer" href="'
+          . htmlspecialchars($docUrl, ENT_QUOTES, 'UTF-8') . '">'
+          . __('Consulter la documentation en ligne', __FILE__) . '</a>',
+        'advice' => '',
+        'state' => true,
+      );
     }
     foreach (eqLogic::byType('stellantis', true) as $eqLogic) {
       $nom = $eqLogic->getName();
@@ -1608,6 +1634,22 @@ class stellantis extends eqLogic {
           'result' => __('Capacité batterie non renseignée — énergie de charge non estimée', __FILE__),
           'advice' => __('Renseignez la capacité (kWh) dans la configuration du véhicule pour estimer l\'énergie de charge', __FILE__),
           'state'  => true,
+        );
+      }
+      // UC71 : dernier résultat de commande à distance (UC18, last_command_result). Placé AVANT le
+      // continue de la branche privacy ci-dessous : un résultat de commande n'est PAS une donnée de
+      // localisation, il doit s'afficher même en mode privacy. Ligne omise si aucune commande n'a jamais
+      // été émise (valeur vide), pour ne pas ajouter de bruit. state dérivé du marqueur cache
+      // MACHINE-READABLE (non traduit) posé par traiterRetourCommande, jamais du texte affiché (traduit).
+      $cmdRes = $eqLogic->getCmd('info', self::CMD_RESULT_LOGICAL_ID);
+      $valRes = is_object($cmdRes) ? (string) $cmdRes->execCmd() : '';
+      if ($valRes !== '') {
+        $statut = (string) cache::byKey(self::CMD_STATUS_KEY . $eqLogic->getId())->getValue('');
+        $lignes[] = array(
+          'test' => $nom,
+          'result' => sprintf(__('Dernière commande : %s', __FILE__), $valRes),
+          'advice' => '',
+          'state' => ($statut !== 'failure'),
         );
       }
       // Privacy connu du dernier /status (cf. refreshTelemetry) : signalé sans être une erreur dure.
@@ -1643,6 +1685,22 @@ class stellantis extends eqLogic {
       }
     }
     return $lignes;
+  }
+
+  // UC71 — URL de documentation (source unique : plugin_info/info.json, déjà utilisé par le core pour le
+  // lien « aide » natif). Best-effort : '' si le fichier est illisible ou la clé absente/vide (jamais de
+  // lien cassé sur la page Santé). Aucun appel réseau — lecture d'un fichier local du plugin.
+  private static function docUrl(): string {
+    try {
+      $info = json_decode((string) file_get_contents(dirname(__DIR__, 2) . '/plugin_info/info.json'), true);
+      $tpl = (is_array($info) && isset($info['documentation'])) ? (string) $info['documentation'] : '';
+      if ($tpl === '') {
+        return '';
+      }
+      return str_replace('#language#', (string) config::byKey('language', 'core', 'fr_FR'), $tpl);
+    } catch (\Throwable $e) {
+      return '';
+    }
   }
 
   // Âge lisible d'un timestamp Unix (chaînes UI LITTÉRALES pour l'extracteur i18n — cf. definitionsCommandes).
@@ -2076,6 +2134,16 @@ class stellantis extends eqLogic {
     } catch (\Throwable $e) {
       log::add('stellantis', 'warning', 'Retour d\'état : MAJ de last_command_result impossible pour l\'équipement #' . $eqId . ' (' . $e->getMessage() . ')');
     }
+    // UC71 : marqueur d'état MACHINE-READABLE (jamais traduit) à côté de la valeur affichée, pour colorer la
+    // ligne « Dernière commande » de la page Santé sans dépendre d'un texte traduit. Lifetime 0 (même
+    // convention que DAEMON_CONN_STATE_KEY) : jamais expiré, écrasé au prochain ack. Try/catch DÉDIÉ (distinct
+    // de celui ci-dessus) : un échec du marqueur ne doit ni être confondu avec un échec de checkAndUpdateCmd
+    // (message trompeur si la valeur a bien été mise à jour) ni faire lever le callback (best-effort).
+    try {
+      cache::set(self::CMD_STATUS_KEY . $eqId, $interp['notify'], 0);
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'warning', 'Retour d\'état : marqueur d\'état de commande non mis à jour pour l\'équipement #' . $eqId . ' (' . $e->getMessage() . ')');
+    }
     // 6) Notif centre de messages (jamais silencieux). removeAll avant add ⇒ au plus un message actif par
     //    véhicule, actualisé (pas d'empilement — même pattern que otp_required).
     $cleMessage = 'command_failed::' . $eqId;
@@ -2483,6 +2551,7 @@ class stellantis extends eqLogic {
   const CMD_CORR_KEY = 'stellantis::cmd_corr::';                 // + correlation_id (cache) => eqId : corrélation ack→véhicule (toute commande MQTT)
   const CMD_CORR_TTL = 300;                                      // TTL du mapping corrélation→eqId (s) : fenêtre d'attente de l'ack d'une commande (wakeup/charge/…)
   const CMD_RESULT_LOGICAL_ID = 'last_command_result';          // logicalId de l'info « Dernier résultat commande » (UC18), alimentée par le callback démon
+  const CMD_STATUS_KEY = 'stellantis::last_cmd_status::';       // + eqId (cache lifetime 0) : statut machine du dernier ack (notify UC18), pour colorer la ligne Santé (UC71)
   const MQTT_RESP_TOPIC_PREFIX = 'psa/RemoteServices/to/cid/';  // préfixe des topics d'ACK de commande (UC18) ; les events/MPHRTServices sont hors périmètre du retour d'état
   const WAKEUP_QUOTA_KEY = 'stellantis::wakeup_quota';           // quota GLOBAL compte (fenêtre glissante JSON)
   const WAKEUP_QUOTA_MAX = 5;                                     // marge sous le ban serveur (~6 wakeups / 20 min, niveau COMPTE)

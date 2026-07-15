@@ -258,7 +258,12 @@
         "Connexion au compte principal": "Conexión de la cuenta principal",
         "Configurez le compte principal depuis la configuration du plugin": "Configure la cuenta principal desde la configuración del plugin",
         "Connexion au compte secondaire %s": "Conexión de la cuenta secundaria %s",
-        "Le pilotage à distance n'est disponible que sur le compte principal": "El control remoto solo está disponible en la cuenta principal"
+        "Le pilotage à distance n'est disponible que sur le compte principal": "El control remoto solo está disponible en la cuenta principal",
+        "Documentation": "Documentación",
+        "Consulter la documentation en ligne": "Consultar la documentación en línea",
+        "Démon arrêté — pilotage à distance indisponible": "Demonio detenido — control remoto no disponible",
+        "Démarrez le démon depuis la page de configuration du plugin": "Inicie el demonio desde la página de configuración del plugin",
+        "Dernière commande : %s": "Último comando: %s"
     },
     "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
         "Carte de position": "Mapa de posición",

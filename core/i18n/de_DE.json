@@ -258,7 +258,12 @@
         "Connexion au compte principal": "Verbindung zum Hauptkonto",
         "Configurez le compte principal depuis la configuration du plugin": "Konfigurieren Sie das Hauptkonto über die Plugin-Konfiguration",
         "Connexion au compte secondaire %s": "Verbindung zum Zweitkonto %s",
-        "Le pilotage à distance n'est disponible que sur le compte principal": "Die Fernsteuerung ist nur beim Hauptkonto verfügbar"
+        "Le pilotage à distance n'est disponible que sur le compte principal": "Die Fernsteuerung ist nur beim Hauptkonto verfügbar",
+        "Documentation": "Dokumentation",
+        "Consulter la documentation en ligne": "Online-Dokumentation ansehen",
+        "Démon arrêté — pilotage à distance indisponible": "Daemon gestoppt — Fernsteuerung nicht verfügbar",
+        "Démarrez le démon depuis la page de configuration du plugin": "Starten Sie den Daemon über die Konfigurationsseite des Plugins",
+        "Dernière commande : %s": "Letzter Befehl: %s"
     },
     "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
         "Carte de position": "Positionskarte",
