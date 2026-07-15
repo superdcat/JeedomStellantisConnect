@@ -411,8 +411,22 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > `poserImageEqLogic()` : ordre **écrire-puis-purger** + glob **ancré sur `-`** ; `preRemove()` purge les
 > fichiers image du véhicule (sinon fuite disque). ⚠️ Les clés `image::*` ne sont **pas** dans le
 > formulaire desktop : elles survivent au « Sauvegarder » car `utils::a2o()` **fusionne** la config clé par
-> clé (nuance la règle « clé absente du form = effacée » — à confirmer en recette). Suite = post-MVP
-> (UC53 multi-véhicules/comptes, UC54 multi-marques, supervision, robustesse…).
+> clé (nuance la règle « clé absente du form = effacée » — à confirmer en recette). **Post-MVP : UC53** —
+> **multi-véhicules & multi-comptes** : **UC de CADRAGE, livrable 100 % documentaire, AUCUN code** (décision
+> utilisateur après challenge advisor). **AC1** (« sync correcte/performante à plusieurs véhicules ») est
+> **déjà satisfaite au MVP** — documenté explicitement dans `53-tech.md` : quotas durs **GLOBAUX au compte**
+> (`WAKEUP_QUOTA`/refresh, jamais par véhicule), mutualisation du token (`getToken()` 1×/passe cron),
+> `try/catch` par véhicule, backoff 429 global ; **limites assumées** (`syncVehicles()` synchrone borné par
+> le cooldown 15 s ; pagination `/user/vehicles` non gérée, loggée depuis UC05) ; l'**anti-rafale proactif
+> du polling** (spread de phase des refresh en cadence défaut `*/5`) est **déplacé en UC72**. **AC2**
+> (besoin multi-comptes) **tranché & capitalisé** (`stellantis-api-architecture.md` § 4.5) : 1 plugin Jeedom
+> = 1 config + 1 token global + 1 OTP → **1 compte/1 marque** aujourd'hui (la table `BRANDS` rend la marque
+> *sélectionnable*, **pas simultanée** — corrige la sur-affirmation § 4.4). Design **UC54** = namespacing par
+> **identifiant de compte générique** (marque = attribut du compte, clé cache `TOKEN_CACHE_KEY::<accountId>`,
+> cron prime le token 1× par compte distinct) → couvre le multi-marques **et** laisse ouvert « 2 comptes
+> même marque » (choix produit diffé­rable, pas fatalité technique — le refus par clé-marque était
+> circulaire) ; `54-multi-marques.md` recablée en conséquence (écart assumé). Suite = post-MVP
+> (UC54 multi-marques, supervision, robustesse…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
 > réel, pas un instantané figé.

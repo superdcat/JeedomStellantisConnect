@@ -268,6 +268,22 @@ avec le PHP via le **socket Jeedom** (`jeedom_socket`/`jeedom_com`, déjà prés
    B1 resterait envisageable pour rester « sans Python » si le démon pose problème de packaging.
 4. **Couverture multi-marques** dès le MVP (paramètre marque) vs Peugeot d'abord : viser **multi-marques
    dès le MVP** (le seul impact est une table TLD/realm), faible coût.
+   ⚠️ **Corrigé (2026-07-15, UC53)** : « le seul impact est une table TLD/realm » est **inexact**. La
+   table `BRANDS` rend la marque **sélectionnable**, **pas simultanée** — un plugin Jeedom = **une** config
+   (`config::byKey(..., 'stellantis')`) + **une** clé cache token globale + **un** OTP → **1 installation =
+   1 compte = 1 marque**. Le vrai multi-marques (foyer Peugeot **+** Citroën) exige en plus le
+   **namespacing des credentials/tokens** → voir point 5.
+5. **Multi-comptes / multi-marques simultanés** (cadré par **UC53**, `53-tech.md`, 2026-07-15 ;
+   implémentation = **UC54**) : généraliser la config mono-compte en une **table indexée par identifiant de
+   compte générique** — `accounts: {<accountId> → {brand, client_id, client_secret, country,
+   redirect_uri}}` — la **marque étant un attribut du compte** (et **non** la clé). Clé cache token
+   `TOKEN_CACHE_KEY::<accountId>` (+ OTP par compte) ; `stellantisApi` résout le compte depuis la config du
+   véhicule (`accountId`) ; le cron prime le token **1× par compte distinct** de la flotte (généralise le
+   « 1×/passe » du MVP). **Décision clé** : namespacer par **compte** (et non par `brand`) couvre le
+   multi-marques **et** laisse ouvert, au même coût, le cas rare « 2 comptes de la **même** marque » — dont
+   l'exposition devient un **choix produit diffé­rable**, non une impossibilité technique (le refus par
+   clé-marque était **circulaire**). Écart assumé vs la 1ʳᵉ version de `54-multi-marques.md` (namespaçait
+   par marque) → spec 54 mise à jour.
 
 ---
 

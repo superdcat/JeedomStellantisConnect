@@ -11,7 +11,16 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-15 (UC52 : `stellantis-data-model.md` § 1 — **image/vignette du modèle** :
+> **Dernière synchro** : 2026-07-15 (UC53 : `stellantis-api-architecture.md` § 4.4-4.5 — **cadrage
+> multi-comptes / multi-marques** : 1 plugin Jeedom = 1 config + 1 token global + 1 OTP → **1 compte/1
+> marque** aujourd'hui (la table `BRANDS` rend la marque *sélectionnable*, **pas simultanée** — corrige la
+> sur-affirmation « seul impact table TLD/realm »). Décision pour **UC54** : namespacer par **identifiant
+> de compte générique** (marque = attribut du compte), clé cache `TOKEN_CACHE_KEY::<accountId>`, cron prime
+> le token 1× par compte distinct → couvre multi-marques **et** laisse ouvert « 2 comptes même marque »
+> (choix produit, pas fatalité technique). **UC53 = cadrage pur, aucun code** ; AC1 (« sync à plusieurs
+> véhicules ») déjà satisfaite au MVP (quotas compte GLOBAUX, mutualisation token, try/catch par véhicule,
+> backoff 429) ; anti-rafale proactif du polling **déplacé en UC72** — cf. `53-tech.md`).
+> Précédemment 2026-07-15 (UC52 : `stellantis-data-model.md` § 1 — **image/vignette du modèle** :
 > le champ `pictures` de `/user/vehicles` (`list[Url]`, `Url` = stub Swagger vide, jamais lu par les réfs)
 > a une **shape runtime NON vérifiée** (3ᵉ instance de la leçon `/maintenance`+`/alerts`) → photo modèle
 > en **best-effort/parsing défensif + log debug** pour observer la vraie forme, repli icône de marque
@@ -127,6 +136,7 @@
 | **Deux systèmes de tokens** (OAuth2 REST vs remote token OTP/SMS pour MQTT) — ne pas confondre | `stellantis-api-architecture.md` § 1.1 |
 | **Commandes à distance** : MQTT (broker `mwa.mpsa.com:8885`, topics, payloads, ack async) | `stellantis-api-architecture.md` § 1.3 |
 | **PHP natif vs démon Python** : lecture en PHP, commandes MQTT → démon (inversion vs philosophie « sans démon ») | `stellantis-api-architecture.md` § 2 et § 3 |
+| **Multi-comptes / multi-marques** (foyer Peugeot+Citroën, 2 comptes même marque) : contrainte 1 plugin=1 config/1 token/1 OTP, design UC54 = namespacing par **compte** (pas par marque) | `stellantis-api-architecture.md` § 4.4-4.5 (+ `specs/.../53-tech.md`, `54-multi-marques.md`) |
 | **Limites** : ban API (wakeup ~2 min), batterie 12 V, mode privacy, quotas OTP (6/24 h), seuil charge | `stellantis-api-architecture.md` § 1.4 |
 | **Champs de télémétrie** (SOC, autonomie, charge, position, portes, km, pneus…) → quelles commandes info | `stellantis-data-model.md` |
 | **`charging.status`** : valeurs, états terminaux **persistants** (≠ momentanés), machine à états de **session de charge** (transition, pas par-poll), énergie = Δ SOC × capacité | `stellantis-data-model.md` § 2.1 |
