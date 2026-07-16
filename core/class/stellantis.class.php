@@ -72,6 +72,15 @@ class stellantis extends eqLogic {
   // Expression cron par défaut (véhicule sans « Auto-actualisation » renseignée) : toutes les 5 minutes.
   const CRON_DEFAUT = '*/5 * * * *';
   const CRON_DEFAUT_STEP = 5; // pas (minutes) de CRON_DEFAUT ('*/5') — sert à la gate de phase anti-rafale UC72
+  // UC75 : pas (minutes) appliqué à la cadence PAR DÉFAUT quand le mode privacy est actif (~1 poll/30 min,
+  // économie quota/anti-ban — le véhicule ne renvoie plus de données exploitables tant qu'il masque tout).
+  // INVARIANT (documenté ici, pas d'infra de test unitaire) : doit rester un MULTIPLE de CRON_DEFAUT_STEP
+  // (=5) ET DIVISER 60 — sinon la phase de la gate modulo (eqId % pas) ne serait plus cohérente avec la
+  // cadence normale (30 satisfait les deux : 30 = 6×5, 60/30 = 2).
+  const CRON_PRIVACY_STEP = 30;
+  // UC75 : TTL (secondes) du cache privacy stellantis::privacy::<eqId> — 2 j, auto-purge des équipements
+  // supprimés (voir aussi le nettoyage explicite du message d'aide dans preRemove()).
+  const PRIVACY_CACHE_TTL = 172800;
 
   // Flag du dernier échec de lien (UC09), posé/effacé par cron() : distingue un refresh KO (rate-limit/
   // transport, token encore présent mais expiré) d'un état sain. TTL borné → auto-guérison.
@@ -840,6 +849,13 @@ class stellantis extends eqLogic {
       // alerts_count — un agrégat n'est pas un ouvrant précis), HISTORISÉ = déclencheur de scénario natif
       // (précédent service_due/at_home/tyre_alert/alerts_count).
       'opening_alert' => array(__('Ouvrant ouvert', __FILE__), 'binary', '', '', true),
+      // UC75 : mode privacy véhicule (« Plane Mode »), dérivé du MÊME /status qu'UC07 (privacy.state, déjà
+      // lu par refreshTelemetry pour gater /lastPosition depuis le MVP) — aucun nouvel appel réseau.
+      // generic_type='' (pas de constante core « privacy » fiable). HISTORISÉE : déclencheur de scénario
+      // natif (précédent opening_alert/tyre_alert/service_due/at_home) + trace des bascules. Mapping
+      // INCONDITIONNEL dans parseStatus (jamais gardé par isset) ⇒ création PARESSEUSE au 1er /status,
+      // retombe toujours à 0 en sortie de privacy (cf. parseStatus, § UC75).
+      'privacy_mode' => array(__('Mode vie privée', __FILE__), 'binary', '', '', true),
     );
   }
 
@@ -1047,10 +1063,10 @@ class stellantis extends eqLogic {
     // Position indisponible si mode privacy actif (cf. data-model § 2.6 / UC75)
     $position = null;
     $privacy = isset($status['privacy']['state']) ? (string) $status['privacy']['state'] : 'None';
-    // UC09 : mémoriser l'état privacy pour la page Santé (lecture locale, sans réappel API). Cache 2 j
-    // (auto-purge des équipements supprimés) — préféré à une clé de config effaçable au Sauvegarder du
-    // formulaire desktop/php (qui ne renvoie que les champs présents).
-    cache::set('stellantis::privacy::' . $this->getId(), $privacy, 172800);
+    // UC09/UC75 : mémorise l'état privacy (cache, page Santé) ET détecte la transition (message d'aide
+    // edge-triggered) — centralisé dans suivrePrivacy() (remplace l'ancien cache::set inline, même clé/TTL).
+    // Appelée AVANT la garde /lastPosition ci-dessous (best-effort, ne lève jamais).
+    $this->suivrePrivacy($privacy);
     if (strcasecmp($privacy, 'None') == 0) {
       try {
         $position = stellantisApi::callWithToken('GET', '/user/vehicles/' . $apiId . '/lastPosition', array(), $slot);
@@ -1069,7 +1085,7 @@ class stellantis extends eqLogic {
       $this->save();
       $this->createCommands();
     }
-    $valeurs = self::parseStatus($status, $position);
+    $valeurs = self::parseStatus($status, $position, $privacy);
     foreach ($valeurs as $logicalId => $valeur) {
       $cmd = $this->ensureCommand($logicalId);
       $this->checkAndUpdateCmd($cmd, $valeur);
@@ -1102,6 +1118,54 @@ class stellantis extends eqLogic {
     // jamais (try/catch interne), posé EN DERNIER dans refreshTelemetry() (après suivreMaintenance, même
     // convention robustesse cron que UC24/33/34/41).
     $this->suivreAlertes($apiId, $slot);
+  }
+
+  /**
+   * UC75 : centralise l'écriture du cache privacy `stellantis::privacy::<eqId>` (MÊME clé, MÊME TTL
+   * (PRIVACY_CACHE_TTL) que l'ancien `cache::set` inline qu'elle remplace — health() et la gate de
+   * cadence du cron restent inchangés) ET détecte la transition (None→actif / actif→None) en lisant la
+   * valeur PRÉCÉDENTE AVANT de l'écraser, pour poser/lever un message d'aide EDGE-TRIGGERED (jamais de
+   * martèlement du centre de messages à chaque poll). Best-effort — try/catch \Throwable, ne lève JAMAIS
+   * (précédent suivreSessionCharge/suivreGeofencing/suivreMaintenance/suivreAlertes) : un échec ici ne
+   * doit jamais interrompre refreshTelemetry().
+   */
+  private function suivrePrivacy(string $_privacy): void {
+    try {
+      $eqId = $this->getId();
+      $cle = 'stellantis::privacy::' . $eqId;
+      // 1) Valeur PRÉCÉDENTE lue AVANT écrasement (sinon la transition n'est plus détectable).
+      $precedent = (string) cache::byKey($cle)->getValue('None');
+      // 2) Écriture de la nouvelle valeur (même clé/TTL que l'ancien cache::set inline).
+      cache::set($cle, $_privacy, self::PRIVACY_CACHE_TTL);
+      $etaitActif = (strcasecmp($precedent, 'None') != 0);
+      $estActif = (strcasecmp($_privacy, 'None') != 0);
+      $tag = 'privacy_' . $eqId;
+      if (!$etaitActif && $estActif) {
+        // Transition None → actif : aide actionnable (removeAll avant add, pattern otp_required — au
+        // plus un message actif par véhicule, pas d'empilement). getName() dérive du champ API 'label'
+        // (surnom renommable dans l'app mobile — donnée EXTERNE non fiable) et le centre de messages est
+        // visible par tout utilisateur connecté ⇒ neutralisation aseptiser()+htmlspecialchars() avant
+        // interpolation (même convention que UC18 traiterRetourCommande / UC51 valeur de la commande label).
+        message::removeAll('stellantis', $tag);
+        message::add(
+          'stellantis',
+          sprintf(
+            __('Le véhicule « %s » est en mode vie privée : le partage des données (Data / Géolocalisation) a été coupé côté véhicule. Réactivez le partage de données depuis l\'écran du véhicule pour retrouver la position et la télémétrie. Ce n\'est pas une panne du plugin.', __FILE__),
+            htmlspecialchars(self::aseptiser($this->getName()), ENT_QUOTES, 'UTF-8')
+          ),
+          '',
+          $tag
+        );
+        log::add('stellantis', 'info', 'UC75 : mode privacy activé côté véhicule pour l\'équipement #' . $eqId . ' (message d\'aide affiché)');
+      } elseif ($etaitActif && !$estActif) {
+        // Transition actif → None : lève l'aide, plus rien à signaler.
+        message::removeAll('stellantis', $tag);
+        log::add('stellantis', 'info', 'UC75 : mode privacy désactivé côté véhicule pour l\'équipement #' . $eqId . ' (message d\'aide levé)');
+      }
+      // État stable (actif→actif ou None→None) : rien — pas de martèlement du centre de messages.
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'warning', 'UC75 : suivi du mode privacy en erreur pour l\'équipement #' . $this->getId() . ' : ' . $e->getMessage());
+    }
   }
 
   // Extrait le tableau d'énergies du /status : energies[] (v4.15+) prioritaire, fallback energy[].
@@ -1157,8 +1221,12 @@ class stellantis extends eqLogic {
    * Mapping PUR et défensif du /status (+ position GeoJSON) vers logicalId => valeur. Champ absent =>
    * clé absente (jamais d'exception). SEUL endroit où vivent les chemins de champs API (data-model) :
    * à faire évoluer ici si le schéma PSA change. Statique et sans effet de bord => testable.
+   * UC75 : $_privacy est PASSÉ par l'appelant (jamais ré-extrait ici de $_status['privacy']['state'],
+   * déjà lu par refreshTelemetry pour gater /lastPosition — éviter la double lecture). Le defaulting
+   * 'None' reste une décision RÉSEAU (aucune donnée privacy connue = pas de restriction) : il vit ici
+   * uniquement comme valeur de repli du paramètre, pour tout appelant futur qui n'en aurait pas.
    */
-  public static function parseStatus(array $_status, ?array $_position = null): array {
+  public static function parseStatus(array $_status, ?array $_position = null, string $_privacy = 'None'): array {
     $valeurs = array();
     // Énergie : router par type. PHEV = 2 entrées ([0] Electric, [1] Fuel).
     foreach (self::energiesDepuisStatus($_status) as $energie) {
@@ -1299,6 +1367,10 @@ class stellantis extends eqLogic {
     }
     // Fraîcheur : horodatage API (conforme UC09 — la donnée peut être ancienne sans wakeup)
     $valeurs['last_update'] = self::extraireFraicheur($_status, $_position);
+    // UC75 : mapping INCONDITIONNEL (jamais gardé par isset) ⇒ toujours 0 ou 1, émis à CHAQUE /status.
+    // Garantit le retour à 0 dès la sortie de privacy (un mapping conditionnel figerait la commande à sa
+    // dernière valeur sur un shape partiel) — cf. definitionsCommandes()/75-tech.md § 1.
+    $valeurs['privacy_mode'] = (strcasecmp($_privacy, 'None') != 0) ? 1 : 0;
     return $valeurs;
   }
 
@@ -4162,13 +4234,19 @@ class stellantis extends eqLogic {
         }
       } else {
         // Cadence PAR DÉFAUT (5 min, CRON_DEFAUT) + anti-rafale UC72 : décalage de phase déterministe par
-        // véhicule (offset = eqId % CRON_DEFAUT_STEP) pour que la flotte ne tombe plus due à la même
-        // minute (0/5/10…). CRON_DEFAUT_STEP = le pas de CRON_DEFAUT ('*/5'), nommé explicitement pour que
-        // le couplage entre les deux constantes reste visible si CRON_DEFAUT change un jour.
+        // véhicule (offset = eqId % pas) pour que la flotte ne tombe plus due à la même minute (0/5/10…).
         // $minuteActuelle est figée pour toute la passe (voir hoist avant la boucle). Invariance fuseau :
         // tout décalage horaire réel est un multiple de 15 min (≤ Népal +5:45), donc divisible par 5 ⇒
-        // minute % CRON_DEFAUT_STEP est identique quel que soit le fuseau.
-        if ($minuteActuelle % self::CRON_DEFAUT_STEP !== $eqLogic->getId() % self::CRON_DEFAUT_STEP) {
+        // minute % pas est identique quel que soit le fuseau (vrai pour 5 ET pour 30, tous deux multiples
+        // de 5). UC75 : pas VARIABLE — mode privacy actif (cache local, sans réappel API) ⇒ pas élargi à
+        // CRON_PRIVACY_STEP (30 min, multiple de CRON_DEFAUT_STEP ⇒ phase cohérente). On continue de sonder
+        // (espacé) pour DÉTECTER LA SORTIE de privacy : latence de reprise de la cadence normale ≤ 30 min
+        // (documentée, 75-tech.md § 3). Cache absent (véhicule neuf) ⇒ getValue('None') ⇒ cadence normale.
+        // Ne s'applique qu'à cette branche (cadence par défaut) : un « Auto-actualisation » custom reste un
+        // opt-out intégral (précédent UC72), y compris en privacy.
+        $privacyActif = (strcasecmp((string) cache::byKey('stellantis::privacy::' . $eqLogic->getId())->getValue('None'), 'None') != 0);
+        $pas = $privacyActif ? self::CRON_PRIVACY_STEP : self::CRON_DEFAUT_STEP;
+        if ($minuteActuelle % $pas !== $eqLogic->getId() % $pas) {
           continue;
         }
       }
@@ -4805,6 +4883,14 @@ class stellantis extends eqLogic {
         @unlink($fichier);
       }
     }
+    // UC75 : nettoyage du message d'aide privacy + de son cache. ⚠️ Asymétrie ASSUMÉE vs les autres
+    // caches par véhicule (CHARGE_NEXT_TIME_KEY, throttles maintenance/alertes…) qui s'auto-purgent par
+    // TTL sans nettoyage explicite : ceux-ci sont inertes, alors qu'un message::add est VISIBLE dans le
+    // centre de messages Jeedom — le laisser orphelin après suppression du véhicule (jusqu'à expiration
+    // du TTL 172800 s du cache, sans même ce TTL pour le message qui n'en a pas) serait gênant pour
+    // l'utilisateur (référence un véhicule qui n'existe plus). getId() reste résolvable à ce stade.
+    message::removeAll('stellantis', 'privacy_' . $this->getId());
+    cache::delete('stellantis::privacy::' . $this->getId());
   }
 
   // Fonction exécutée automatiquement après la suppression de l'équipement

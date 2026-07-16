@@ -556,6 +556,40 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > `rate_limited_<slot>`/`link_error` (pas une régression UC74 ; correctif = futur nettoyage transverse
 > multi-comptes, pour **tous** les tags à la fois). Reviews croisées : sécurité **RAS**, qualité **PASS**
 > (1 finding *minor* = l'orphelin ci-dessus, documenté).
+> **Post-MVP : UC75** — **mode privacy du véhicule (« Plane Mode »)** (supervision/robustesse, 100 %
+> local, **AUCUN appel réseau/MQTT neuf** : exploite le champ `privacy.state` déjà présent dans le
+> `/status` récupéré au cron) : détecter/gérer que l'utilisateur a coupé Data/Géoloc côté voiture (l'API
+> devient muette **indépendamment du plugin**) — l'expliquer, pas le traiter comme une panne ni marteler
+> en retry. Le **socle existait depuis le MVP** (`refreshTelemetry` lit `privacy.state`, cache
+> `stellantis::privacy::<eqId>` 2 j, **skip `/lastPosition`** si `≠ None`, privacy exclu de
+> `connectionState()`, ligne page Santé) ; UC75 **complète** avec 3 livrables, dans le seul
+> `core/class/stellantis.class.php`. (1) **Info `privacy_mode`** (binary **historisée**, `generic_type=''`,
+> déclencheur de scénario natif — précédent `at_home`/`tyre_alert`/`opening_alert`) : **création
+> paresseuse** (jamais dans `createCommands`), mappée dans `parseStatus()` via un **nouveau 3ᵉ paramètre
+> `$_privacy` PASSÉ par l'appelant** (jamais ré-extrait — `parseStatus` reste pur, le defaulting `'None'`
+> vit dans `refreshTelemetry`, précédent `$_position`) et **mapping INCONDITIONNEL** (`strcasecmp ≠ 'None'
+> ? 1 : 0`, jamais gardé par `isset`) ⇒ toujours 0/1, **retombe toujours à 0 en sortie de privacy**.
+> Contrat `privacy.state` enum `None`/`Geolocation`/`Full` (data-model § 2.6 — « À confirmer » de la spec
+> **clos** : champ explicite, pas d'heuristique floue « réponses vides »). (2) **Message d'aide
+> edge-triggered** : nouvelle méthode best-effort `suivrePrivacy(string $_privacy)` (try/catch `\Throwable`,
+> ne lève jamais) qui **centralise l'écriture du cache** (remplace le `cache::set` inline, même clé +
+> nouvelle const `PRIVACY_CACHE_TTL=172800`) ET détecte la transition en lisant la valeur **précédente
+> AVANT écrasement** : None→actif ⇒ `message::removeAll`+`add` (tag **par véhicule** `privacy_<eqId>`,
+> texte « réactivez le partage de données côté véhicule, ce n'est pas une panne ») ; actif→None ⇒
+> `removeAll` ; stable ⇒ rien. ⚠️ **Sécurité** : le nom du véhicule injecté (`$this->getName()`, dérivé du
+> `label` externe renommable dans l'app mobile) est **neutralisé** `htmlspecialchars(self::aseptiser(...),
+> ENT_QUOTES,'UTF-8')` avant `message::add` (convention UC18/UC51 ; finding review HIGH corrigé —
+> `getName()` est une **donnée tainted**). Nettoyage `preRemove()` (message + cache) — asymétrie assumée
+> vs les autres caches auto-purgés par TTL (un `message::add` orphelin est visible). (3) **Cadence de
+> polling réduite** en privacy — const `CRON_PRIVACY_STEP=30` (multiple de `CRON_DEFAUT_STEP=5`, divise
+> 60) : dans `cron()`, branche cadence **par défaut uniquement**, gate de phase modulo à **pas variable**
+> (`$privacyActif ? 30 : 5`, `$privacyActif` lu du cache) ⇒ ~1 poll/30 min en privacy (économie
+> quota/anti-ban), on continue de sonder pour **détecter la sortie** (latence ≤ 30 min). ⚠️ **Limites
+> assumées** : cadence custom `autorefresh` = opt-out intégral (précédent UC72) ; auto-wakeup (UC73) &
+> refresh post-ack `CMD_PENDING` (UC18) **contournent** la gate (rafale résiduelle assumée) ; possible
+> re-notification sur expiration TTL/`cache::flush()` (précédent UC74). Reviews croisées : sécurité **RAS**
+> (après fix HIGH), qualité **PASS** (1 nit cosmétique résiduel non bloquant : commentaire `preRemove` citant
+> la valeur littérale du TTL).
 > Suite = post-MVP (supervision, robustesse, livraison…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
