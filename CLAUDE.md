@@ -28,7 +28,7 @@ Un plugin Jeedom **n'est pas autonome** : il s'installe sous `<jeedom>/plugins/s
 PHP dépend du core Jeedom, atteint via `require_once __DIR__ . '/../../../../core/php/core.inc.php';`.
 Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 
-> **État d'avancement (2026-07-15)** : l'id a été renommé `template` → `stellantis` (classes
+> **État d'avancement (2026-07-16)** : l'id a été renommé `template` → `stellantis` (classes
 > `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP lecture seule COMPLET** : UC01 à
 > UC10 sont implémentées (configuration du plugin, client HTTP REST, authentification OAuth2 PKCE/token,
 > test de connexion, découverte des véhicules, création/synchronisation des équipements, commandes info
@@ -501,6 +501,39 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > pour concevoir un vrai backoff plus tard, sur preuve. Chemins de rafale **résiduels documentés comme
 > assumés** (hors scope) : `syncVehicles()` (refresh dos-à-dos, cooldown 15 s anti-double-clic seul) et la
 > consommation `CMD_PENDING` du cron (bornée par WAKEUP_QUOTA/debounce).
+> **Post-MVP : UC73** — **protection de la batterie 12 V / réveil automatique adaptatif** (supervision/
+> robustesse, 100 % local, **AUCUN appel réseau/MQTT neuf** : ne fait que *déclencher, sous conditions,*
+> le wakeup MQTT existant UC13 en lisant la télémétrie déjà stockée) : c'est **l'exception OPT-IN à la
+> règle historique « jamais de wakeup au cron »**, strictement encadrée. Auto-wakeup **désactivé par
+> défaut** (config véhicule `auto_wakeup`, **AC1**) et **réservé au compte principal (slot 1)** — pilotage
+> à distance mono-compte (UC54). **Cadence adaptative** selon l'état LOCAL du véhicule (**AC2**) via le
+> helper **pur** `cadenceAutoWakeupSecondes(chargingStatus, moving, chargeMin, idleMin): ?int` : en
+> **roulage** (`moving==1`) ⇒ `null` (déjà réveillé, REST frais, aucun wakeup) ; **en charge**
+> (`strcasecmp charging_status 'InProgress'`) ⇒ cadence de charge (défaut 5 min) ; **sinon** (veille) ⇒
+> cadence de veille (défaut 60 min). **Clamp `[AUTO_WAKEUP_MIN_PLANCHER = self::WAKEUP_COOLDOWN/60 (=5),
+> AUTO_WAKEUP_IDLE_MAX_MIN = 1440]`** min ⇒ « jamais sous les limites UC72 » **garanti par construction**
+> même sur saisie hors bornes (0/négative/énorme). Orchestrateur best-effort `declencherAutoWakeupSiDu()`
+> (instance, `try/catch \Throwable` englobant, **ne lève jamais**) : gates opt-in → `accountSlotDe()==1`
+> (source unique du slot, jamais de lecture brute) → lecture défensive `getCmd('info',charging_status|
+> moving)->execCmd()` → cadence → **gate de cadence** (`AUTO_WAKEUP_LAST_KEY.eqId`, TTL
+> `AUTO_WAKEUP_IDLE_MAX_MIN*60`) → `wakeup()` (UC13) en try/catch. **Réutilise SANS modification** les
+> garde-fous anti-ban de `wakeup()`/`publishRemoteCommand()` (cooldown 300 s per-véhicule + quota GLOBAL
+> compte 5/20 min) — **aucun garde-fou dupliqué**. **`AUTO_WAKEUP_LAST_KEY` posé dans TOUS les cas
+> (succès ET échec)** ⇒ la cadence fait office de **backoff** (pas de rafale de tentatives chaque minute
+> de cron). **Pas de pré-check `hasRemoteToken()`** : `wakeup()` gère lui-même l'alerte OTP canonique
+> (`alerterOtpRequired`). Typage des `stellantisException` : `rate_limited`/`otp_required` ⇒ `debug`
+> (contention/OTP attendus, non fatals) ; `not_configured`/`transport` ⇒ **warning throttlé 1×/h/véhicule**
+> (gabarit `cleWarn`). **Hook `cron()`** : `if ($slot == 1) { $eqLogic->declencherAutoWakeupSiDu(); }`
+> placé **après** la garde `tokenOk[$slot]` et **AVANT** le bloc `CMD_PENDING` — évalué **chaque passe**
+> (indépendant de la gate de phase du polling REST, qui reste **strictement inchangé**, **AC3**). UI
+> desktop (`stellantis.php`) : checkbox `auto_wakeup` (OFF par défaut) + **avertissement VISIBLE du risque
+> batterie 12 V** (pas qu'un tooltip, **AC1**) + 2 cadences éditables `auto_wakeup_charge_min`/
+> `auto_wakeup_idle_min` (repli défauts si vides, helpers `cadenceChargeMin/IdleMin`). ⚠️ **Limite assumée
+> documentée** (`73-tech.md`) : le quota wakeup est GLOBAL au compte ⇒ plusieurs VE en charge simultanée à
+> cadence 5 min saturent le plafond compte (5/20 min) ⇒ certaines passes refusées (backoff) ; choix : le
+> quota UC72 EST le plafond dur (anti-ban prioritaire), pas de répartition équitable (futur UC si besoin
+> confirmé en recette). Reviews croisées : sécurité **LOW**, qualité **PASS** (fidélité spec point par
+> point).
 > Suite = post-MVP (supervision, robustesse, livraison…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
@@ -613,7 +646,10 @@ Configuration & secrets :
   **UC32** ajoute `isVisiblePanel` (case du formulaire desktop, défaut 1 posé par le plugin — inclut le
   véhicule dans le panneau carte « Mes véhicules »). **UC41** ajoute 2 champs **éditables** (formulaire
   desktop) : `service_alert_km` / `service_alert_days` (seuils « révision proche » par véhicule ; repli sur
-  défauts 1000 km / 30 j via `seuilAlerteKm/Jours()` si vides).
+  défauts 1000 km / 30 j via `seuilAlerteKm/Jours()` si vides). **UC73** ajoute 3 champs **éditables**
+  (formulaire desktop, opt-in réveil auto adaptatif, slot 1 uniquement) : `auto_wakeup` (case, **OFF par
+  défaut**), `auto_wakeup_charge_min` / `auto_wakeup_idle_min` (cadences en charge/veille min ; repli
+  défauts 5 / 60 min via `cadenceChargeMin/IdleMin()` si vides).
 - **Tokens** OAuth2 (access/refresh) + **remote token OTP** (UC12, clé cache `stellantis::remote_token`,
   **distinct** du token OAuth2 — c'est le mot de passe MQTT, TTL ~890 s) : en cache **chiffré** (classe
   `cache`). ⚠️ `access_token` OAuth2 à durée courte (~15 min) → refresh proactif/réactif.

@@ -2687,6 +2687,133 @@ class stellantis extends eqLogic {
     cache::set(self::WAKEUP_QUOTA_KEY, json_encode($quota), self::WAKEUP_QUOTA_FENETRE);
   }
 
+  /* * ******************* UC73 — Réveil automatique adaptatif (protection batterie 12 V) ******************* */
+
+  const AUTO_WAKEUP_CONFIG = 'auto_wakeup';                         // clé de config véhicule (opt-in, DÉSACTIVÉ par défaut — AC1)
+  const AUTO_WAKEUP_CHARGE_MIN_CONFIG = 'auto_wakeup_charge_min';   // clé de config véhicule : cadence (min) en charge
+  const AUTO_WAKEUP_IDLE_MIN_CONFIG = 'auto_wakeup_idle_min';       // clé de config véhicule : cadence (min) en veille
+  const AUTO_WAKEUP_LAST_KEY = 'stellantis::auto_wakeup_last::';    // + eqId (cache) : horodatage du dernier auto-wakeup (succès OU échec) — gate de cadence ET backoff, DISTINCT de WAKEUP_COOLDOWN_KEY (cooldown manuel+auto)
+  const AUTO_WAKEUP_CHARGE_MIN_DEFAUT = 5;                          // défaut (min) cadence en charge
+  const AUTO_WAKEUP_IDLE_MIN_DEFAUT = 60;                           // défaut (min) cadence en veille
+  const AUTO_WAKEUP_MIN_PLANCHER = self::WAKEUP_COOLDOWN / 60;      // plancher dur (min) = WAKEUP_COOLDOWN/60 : une cadence configurée plus basse est remontée à 5 min (jamais sous le cooldown UC13 / les limites UC72)
+  const AUTO_WAKEUP_IDLE_MAX_MIN = 1440;                            // plafond (min) d'une cadence configurée (garde-fou saisie, 24 h) — aussi TTL (s) de AUTO_WAKEUP_LAST_KEY (auto-purge des véhicules supprimés)
+
+  /**
+   * UC73 : détermine la cadence (secondes) d'auto-wakeup adaptative à partir de l'état LOCAL déjà connu du
+   * véhicule (dernière télémétrie stockée, aucun appel réseau). PURE — aucun accès cache/cmd/config,
+   * testable isolément : en roulage (véhicule déjà réveillé, REST frais) → null (aucun wakeup, on ne
+   * gaspille ni quota ni batterie) ; en charge → cadence de charge ; sinon (veille, statut terminal ou
+   * inconnu) → cadence de veille. Clamp [AUTO_WAKEUP_MIN_PLANCHER, AUTO_WAKEUP_IDLE_MAX_MIN] : garantit
+   * l'invariant « jamais sous les limites UC72 » (AC2) même avec une cadence configurée hors bornes.
+   * @param string $_chargingStatus dernière valeur connue de la commande info charging_status (assainie par parseStatus ; '' si absente/thermique)
+   * @param mixed $_moving dernière valeur connue de la commande info moving (0/1 ; '' ou non numérique si absente)
+   * @return int|null cadence en secondes, ou null si aucun auto-wakeup ne doit être déclenché (roulage)
+   */
+  public static function cadenceAutoWakeupSecondes(string $_chargingStatus, $_moving, int $_chargeMin, int $_idleMin): ?int {
+    if ((int) $_moving === 1) {
+      return null;
+    }
+    $cadenceMin = (strcasecmp($_chargingStatus, 'InProgress') == 0) ? $_chargeMin : $_idleMin;
+    $cadenceMin = max(self::AUTO_WAKEUP_MIN_PLANCHER, min(self::AUTO_WAKEUP_IDLE_MAX_MIN, $cadenceMin));
+    return $cadenceMin * 60;
+  }
+
+  // Cadence de réveil en charge (min) : config VÉHICULE 'auto_wakeup_charge_min', repli sur le défaut si
+  // vide/non numérique/négatif — précédent seuilAlerteKm/Jours (UC41) : une clé vide ne doit PAS valoir 0.
+  private function cadenceChargeMin(): int {
+    $config = trim((string) $this->getConfiguration(self::AUTO_WAKEUP_CHARGE_MIN_CONFIG, ''));
+    if ($config != '' && is_numeric($config) && (float) $config >= 0) {
+      return (int) $config;
+    }
+    return self::AUTO_WAKEUP_CHARGE_MIN_DEFAUT;
+  }
+
+  // Idem, cadence de veille (min) (config véhicule 'auto_wakeup_idle_min').
+  private function cadenceIdleMin(): int {
+    $config = trim((string) $this->getConfiguration(self::AUTO_WAKEUP_IDLE_MIN_CONFIG, ''));
+    if ($config != '' && is_numeric($config) && (float) $config >= 0) {
+      return (int) $config;
+    }
+    return self::AUTO_WAKEUP_IDLE_MIN_DEFAUT;
+  }
+
+  /**
+   * UC73 : déclenche, sous conditions, un réveil MQTT (wakeup(), UC13) de CE véhicule pour rafraîchir la
+   * télémétrie que le polling REST seul ne peut pas obtenir (batterie précise, position…). Exception
+   * ENCADRÉE à la règle historique « jamais de wakeup au cron » : opt-in STRICT (désactivé par défaut, AC1),
+   * pilotage à distance réservé au compte principal (slot 1, UC54), cadence adaptative selon l'état LOCAL
+   * (charge/veille/roulage, AC2), et réutilise SANS modification les garde-fous anti-ban de wakeup()/
+   * publishRemoteCommand() (cooldown per-véhicule 300 s + quota GLOBAL compte 5/20 min — AC2 « jamais sous
+   * UC72 » garanti même en contention). Best-effort : NE LÈVE JAMAIS (try/catch \Throwable englobant —
+   * appelée par cron() à chaque passe pour chaque véhicule, une exception romprait la boucle véhicules).
+   * N'appelle ni n'impacte refreshTelemetry()/le polling REST (AC3, strictement indépendant).
+   */
+  public function declencherAutoWakeupSiDu(): void {
+    try {
+      // 1) Opt-in strict : désactivé par défaut (AC1). Pas de lecture d'une éventuelle valeur '1' textuelle
+      // exotique : cast entier strict, comme les autres flags booléens de config du plugin.
+      if ((int) $this->getConfiguration(self::AUTO_WAKEUP_CONFIG, 0) !== 1) {
+        return;
+      }
+      // 2) Pilotage à distance = compte principal uniquement (UC54). Source UNIQUE de résolution du slot
+      // (accountSlotDe), jamais de lecture brute de la config 'accountSlot'.
+      if (self::accountSlotDe($this) != 1) {
+        return;
+      }
+      // 3) État LOCAL déjà connu (dernière télémétrie stockée) — défensif : commande absente (véhicule pas
+      // encore synchronisé) ou thermique pur (pas de charging_status) ⇒ chaîne vide ⇒ branche veille (sûr).
+      $cmdCharge = $this->getCmd('info', 'charging_status');
+      $chargingStatus = is_object($cmdCharge) ? (string) $cmdCharge->execCmd() : '';
+      $cmdMoving = $this->getCmd('info', 'moving');
+      $moving = is_object($cmdMoving) ? $cmdMoving->execCmd() : '';
+      $cadence = self::cadenceAutoWakeupSecondes($chargingStatus, $moving, $this->cadenceChargeMin(), $this->cadenceIdleMin());
+      if ($cadence === null) {
+        // Roulage : déjà réveillé, REST déjà frais — aucun wakeup à déclencher.
+        return;
+      }
+      // 4) Gate de cadence : dernier auto-wakeup (succès OU échec) trop récent ⇒ on attend encore.
+      $cleDernier = self::AUTO_WAKEUP_LAST_KEY . $this->getId();
+      $dernier = (int) cache::byKey($cleDernier)->getValue(0);
+      if ($dernier > 0 && time() - $dernier < $cadence) {
+        return;
+      }
+      // 5) Déclenchement : wakeup() porte déjà tous les garde-fous (cooldown/quota/OTP) et l'alerte OTP
+      // canonique (alerterOtpRequired) — pas de pré-check ni de doublon d'alerte ici.
+      $reussi = false;
+      try {
+        $this->wakeup();
+        $reussi = true;
+      } catch (stellantisException $e) {
+        $type = $e->getApiType();
+        if ($type == 'rate_limited' || $type == 'otp_required') {
+          // Contention anti-ban attendue (cooldown/quota) ou OTP non activé (déjà alerté par wakeup()) :
+          // non fatal, non spammé — la cadence elle-même fait office de backoff (étape 6 ci-dessous).
+          log::add('stellantis', 'debug', 'Réveil automatique ignoré pour l\'équipement #' . $this->getId() . ' (' . $type . ') : ' . $e->getMessage());
+        } else {
+          // not_configured (CID/démon) / transport : anomalie plus durable — warning THROTTLÉ 1×/h/véhicule
+          // (cron chaque minute → sinon spam log), même gabarit cleWarn que cron()/suivreMaintenance().
+          $cleWarn = 'stellantis::auto_wakeup_warn::' . $this->getId();
+          if (cache::byKey($cleWarn)->getValue('') == '') {
+            log::add('stellantis', 'warning', 'Réveil automatique en échec pour l\'équipement #' . $this->getId() . ' (' . $type . ') : ' . $e->getMessage());
+            cache::set($cleWarn, '1', 3600);
+          } else {
+            log::add('stellantis', 'debug', 'Réveil automatique en échec pour l\'équipement #' . $this->getId() . ' (' . $type . ', warning throttlé) : ' . $e->getMessage());
+          }
+        }
+      }
+      // 6) Posé DANS TOUS LES CAS (succès ET échec) : la cadence sert de backoff, pas de rafale de
+      // tentatives à chaque minute de cron en cas d'échec persistant (contention, OTP non activé…).
+      cache::set($cleDernier, time(), self::AUTO_WAKEUP_IDLE_MAX_MIN * 60);
+      if ($reussi) {
+        $modeCadence = (strcasecmp($chargingStatus, 'InProgress') == 0) ? 'charge' : 'veille';
+        log::add('stellantis', 'info', 'Réveil automatique (' . $modeCadence . ') déclenché pour l\'équipement #' . $this->getId());
+      }
+    } catch (\Throwable $e) {
+      // Filet de sécurité ultime (best-effort intégral) : ne doit jamais interrompre la boucle cron().
+      log::add('stellantis', 'debug', 'Réveil automatique : erreur inattendue pour l\'équipement #' . $this->getId() . ' : ' . $e->getMessage());
+    }
+  }
+
   /* * ******************* UC14 — Commande de charge (démarrer / arrêter) ******************* */
 
   const CHARGE_SERVICE = '/VehCharge';                           // segment de service du topic MQTT (⚠️ distinct du wakeup /VehCharge/state)
@@ -3969,6 +4096,12 @@ class stellantis extends eqLogic {
       }
       if (empty($tokenOk[$slot])) {
         continue;
+      }
+      // UC73 : réveil automatique adaptatif (opt-in) — SLOT 1 uniquement (pilotage à distance). ÉVALUÉ À
+      // CHAQUE PASSE (indépendant de la gate de phase du polling REST ci-dessous, AC3) : la cadence propre
+      // de declencherAutoWakeupSiDu() régule elle-même la fréquence. Best-effort, ne lève jamais.
+      if ($slot == 1) {
+        $eqLogic->declencherAutoWakeupSiDu();
       }
       // UC13/UC14 : une commande MQTT (wakeup, charge…) a été acquittée depuis la dernière passe (flag posé
       // par traiterRetourCommande, UC18) → remontée d'état FORCÉE (hors cadence autorefresh), avec les

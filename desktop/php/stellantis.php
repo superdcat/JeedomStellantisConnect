@@ -256,6 +256,43 @@ $iconeConnexion = ($etatConnexion['state'] == 'ok') ? 'fa-check-circle' : (($eta
 									<input type="number" min="0" step="1" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="service_alert_days">
 								</div>
 							</div>
+							<!-- UC73 : réveil automatique adaptatif — opt-in, DÉSACTIVÉ par défaut (pas d'attribut
+							     "checked", à la différence d'isVisiblePanel ci-dessous, AC1). Réveille le véhicule via
+							     MQTT (wakeup UC13) pour rafraîchir la télémétrie qu'un simple polling REST ne peut pas
+							     obtenir ; consomme la batterie de servitude 12 V, d'où l'avertissement VISIBLE (pas
+							     qu'un tooltip). Cadences éditables (clé absente du formulaire = effacée au Sauvegarder,
+							     même précédent que battery_capacity/service_alert_* ci-dessus) ; le serveur reste
+							     autoritaire (clamp 5..1440 min dans cadenceAutoWakeupSecondes()). -->
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Réveil automatique adaptatif}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Réveille périodiquement le véhicule pour rafraîchir la télémétrie (batterie, position, charge…) que le polling REST seul ne peut pas obtenir. Cadence adaptative : fréquente en charge, rare en veille. Nécessite l'activation de l'OTP (pilotage à distance).}}"></i></sup>
+								</label>
+								<div class="col-sm-6">
+									<label class="checkbox-inline">
+										<input type="checkbox" class="eqLogicAttr" data-l1key="configuration" data-l2key="auto_wakeup">
+									</label>
+									<div class="alert alert-warning" style="margin-top:5px;margin-bottom:0;">
+										<i class="fas fa-exclamation-triangle"></i>
+										{{⚠️ Risque batterie 12 V : réveiller le véhicule consomme la batterie de servitude. Un usage excessif peut la décharger (démarrage / accès sans clé inopérants). À n'activer qu'en connaissance de cause.}}
+									</div>
+								</div>
+							</div>
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Cadence de réveil en charge (min)}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Fréquence de réveil automatique quand le véhicule est en charge — minimum 5 min (protection anti-ban / batterie). Sans effet sur un véhicule thermique. Laisser vide pour le défaut (5 min).}}"></i></sup>
+								</label>
+								<div class="col-sm-6">
+									<input type="number" min="0" step="1" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="auto_wakeup_charge_min" placeholder="5">
+								</div>
+							</div>
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Cadence de réveil en veille (min)}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Fréquence de réveil automatique quand le véhicule est à l'arrêt — plus la valeur est élevée, plus la batterie 12 V est préservée. Laisser vide pour le défaut (60 min).}}"></i></sup>
+								</label>
+								<div class="col-sm-6">
+									<input type="number" min="0" step="1" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="auto_wakeup_idle_min" placeholder="60">
+								</div>
+							</div>
 							<!-- UC32 : panneau carte « Mes véhicules » — sélection par véhicule. Défaut (coché) posé par le
 							     plugin (stellantis::assurerVisiblePanelParDefaut) à la création ET au backfill des véhicules
 							     existants. Clé de configuration OBLIGATOIRE dans ce formulaire (sinon effacée au Sauvegarder,

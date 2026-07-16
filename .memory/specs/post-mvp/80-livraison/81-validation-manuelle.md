@@ -82,7 +82,26 @@ manuelle** sur un Jeedom réel : la « preuve » qu'une UC marche vraiment (lint
      `log/stellantis_daemon` (y compris en niveau **debug**) → **0** occurrence en clair (seulement `***`).
 - **Commandes (post-MVP 12-x)** : OTP réalisée une fois ; wakeup throttlé ; lock/charge → ack remonté ;
   refus véhicule signalé.
-- **Anti-ban/batterie (72/73)** : vérifier qu'aucune rafale n'est émise ; auto-wakeup off par défaut.
+- **Anti-ban (post-MVP 72)** : vérifier qu'aucune rafale de polling n'est émise (flotte à cadence défaut
+  décalée par véhicule) ; sur HTTP 429, un message utilisateur « suspension temporaire » apparaît puis
+  disparaît à la reprise.
+- **Protection batterie 12 V / auto-wakeup adaptatif (post-MVP 73)** : le réveil auto est **opt-in**,
+  réservé au **compte principal (slot 1)**. Prérequis : OTP activé + démon MQTT lancé.
+  1. **Off par défaut** (AC1) : sur un véhicule fraîchement synchronisé, la case « Réveil automatique
+     adaptatif » est **décochée** ; l'avertissement risque batterie 12 V est **visible** (pas qu'un
+     tooltip) ; aucun réveil n'est émis au cron (log `stellantis` : aucun « Réveil automatique … déclenché »).
+  2. **Cadence en charge** (AC2) : activer la case, véhicule **en charge** (`charging_status = InProgress`)
+     → un « Réveil automatique (charge) déclenché pour l'équipement #… » apparaît, espacé d'**~5 min**
+     (jamais moins), et un refresh REST suit l'ack (info batterie/charge rafraîchies).
+  3. **Cadence en veille** (AC2) : véhicule **à l'arrêt** (ni charge ni mouvement) → « Réveil automatique
+     (veille) déclenché … » espacé d'**~60 min** (défaut).
+  4. **Roulage** : véhicule `moving = 1` → **aucun** réveil auto (la voiture est déjà éveillée, REST frais).
+  5. **Clamp serveur** (AC2) : saisir `1` dans « Cadence de réveil en charge (min) », Sauvegarder → les
+     réveils restent espacés d'**≥ 5 min** (la saisie sous le plancher est remontée à 5 côté serveur).
+  6. **Indépendance du polling REST** (AC3) : désactiver la case → le rafraîchissement REST périodique
+     (batterie, position…) **continue** à la cadence habituelle ; seuls les réveils MQTT cessent.
+  7. **Respect UC72 / anti-ban** : avec plusieurs véhicules en charge simultanée, le quota global compte
+     (5/20 min) n'est **jamais** dépassé (un excès est refusé, loggué en `debug`, jamais une rafale).
 
 ## Critères d'acceptation
 - [ ] Chaque UC livrée a au moins un scénario de recette observable, vérifié sur Jeedom réel.

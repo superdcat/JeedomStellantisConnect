@@ -334,7 +334,14 @@
         "Libellé du véhicule": "Etiqueta del vehículo",
         "Nom du véhicule tel que défini dans l'application mobile (pré-rempli avec la désignation commerciale, modifiable ; renseigné par la synchronisation)": "Nombre del vehículo tal como se define en la aplicación móvil (rellenado previamente con la denominación comercial, modificable; rellenado por la sincronización)",
         "Compte du véhicule": "Cuenta del vehículo",
-        "Compte Stellantis auquel ce véhicule est rattaché (renseigné par la synchronisation) — seul le compte principal permet le pilotage à distance": "Cuenta Stellantis a la que está vinculado este vehículo (rellenada por la sincronización) — solo la cuenta principal permite el control remoto"
+        "Compte Stellantis auquel ce véhicule est rattaché (renseigné par la synchronisation) — seul le compte principal permet le pilotage à distance": "Cuenta Stellantis a la que está vinculado este vehículo (rellenada por la sincronización) — solo la cuenta principal permite el control remoto",
+        "Réveil automatique adaptatif": "Despertar automático adaptativo",
+        "Réveille périodiquement le véhicule pour rafraîchir la télémétrie (batterie, position, charge…) que le polling REST seul ne peut pas obtenir. Cadence adaptative : fréquente en charge, rare en veille. Nécessite l'activation de l'OTP (pilotage à distance).": "Despierta periódicamente el vehículo para actualizar la telemetría (batería, posición, carga…) que el sondeo REST por sí solo no puede obtener. Cadencia adaptativa: frecuente durante la carga, escasa en reposo. Requiere la activación del OTP (control remoto).",
+        "⚠️ Risque batterie 12 V : réveiller le véhicule consomme la batterie de servitude. Un usage excessif peut la décharger (démarrage / accès sans clé inopérants). À n'activer qu'en connaissance de cause.": "⚠️ Riesgo para la batería de 12 V: despertar el vehículo consume la batería auxiliar. Un uso excesivo puede descargarla (arranque / acceso sin llave inoperativos). Actívelo solo con pleno conocimiento del riesgo.",
+        "Cadence de réveil en charge (min)": "Cadencia de despertar durante la carga (min)",
+        "Fréquence de réveil automatique quand le véhicule est en charge — minimum 5 min (protection anti-ban / batterie). Sans effet sur un véhicule thermique. Laisser vide pour le défaut (5 min).": "Frecuencia de despertar automático cuando el vehículo está cargando — mínimo 5 min (protección anti-bloqueo / batería). Sin efecto en un vehículo térmico. Dejar vacío para usar el valor por defecto (5 min).",
+        "Cadence de réveil en veille (min)": "Cadencia de despertar en reposo (min)",
+        "Fréquence de réveil automatique quand le véhicule est à l'arrêt — plus la valeur est élevée, plus la batterie 12 V est préservée. Laisser vide pour le défaut (60 min).": "Frecuencia de despertar automático cuando el vehículo está parado — cuanto mayor sea el valor, más se preserva la batería de 12 V. Dejar vacío para usar el valor por defecto (60 min)."
     },
     "plugins/stellantis/desktop/php/panel.php": {
         "401 - Accès non autorisé": "401 - Acceso no autorizado",

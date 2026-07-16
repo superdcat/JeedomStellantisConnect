@@ -334,7 +334,14 @@
         "Libellé du véhicule": "Vehicle label",
         "Nom du véhicule tel que défini dans l'application mobile (pré-rempli avec la désignation commerciale, modifiable ; renseigné par la synchronisation)": "Vehicle name as defined in the mobile app (pre-filled with the commercial designation, editable; filled in by the synchronization)",
         "Compte du véhicule": "Vehicle account",
-        "Compte Stellantis auquel ce véhicule est rattaché (renseigné par la synchronisation) — seul le compte principal permet le pilotage à distance": "Stellantis account this vehicle is linked to (filled in by the synchronization) — only the primary account allows remote control"
+        "Compte Stellantis auquel ce véhicule est rattaché (renseigné par la synchronisation) — seul le compte principal permet le pilotage à distance": "Stellantis account this vehicle is linked to (filled in by the synchronization) — only the primary account allows remote control",
+        "Réveil automatique adaptatif": "Adaptive automatic wake-up",
+        "Réveille périodiquement le véhicule pour rafraîchir la télémétrie (batterie, position, charge…) que le polling REST seul ne peut pas obtenir. Cadence adaptative : fréquente en charge, rare en veille. Nécessite l'activation de l'OTP (pilotage à distance).": "Periodically wakes up the vehicle to refresh telemetry (battery, position, charging…) that REST polling alone cannot obtain. Adaptive rate: frequent while charging, rare at rest. Requires OTP activation (remote control).",
+        "⚠️ Risque batterie 12 V : réveiller le véhicule consomme la batterie de servitude. Un usage excessif peut la décharger (démarrage / accès sans clé inopérants). À n'activer qu'en connaissance de cause.": "⚠️ 12 V battery risk: waking up the vehicle consumes the auxiliary battery. Excessive use may drain it (starting / keyless access no longer working). Only enable this with full knowledge of the risk.",
+        "Cadence de réveil en charge (min)": "Wake-up rate while charging (min)",
+        "Fréquence de réveil automatique quand le véhicule est en charge — minimum 5 min (protection anti-ban / batterie). Sans effet sur un véhicule thermique. Laisser vide pour le défaut (5 min).": "Automatic wake-up frequency while the vehicle is charging — minimum 5 min (anti-ban / battery protection). No effect on a combustion-engine vehicle. Leave empty to use the default (5 min).",
+        "Cadence de réveil en veille (min)": "Wake-up rate at rest (min)",
+        "Fréquence de réveil automatique quand le véhicule est à l'arrêt — plus la valeur est élevée, plus la batterie 12 V est préservée. Laisser vide pour le défaut (60 min).": "Automatic wake-up frequency while the vehicle is at rest — the higher the value, the more the 12 V battery is preserved. Leave empty to use the default (60 min)."
     },
     "plugins/stellantis/desktop/php/panel.php": {
         "401 - Accès non autorisé": "401 - Unauthorized access",
