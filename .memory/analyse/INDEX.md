@@ -11,7 +11,15 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-15 (UC54 : `stellantis-api-architecture.md` § 4.5 — **multi-comptes
+> **Dernière synchro** : 2026-07-16 (UC74 : `stellantis-api-architecture.md` § 4.5 — **limite de cycle de
+> vie des états PAR SLOT** : les tags `message::add` **et** clés cache suffixés par slot
+> (`link_error`/`degraded_warn`/`rate_limited_<slot>`/`auth_required_<slot>`) ne sont effacés que par la
+> branche succès du priming `cron()` ou `storeTokenResponse()` ⇒ **orphelins** si un compte secondaire est
+> **totalement déconfiguré** (hooks `preConfig_*` ne purgent que le token, cron n'itère plus le slot).
+> Impact faible ; **correctif transverse** = `message::removeAll`/`cache::delete` pour tout slot non
+> configuré dans les boucles `for` en tête de `cron()`, **pour tous les tags à la fois**. UC74 a par
+> ailleurs livré l'alerte centre de messages « reconnexion requise » sur `auth_required` — cf. `74-tech.md`).
+> Précédemment 2026-07-15 (UC54 : `stellantis-api-architecture.md` § 4.5 — **multi-comptes
 > IMPLÉMENTÉ (slice LECTURE SEULE)** : slots fixes `MAX_ACCOUNTS=3`, slot 1 = config actuelle non suffixée
 > (zéro migration), threading `$slot` dans `getApiConfig`/`callWithToken`/token, **cloisonnement par slot
 > des 6 clés cache niveau-compte** (token/oauth_pending/refresh_quota/ratelimit/link_error/degraded_warn
@@ -144,7 +152,7 @@
 | **Deux systèmes de tokens** (OAuth2 REST vs remote token OTP/SMS pour MQTT) — ne pas confondre | `stellantis-api-architecture.md` § 1.1 |
 | **Commandes à distance** : MQTT (broker `mwa.mpsa.com:8885`, topics, payloads, ack async) | `stellantis-api-architecture.md` § 1.3 |
 | **PHP natif vs démon Python** : lecture en PHP, commandes MQTT → démon (inversion vs philosophie « sans démon ») | `stellantis-api-architecture.md` § 2 et § 3 |
-| **Multi-comptes / multi-marques** (foyer Peugeot+Citroën, 2 comptes même marque) : contrainte 1 plugin=1 config/1 token/1 OTP, design UC54 = namespacing par **compte** (pas par marque) | `stellantis-api-architecture.md` § 4.4-4.5 (+ `specs/.../53-tech.md`, `54-multi-marques.md`) |
+| **Multi-comptes / multi-marques** (foyer Peugeot+Citroën, 2 comptes même marque) : contrainte 1 plugin=1 config/1 token/1 OTP, design UC54 = namespacing par **compte** (pas par marque) ; **cycle de vie des états par slot** (messages/cache orphelins si compte secondaire déconfiguré — UC74) | `stellantis-api-architecture.md` § 4.4-4.5 (+ `specs/.../53-tech.md`, `54-multi-marques.md`, `74-tech.md`) |
 | **Limites** : ban API (wakeup ~2 min), batterie 12 V, mode privacy, quotas OTP (6/24 h), seuil charge | `stellantis-api-architecture.md` § 1.4 |
 | **Champs de télémétrie** (SOC, autonomie, charge, position, portes, km, pneus…) → quelles commandes info | `stellantis-data-model.md` |
 | **`charging.status`** : valeurs, états terminaux **persistants** (≠ momentanés), machine à états de **session de charge** (transition, pas par-poll), énergie = Δ SOC × capacité | `stellantis-data-model.md` § 2.1 |

@@ -534,6 +534,28 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > quota UC72 EST le plafond dur (anti-ban prioritaire), pas de répartition équitable (futur UC si besoin
 > confirmé en recette). Reviews croisées : sécurité **LOW**, qualité **PASS** (fidélité spec point par
 > point).
+> **Post-MVP : UC74** — **renouvellement & alertes de token** (supervision/robustesse, 100 % local,
+> **AUCUN appel réseau/MQTT neuf** : ne fait qu'*alerter* sur un état déjà détecté) : l'audit a confirmé
+> que le périmètre est **déjà en place à ~95 %** — « sans boucle d'appels » (AC1) garanti par construction
+> (`refreshToken()` sur `invalid_grant` **supprime le token cache** ⇒ toute passe suivante lève
+> `auth_required` **sans réseau** ; véhicules du slot **sautés** au cron via `tokenOk[$slot]=false`) ;
+> **remote token expiré → `otp_required` + `alerterOtpRequired()` sans régénération OTP auto** (AC2) déjà
+> livré (UC12) ; **états visibles** (bandeau `connectionState()` page plugin, `health()` page Santé, état
+> OTP page config) (AC3) déjà là. **Un seul livrable code** (`core/class/stellantis.class.php`, +26 l.) :
+> comblement du **`message::add` manquant** pour l'OAuth (la spec liste « log warning + **message** +
+> Santé », l'OTP l'avait, pas l'OAuth) — nouvelle méthode `alerterAuthRequired(int $_slot)` (famille des
+> helpers `alerter*`, `removeAll`+`add`, **tag suffixé par slot** `auth_required_<slot>` comme
+> `rate_limited_<slot>`, **sans `log::add`** car le warning « Mode dégradé » est déjà émis inline par le
+> cron dans la **même garde**), appelée depuis `cron()` **à l'intérieur de la garde `degraded_warn`
+> existante** (throttle 1×/h/compte **réutilisé**, jamais sur transport/rate_limited ⇒ **pas de « cri au
+> loup »**), effacée dans `stellantisApi::storeTokenResponse()` (**point unique de recouvrement** : ré-auth
+> manuelle `exchangeCode` **et** refresh auto `refreshToken`, feedback immédiat). ⚠️ **Limite assumée
+> documentée** (`74-tech.md` + `stellantis-api-architecture.md` § 4.5) : message/flags par slot
+> **orphelins** si un compte secondaire est **totalement déconfiguré** (hooks `preConfig_*` ne purgent que
+> le token, cron n'itère plus le slot) — **limitation structurelle préexistante symétrique** à
+> `rate_limited_<slot>`/`link_error` (pas une régression UC74 ; correctif = futur nettoyage transverse
+> multi-comptes, pour **tous** les tags à la fois). Reviews croisées : sécurité **RAS**, qualité **PASS**
+> (1 finding *minor* = l'orphelin ci-dessus, documenté).
 > Suite = post-MVP (supervision, robustesse, livraison…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement

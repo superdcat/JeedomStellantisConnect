@@ -295,6 +295,19 @@ avec le PHP via le **socket Jeedom** (`jeedom_socket`/`jeedom_com`, déjà prés
    (commandes/OTP/MQTT) pour slots ≥2 — le démon MQTT reste **mono-connexion** (commandes = slot 1
    uniquement ; slots ≥2 = lecture seule, garde runtime dans `stellantisCmd::execute()`). Un vrai
    multi-comptes pour les commandes = futur UC (démon multi-connexions).
+   ⚠️ **Limite de cycle de vie des états PAR SLOT (à traiter dans un futur nettoyage transverse)** —
+   confirmée à UC74 (2026-07-16) : les clés cache **et** les tags `message::add` suffixés par slot
+   (`link_error`, `degraded_warn`, `rate_limited_<slot>`, et désormais `auth_required_<slot>`) ne sont
+   effacés que par (a) la **branche succès du priming** dans `cron()` ou (b) `storeTokenResponse()`.
+   Si un compte secondaire est **totalement déconfiguré** (ex. `client_id_2` vidé) alors qu'un de ces
+   états est actif, il devient **orphelin** : les hooks `preConfig_client_id_N`/`preConfig_brand_N` ne
+   font que `purgeTokenCache(N)` (pas de nettoyage des messages/flags), et un slot absent de
+   `slotsConfigures()` n'est **plus itéré** par le cron ⇒ plus rien ne l'efface. Impact faible (message
+   acquittable manuellement ; dans le flux normal changement-creds→ré-auth, `storeTokenResponse` nettoie).
+   **Correctif transverse** (si un jour jugé utile) : ajouter un `message::removeAll('stellantis', '<tag>_'
+   . $s)` (+ `cache::delete` des flags) dans les boucles `for ($s=1; $s<=MAX_ACCOUNTS; $s++)` déjà
+   présentes en tête de `cron()`, pour **tout slot non configuré** — à faire pour **tous** les tags à la
+   fois (parité), pas par UC isolée. Cf. `specs/.../74-tech.md` § Limites assumées.
 
 ---
 

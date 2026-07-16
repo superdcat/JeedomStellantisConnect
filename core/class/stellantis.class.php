@@ -2543,6 +2543,22 @@ class stellantis extends eqLogic {
     log::add('stellantis', 'warning', 'UC72 : rate-limit API (HTTP 429) → alerte utilisateur' . ($_slot > 1 ? ' (compte ' . $_slot . ')' : ''));
   }
 
+  // UC74 — Alerte utilisateur « reconnexion requise » (refresh token OAuth2 mort/révoqué), PAR COMPTE.
+  // Tag suffixé par slot (comme alerterRateLimit) : un removeAll d'un compte n'efface pas l'alerte d'un
+  // autre ; removeAll+add ⇒ au plus un message actif par compte (pas d'empilement). Appelée depuis cron()
+  // à l'intérieur de la garde `degraded_warn` existante (throttle 1×/h/compte réutilisé, pas de nouvelle
+  // clé). Pas de `log::add` ici : le warning « Mode dégradé » est déjà émis inline par le cron dans cette
+  // même garde — ce helper est focalisé sur la seule notification du centre de messages.
+  private static function alerterAuthRequired(int $_slot): void {
+    $tag = 'auth_required_' . $_slot;
+    message::removeAll('stellantis', $tag);
+    if ($_slot > 1) {
+      message::add('stellantis', sprintf(__('La connexion au compte secondaire %s a expiré (jeton de rafraîchissement invalide ou révoqué). Reconnectez-vous depuis la configuration du plugin.', __FILE__), $_slot), '', $tag);
+    } else {
+      message::add('stellantis', __('La connexion au compte Stellantis a expiré (jeton de rafraîchissement invalide ou révoqué). Reconnectez-vous depuis la configuration du plugin.', __FILE__), '', $tag);
+    }
+  }
+
   // Purge le remote token + le device OTP + l'état d'alerte/pending. Appelée sur changement de
   // credentials/marque (device devenu incohérent) et à la désinstallation. NE réinitialise PAS le
   // compteur SMS à vie (sécurité : ne jamais rouvrir un quota potentiellement épuisé côté serveur).
@@ -4070,6 +4086,11 @@ class stellantis extends eqLogic {
           if (cache::byKey($cleWarn)->getValue('') == '') {
             log::add('stellantis', 'warning', 'Mode dégradé (compte ' . $slot . ') : authentification requise — (ré)authentifiez-vous depuis la configuration du plugin. Les dernières valeurs des commandes de ce compte sont conservées.');
             cache::set($cleWarn, '1', 3600);
+            // UC74 : réutilise le throttle `degraded_warn` (1×/h/compte) pour l'alerte centre de messages —
+            // sûr car `degraded_warn` n'est posé QUE dans cette branche `auth_required` (jamais par
+            // transport/rate_limited, branche `else` ci-dessous) : le couplage ne « crie jamais au loup »
+            // sur un incident réseau transitoire.
+            self::alerterAuthRequired($slot);
           } else {
             log::add('stellantis', 'debug', 'Cron (compte ' . $slot . ') : authentification requise (warning throttlé) : ' . $e->getMessage());
           }
@@ -5302,6 +5323,11 @@ class stellantisApi {
       'refresh_token' => $refresh,
       'exp' => $exp,
     ))), 0);
+    // UC74 : point unique de recouvrement — appelée par exchangeCode() (ré-auth manuelle) ET refreshToken()
+    // (refresh auto réussi) : dans les deux cas un token valide vient d'être écrit pour ce compte, donc
+    // l'alerte « reconnexion requise » (si posée) n'a plus lieu d'être. Feedback immédiat après une ré-auth
+    // manuelle, sans attendre le prochain cron.
+    message::removeAll('stellantis', 'auth_required_' . $_slot);
   }
 
   // Relit le cache token déchiffré DU COMPTE $_slot ; null si absent ou illisible
