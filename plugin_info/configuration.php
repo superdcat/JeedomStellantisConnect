@@ -35,7 +35,7 @@ $otpSmsCount = stellantis::otpSmsCount();
     <?php if (!$stellantisConfigure) { ?>
     <div class="alert alert-warning">{{Plugin non configuré : renseignez au minimum le Client ID et le Client Secret.}}</div>
     <?php } ?>
-    <div class="alert alert-info">{{Les identifiants Client ID et Client Secret ne sont pas fournis par Stellantis aux particuliers : ils doivent être extraits de l'application mobile de votre marque (APK) à l'aide d'un outil externe. Consultez la documentation du plugin pour la procédure.}}</div>
+    <div class="alert alert-info">{{Les identifiants Client ID et Client Secret ne sont pas fournis par Stellantis aux particuliers. Utilisez le bouton « Extraire automatiquement » ci-dessous pour les récupérer directement depuis l'application mobile de votre marque (APK). En cas d'échec, ou sur un Raspberry Pi à carte SD, une extraction manuelle avec un outil externe reste possible : consultez la documentation du plugin pour la procédure.}}</div>
     <div class="form-group">
       <label class="col-md-4 control-label">{{Marque}}
         <sup><i class="fas fa-question-circle tooltips" title="{{Détermine le serveur d'authentification (idpcvs) et le realm utilisés}}"></i></sup>
@@ -52,7 +52,7 @@ $otpSmsCount = stellantis::otpSmsCount();
     </div>
     <div class="form-group">
       <label class="col-md-4 control-label">{{Client ID}}
-        <sup><i class="fas fa-question-circle tooltips" title="{{Identifiant client OAuth2 de l'application mobile de la marque (extrait via un outil externe)}}"></i></sup>
+        <sup><i class="fas fa-question-circle tooltips" title="{{Identifiant client OAuth2 de l'application mobile de la marque (rempli automatiquement par le bouton « Extraire automatiquement » ci-dessous, ou manuellement via un outil externe en repli)}}"></i></sup>
       </label>
       <div class="col-md-4">
         <input class="configKey form-control" data-l1key="client_id"/>
@@ -60,7 +60,7 @@ $otpSmsCount = stellantis::otpSmsCount();
     </div>
     <div class="form-group">
       <label class="col-md-4 control-label">{{Client Secret}}
-        <sup><i class="fas fa-question-circle tooltips" title="{{Secret client OAuth2 (stocké chiffré, jamais affiché en clair)}}"></i></sup>
+        <sup><i class="fas fa-question-circle tooltips" title="{{Secret client OAuth2 (obtenu de la même façon que le Client ID ; stocké chiffré, jamais affiché en clair)}}"></i></sup>
       </label>
       <div class="col-md-4">
         <input type="password" autocomplete="new-password" class="configKey form-control" data-l1key="client_secret"/>
@@ -221,7 +221,7 @@ $otpSmsCount = stellantis::otpSmsCount();
       </div>
       <div class="form-group">
         <label class="col-md-4 control-label">{{Client ID}}
-          <sup><i class="fas fa-question-circle tooltips" title="{{Identifiant client OAuth2 de l'application mobile de la marque (extrait via un outil externe)}}"></i></sup>
+          <sup><i class="fas fa-question-circle tooltips" title="{{Identifiant client OAuth2 de l'application mobile de la marque (rempli automatiquement par le bouton « Extraire automatiquement » ci-dessous, ou manuellement via un outil externe en repli)}}"></i></sup>
         </label>
         <div class="col-md-4">
           <input class="configKey form-control" data-l1key="client_id_<?php echo $slotN; ?>"/>
@@ -229,7 +229,7 @@ $otpSmsCount = stellantis::otpSmsCount();
       </div>
       <div class="form-group">
         <label class="col-md-4 control-label">{{Client Secret}}
-          <sup><i class="fas fa-question-circle tooltips" title="{{Secret client OAuth2 (stocké chiffré, jamais affiché en clair)}}"></i></sup>
+          <sup><i class="fas fa-question-circle tooltips" title="{{Secret client OAuth2 (obtenu de la même façon que le Client ID ; stocké chiffré, jamais affiché en clair)}}"></i></sup>
         </label>
         <div class="col-md-4">
           <input type="password" autocomplete="new-password" class="configKey form-control" data-l1key="client_secret_<?php echo $slotN; ?>"/>

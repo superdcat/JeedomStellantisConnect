@@ -666,6 +666,33 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > Reviews : **sécurité sans objet** (aucun code) + garde anti-fuite (grep VIN/token) OK ; **qualité PASS**
 > (2 findings minor corrigés : flag `otp_sms_pending` ≠ compteur `otp_sms_count` ; liste des blocs datés de
 > `81-tech.md` rectifiée). **i18n sans objet** (fichier interne FR). Spec technique : `81-tech.md`.
+> **Post-MVP : UC82** — **packaging & documentation utilisateur** (domaine livraison) : deux volets. (A)
+> **Packaging VÉRIFIÉ, non modifié** — `packages.json` (**`paho-mqtt` 1.6.1** pin exact, `requests` 2.32.3,
+> `pycryptodomex` 3.20.0) et `info.json` (category `devicecommunication`, `require 4.2`, os 10–12.99,
+> `hasDependency/hasOwnDeamon:true`, 4 langues, compat) étaient déjà corrects (AC1 satisfait par
+> construction, post-MVP) ; ⚠️ le texte de la spec fonctionnelle (`<2.0.0`, `cryptography`, `jeedomdaemon`)
+> était **périmé** et a été corrigé dans `82-packaging-doc.md` (Volet D) pour refléter le réel (pin exact,
+> `pycryptodomex`, démon = squelette `demond.py` + lib `jeedom/`). Dette signalée non traitée :
+> `link.forum`/`link.video` d'`info.json` restent des placeholders (à remplir avant soumission store). (B)
+> **Doc utilisateur `docs/<langue>/index.md` complétée** (livrable principal, AC2) : correction d'une
+> **erreur factuelle livrée dans les 4 langues** (« le plugin ne télécharge/analyse aucun APK » — faux
+> depuis UC61) ; **« Obtenir les identifiants » restructuré** en Méthode 1 (extraction automatique
+> in-Jeedom UC61, recommandée, avec nuance box/Python/~100 Mo) / Méthode 2 (repli manuel `psa_car_controller`) ;
+> **sections ajoutées** : « Avertissement — API non officielle & risques (ToS) », « Pilotage à distance —
+> activation OTP » (3 étapes ancrées sur l'UI réelle + quotas 6/24 h & 20 SMS/vie + renouvellement sans SMS,
+> slot 1 uniquement), « Comptes secondaires (lecture seule) », « Fonctions disponibles », « Limites & bonnes
+> pratiques » (fraîcheur ~5 min sans push, batterie 12 V, anti-ban, privacy, mono-compte). ⚠️ Fait API
+> capitalisé : le **remote token** a un TTL ~890 s **auto-renouvelé par le cron sans consommer de quota**
+> (`syncDaemonToken→refreshRemoteToken`), tandis que le bouton **« Renouveler le jeton distant »**
+> (`renewRemoteToken`) **génère un code OTP consommant 1 unité du quota 6/24 h** (distinct du quota SMS
+> 20/vie). (C) **Cohérence UI `configuration.txt`** : chaînes « outil externe » (alerte + tooltips Client
+> ID/Secret, comptes principal & secondaires) reformulées pour ne plus contredire le bouton « Extraire
+> automatiquement » (UC61), `.php` re-synchronisé. Reviews croisées : **sécurité RAS** (guillemets français
+> `« »` dans les `title="..."` → pas d'injection ; aucun secret dans la doc), **qualité PASS après
+> corrections** (1 major = cycle de vie du jeton distant factuellement faux/contradictoire, corrigé ; 3
+> minor corrigés). Traduction en/de/es : **3 docs réécrites section par section** (erreur APK corrigée dans
+> les 3 langues) + i18n `configuration.txt` (3 clés modifiées + lacune « Tester la connexion » comblée), 3
+> JSON valides. Spec technique : `82-tech.md`.
 > Suite = post-MVP (supervision, robustesse, livraison…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement

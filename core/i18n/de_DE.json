@@ -1,13 +1,13 @@
 {
     "plugins/stellantis/plugin_info/configuration.php": {
         "Plugin non configuré : renseignez au minimum le Client ID et le Client Secret.": "Plugin nicht konfiguriert: Bitte geben Sie mindestens die Client-ID und das Client-Secret ein.",
-        "Les identifiants Client ID et Client Secret ne sont pas fournis par Stellantis aux particuliers : ils doivent être extraits de l'application mobile de votre marque (APK) à l'aide d'un outil externe. Consultez la documentation du plugin pour la procédure.": "Die Anmeldedaten Client-ID und Client-Secret werden von Stellantis nicht an Privatpersonen herausgegeben: Sie müssen mithilfe eines externen Tools aus der mobilen App Ihrer Marke (APK) extrahiert werden. Das Vorgehen finden Sie in der Plugin-Dokumentation.",
+        "Les identifiants Client ID et Client Secret ne sont pas fournis par Stellantis aux particuliers. Utilisez le bouton « Extraire automatiquement » ci-dessous pour les récupérer directement depuis l'application mobile de votre marque (APK). En cas d'échec, ou sur un Raspberry Pi à carte SD, une extraction manuelle avec un outil externe reste possible : consultez la documentation du plugin pour la procédure.": "Die Anmeldedaten Client-ID und Client-Secret werden von Stellantis nicht an Privatpersonen herausgegeben. Verwenden Sie die Schaltfläche «Automatisch extrahieren» unten, um sie direkt aus der mobilen App Ihrer Marke (APK) abzurufen. Bei einem Fehlschlag oder auf einem Raspberry Pi mit SD-Karte ist eine manuelle Extraktion mit einem externen Tool weiterhin möglich: Das Vorgehen finden Sie in der Plugin-Dokumentation.",
         "Marque": "Marke",
         "Détermine le serveur d'authentification (idpcvs) et le realm utilisés": "Bestimmt den verwendeten Authentifizierungsserver (idpcvs) und den Realm",
         "Client ID": "Client-ID",
-        "Identifiant client OAuth2 de l'application mobile de la marque (extrait via un outil externe)": "OAuth2-Client-Kennung der mobilen App der Marke (mit einem externen Tool extrahiert)",
+        "Identifiant client OAuth2 de l'application mobile de la marque (rempli automatiquement par le bouton « Extraire automatiquement » ci-dessous, ou manuellement via un outil externe en repli)": "OAuth2-Client-Kennung der mobilen App der Marke (wird automatisch über die Schaltfläche «Automatisch extrahieren» unten ausgefüllt, oder alternativ manuell mit einem externen Tool)",
         "Client Secret": "Client-Secret",
-        "Secret client OAuth2 (stocké chiffré, jamais affiché en clair)": "OAuth2-Client-Secret (verschlüsselt gespeichert, wird nie im Klartext angezeigt)",
+        "Secret client OAuth2 (obtenu de la même façon que le Client ID ; stocké chiffré, jamais affiché en clair)": "OAuth2-Client-Secret (auf dieselbe Weise wie die Client-ID beschafft; wird verschlüsselt gespeichert und nie im Klartext angezeigt)",
         "Pays": "Land",
         "Code pays à 2 lettres (ex. fr) utilisé pour construire l'URL de redirection par défaut": "Zweistelliger Ländercode (z. B. fr), der zur Erstellung der Standard-Weiterleitungs-URL verwendet wird",
         "URL de redirection": "Weiterleitungs-URL",
@@ -55,6 +55,7 @@
         "Pilotage à distance (activation OTP)": "Fernsteuerung (OTP-Aktivierung)",
         "Le pilotage à distance (réveil, charge, verrouillage…) nécessite une activation unique par SMS + le code PIN de votre application mobile. Attention : les quotas sont stricts et définitifs côté Stellantis (6 codes par 24 h, 20 activations SMS par compte à vie). N'activez que lorsque vous êtes prêt.": "Die Fernsteuerung (Aufwecken, Laden, Verriegeln…) erfordert eine einmalige Aktivierung per SMS + den PIN-Code Ihrer mobilen App. Achtung: Die Kontingente sind auf Stellantis-Seite streng und endgültig (6 Codes pro 24 Std., 20 SMS-Aktivierungen pro Konto auf Lebenszeit). Aktivieren Sie erst, wenn Sie bereit sind.",
         "État du pilotage à distance": "Status der Fernsteuerung",
+        "Activations SMS utilisées : %1$s / %2$s": "Verwendete SMS-Aktivierungen: %1$s / %2$s",
         "Activé": "Aktiviert",
         "Expiré — renouvellement nécessaire": "Abgelaufen — Erneuerung erforderlich",
         "SMS envoyé — en attente d'activation": "SMS gesendet — Aktivierung ausstehend",
@@ -81,7 +82,8 @@
         "Compte principal (pilotage à distance)": "Hauptkonto (Fernsteuerung)",
         "Ce compte est en lecture seule : le pilotage à distance (commandes) n'est disponible que sur le compte principal": "Dieses Konto ist schreibgeschützt: Die Fernsteuerung (Befehle) ist nur beim Hauptkonto verfügbar",
         "Configurez d'abord le compte principal ci-dessus": "Konfigurieren Sie zuerst das Hauptkonto oben",
-        "Compte secondaire %s (lecture seule)": "Zweitkonto %s (nur Lesezugriff)"
+        "Compte secondaire %s (lecture seule)": "Zweitkonto %s (nur Lesezugriff)",
+        "Tester la connexion": "Verbindung testen"
     },
     "plugins/stellantis/core/ajax/stellantis.ajax.php": {
         "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert",

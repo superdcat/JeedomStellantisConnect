@@ -2,28 +2,47 @@
 
 Ce plugin connecte vos véhicules **Stellantis / ex-Groupe PSA** (Peugeot, Citroën, DS, Opel, Vauxhall)
 à Jeedom : remontée de la télémétrie (batterie, charge, autonomie, carburant, position GPS,
-kilométrage…) via l'API « connected car » utilisée par les applications mobiles officielles
-(MyPeugeot, MyCitroën, MyDS, MyOpel, MyVauxhall).
-
-> ⚠️ Le plugin utilise l'API **consommateur** de Stellantis, la même que les applications mobiles.
-> Stellantis ne fournit pas d'accès développeur aux particuliers : vous devez récupérer vous-même les
-> identifiants de l'application mobile de votre marque (voir « Obtenir les identifiants » ci-dessous).
+kilométrage, portes/ouvrants, pression des pneus, entretien…) et, une fois le pilotage à distance
+activé, **commandes à distance** (réveil, charge, préconditionnement, verrouillage, klaxon, feux) — via
+l'API « connected car » utilisée par les applications mobiles officielles (MyPeugeot, MyCitroën, MyDS,
+MyOpel, MyVauxhall).
 
 > Les noms et couleurs de marques (Peugeot, Citroën, DS, Opel, Vauxhall) sont cités à titre
 > d'identification ; ce plugin n'est ni affilié ni approuvé par les constructeurs.
 
+## Avertissement — API non officielle & risques (ToS)
+
+> ⚠️ **À lire avant toute utilisation.**
+
+Ce plugin repose sur l'API **consommateur** de Stellantis — celle qu'utilisent les applications
+mobiles — et non sur une API développeur officielle : Stellantis n'en fournit pas aux particuliers.
+Cette API a été **reverse-engineered** par la communauté (notamment le projet
+[`psa_car_controller`](https://github.com/flobz/psa_car_controller), dont ce plugin réutilise certains
+éléments sous licence GPL-3, et dont le comportement observé sert de référence).
+
+Conséquences à connaître avant d'activer le plugin :
+
+- Elle peut **cesser de fonctionner sans préavis**, en totalité ou en partie, à la suite d'un
+  changement décidé par Stellantis (aucune garantie de continuité ni de délai de correction).
+- Son usage se fait **aux risques de l'utilisateur**, y compris les risques **légaux et
+  contractuels** : c'est à vous de vérifier que cet usage reste compatible avec les conditions
+  d'utilisation (ToS) de votre compte de marque.
+- Le plugin est fourni **sans aucune garantie**, conformément à la licence **GPL-3** qui le régit.
+- L'extraction de vos identifiants (Client ID / Client Secret) — qu'elle soit automatique ou
+  manuelle — se fait sous votre seule responsabilité.
+
 ## Configuration du plugin
 
 Rendez-vous dans `Plugins → Gestion des plugins → Stellantis Connect → Configuration`. Les paramètres
-sont communs à tous vos véhicules d'une même marque :
+du fieldset « Compte principal (pilotage à distance) » sont communs à tous les véhicules de ce compte :
 
 | Champ | Description |
 |---|---|
 | **Marque** | La marque de vos véhicules (Peugeot, Citroën, DS, Opel ou Vauxhall). Elle détermine le serveur d'authentification et le domaine utilisés — choisissez la marque correspondant à l'application mobile dont proviennent vos identifiants. |
-| **Client ID** | Identifiant OAuth2 de l'application mobile, extrait de l'APK (voir ci-dessous). |
-| **Client Secret** | Secret OAuth2 associé, extrait de l'APK. Il est **stocké chiffré** dans Jeedom et n'apparaît jamais dans les logs. |
-| **Pays** | Code pays à 2 lettres (ex. `fr`), utilisé pour construire l'URL de redirection par défaut. |
-| **URL de redirection** | `redirect_uri` OAuth2 de l'application mobile (ex. `mymap://oauth2redirect/fr`). Laissez vide pour utiliser la valeur par défaut de la marque. Si votre outil d'extraction vous a fourni une valeur, utilisez-la. |
+| **Client ID** | Identifiant OAuth2 de l'application mobile. Rempli automatiquement par **Extraire automatiquement**, ou saisi manuellement (voir « Obtenir les identifiants » ci-dessous). |
+| **Client Secret** | Secret OAuth2 associé, obtenu de la même façon. Il est **stocké chiffré** dans Jeedom et n'apparaît jamais dans les logs. |
+| **Pays** | Code pays à 2 lettres (ex. `fr`), utilisé pour construire l'URL de redirection par défaut et pour l'extraction automatique. |
+| **URL de redirection** | `redirect_uri` OAuth2 de l'application mobile (ex. `mymap://oauth2redirect/fr`). Laissez vide pour utiliser la valeur par défaut de la marque. |
 
 Tant que le Client ID et le Client Secret ne sont pas renseignés, la page affiche un bandeau
 « Plugin non configuré » et les autres fonctions du plugin restent inactives.
@@ -32,18 +51,38 @@ Tant que le Client ID et le Client Secret ne sont pas renseignés, la page affic
 
 Les identifiants ne sont **pas** distribués par Stellantis : ils sont embarqués dans l'APK de
 l'application mobile de chaque marque (dans un fichier interne `parameters.json`, sous les clés
-`cvsClientId` et `cvsSecret`). Il faut donc les extraire **une fois**, sur un ordinateur — le plugin,
-lui, ne télécharge ni n'analyse aucun APK.
+`cvsClientId` et `cvsSecret`), et dépendent de la **marque** et du **pays** de votre compte. Deux
+méthodes permettent de les récupérer ; elles ne dépendent l'une de l'autre en rien.
 
-> Les identifiants dépendent de la **marque** et du **pays** de votre compte : extrayez ceux qui
-> correspondent à l'application que vous utilisez et à votre pays. Ils n'expirent pas.
+### Méthode 1 (recommandée, en un clic) : extraction automatique dans Jeedom
 
-### Méthode recommandée : extraction directe (sans connexion au compte)
+Le plugin sait lui-même télécharger l'application mobile de votre marque et en extraire les
+identifiants, sans outil externe à installer :
 
-Cette méthode récupère **uniquement** le Client ID et le Client Secret ; la connexion à votre compte
-se fera ensuite dans Jeedom (section suivante), il est donc inutile de se connecter ici. Sur une
-machine disposant de **Python 3.11 ou plus récent** (votre PC, ou votre Jeedom si sa version de Python
-convient) :
+1. Dans la configuration du plugin, sélectionnez la **Marque** et renseignez le **Pays** (ex. `fr`).
+2. Cliquez sur le bouton **Extraire automatiquement**.
+3. Confirmez l'avertissement affiché (« Cette API n'est pas officielle. Continuer ? ») : le
+   téléchargement de l'application (~100 Mo) démarre, hébergé sur un dépôt communautaire tiers.
+4. Patientez le temps du téléchargement et de l'extraction. En cas de succès, les champs **Client ID**
+   et **Client Secret** se remplissent automatiquement.
+
+> ℹ️ **Où ça s'exécute, et quand préférer l'autre méthode.** Cette extraction a lieu **sur la box
+> Jeedom elle-même** : elle réutilise l'interpréteur **Python 3** déjà installé pour le démon de
+> pilotage à distance, et télécharge directement sur la box l'archive de l'application mobile
+> (**~100 Mo**). Sur un **Raspberry Pi équipé d'une carte SD** (où mieux vaut ménager l'espace et les
+> écritures) — ou **en cas d'échec** — préférez la **Méthode 2** ci-dessous, à réaliser sur un
+> ordinateur.
+
+Le champ avancé **URL de l'application mobile (avancé)** (`apk_url`) permet d'indiquer une autre URL
+d'archive `.apk.bz2` si le dépôt communautaire par défaut est indisponible ou a été déplacé ; laissez-le
+vide dans le cas général.
+
+### Méthode 2 (repli) : extraction manuelle sur un ordinateur
+
+Cette méthode récupère **uniquement** le Client ID et le Client Secret, sur une machine de votre choix
+disposant de **Python 3.11 ou plus récent** (typiquement votre PC) ; la connexion à votre compte se
+fera ensuite dans Jeedom (section « Connexion au compte » suivante), il est donc inutile de se
+connecter ici :
 
 ```bash
 # 1. Installer l'outil d'extraction (il apporte aussi sa dépendance « androguard »)
@@ -78,23 +117,14 @@ connues pour fonctionner) :
 | Opel | `myopel.apk.bz2` |
 | Vauxhall | `myvauxhall.apk.bz2` |
 
-### Autre méthode : assistant graphique de psa_car_controller
-
-Si vous préférez une interface web à la ligne de commande, l'assistant de psa_car_controller télécharge
-l'APK et extrait les identifiants automatiquement — mais il vous fait **aller jusqu'au bout d'une
-connexion OAuth** (la même que l'étape « Connexion au compte » ci-dessous) avant d'écrire les valeurs
-sur le disque :
-
-1. `pip3 install psa-car-controller`, puis lancez `psa-car-controller -l 0.0.0.0 --web-conf`.
-2. Ouvrez `http://<adresse-de-la-machine>:5000` et renseignez la marque, l'e-mail, le mot de passe du
-   compte et le code pays.
-3. Terminez la procédure de connexion (elle utilise la même récupération de code via F12 décrite plus bas).
-4. Ouvrez le fichier `config.json` créé dans le dossier de travail : recopiez-en les valeurs `client_id`
-   et `client_secret` dans le plugin.
-
-> Cet assistant installe et fait tourner un second outil (et vous fait vous connecter deux fois, une
-> fois ici puis une fois dans Jeedom). Le plugin **n'en dépend pas** ensuite : c'est pourquoi la méthode
-> directe ci-dessus est préférable.
+> **Variante : assistant graphique de `psa_car_controller`.** Si vous préférez une interface web à la
+> ligne de commande, `pip3 install psa-car-controller` puis `psa-car-controller -l 0.0.0.0 --web-conf`
+> ouvre un assistant (`http://<adresse-de-la-machine>:5000`) qui télécharge l'APK et extrait les
+> identifiants automatiquement — mais il vous fait aller jusqu'au bout d'une **connexion OAuth**
+> complète (la même procédure que « Connexion au compte » ci-dessous) avant d'écrire un fichier
+> `config.json` dont vous recopierez les valeurs `client_id`/`client_secret`. Cet assistant installe et
+> fait tourner un second outil, et vous fait vous connecter deux fois (une fois là, une fois dans
+> Jeedom) : la ligne de commande ci-dessus est donc préférable dans le cas général.
 
 ## Connexion au compte
 
@@ -118,18 +148,99 @@ compte » de la page de configuration). Cette connexion se fait de préférence 
 4. Collez l'URL complète (ou, à défaut, le `code` seul) dans le champ **Code d'autorisation**, puis
    cliquez sur **Valider le code** **sans attendre** : le code n'est valable que quelques instants et
    à usage unique.
-   > Si un message « code invalide, expiré ou déjà utilisé » ou « ré-authentification requise »
-   > apparaît, régénérez l'URL (étape 1) et recollez la nouvelle URL rapidement. Un message
-   > mentionnant le *realm* signifie que la **marque choisie ne correspond pas au compte**.
+   > Si un message signale un **code refusé (invalide, expiré ou déjà utilisé)** ou qu'une **nouvelle
+   > connexion est nécessaire**, régénérez l'URL (étape 1) et recollez la nouvelle URL rapidement. Un
+   > message mentionnant le *realm* signifie que la **marque choisie ne correspond pas au compte**.
 
 L'état passe à « Connecté au compte ». Vous pouvez vérifier le bon fonctionnement à tout moment via
 le bouton **Tester la connexion** de la page du plugin (`Plugins → Objets connectés → Stellantis
 Connect`), qui affiche le nombre de véhicules trouvés sur le compte. Le plugin gère ensuite seul le
-rafraîchissement du jeton d'accès ; vous n'aurez à refaire cette procédure que si la connexion est révoquée (message
-« ré-authentification requise »), après un changement de marque ou d'identifiants, ou après un
-vidage complet du cache Jeedom.
+rafraîchissement du jeton d'accès ; vous n'aurez à refaire cette procédure que si la connexion est
+révoquée (un message signale alors qu'une reconnexion est nécessaire, sur la page du plugin et dans
+les messages Jeedom), après un changement de marque ou d'identifiants, ou après un vidage complet du
+cache Jeedom.
 
-## Étapes suivantes
+## Pilotage à distance — activation OTP
 
-La découverte des véhicules et la remontée de la télémétrie sont décrites dans les sections
-correspondantes de cette documentation au fur et à mesure des versions du plugin.
+Le simple raccordement de votre compte (section précédente) ne suffit qu'à la **lecture** de la
+télémétrie. Pour débloquer les **commandes à distance** (réveil, démarrage/arrêt de charge,
+programmation de la charge, préconditionnement, verrouillage/déverrouillage, klaxon, feux), une
+activation supplémentaire est nécessaire : elle se fait dans le fieldset **« Pilotage à distance
+(activation OTP) »** de la page de configuration.
+
+> **Prérequis** : le compte principal doit déjà être **connecté** (section « Connexion au compte »
+> ci-dessus) — le numéro de téléphone associé à ce compte est utilisé pour recevoir le SMS
+> d'activation.
+
+Procédure en 3 étapes :
+
+1. Cliquez sur **Envoyer le SMS d'activation** (« 1. Recevoir le SMS ») et confirmez : un SMS
+   contenant un code est envoyé au numéro associé à votre compte de marque.
+2. Saisissez ce code dans le champ **Code reçu par SMS** (« 2. Code reçu par SMS »).
+3. Saisissez votre **Code PIN de l'application** (« 3. Code PIN de l'application » — le code à
+   4 chiffres que vous utilisez dans l'application mobile de votre marque), puis cliquez sur
+   **Activer le pilotage à distance**.
+
+L'état affiché passe à « Activé ».
+
+> ⚠️ **Quotas durs et définitifs côté Stellantis** : **6 codes par 24 h** et **20 activations SMS par
+> compte, à vie** — ces compteurs ne sont **jamais remis à zéro**. N'utilisez cette activation que
+> lorsque vous êtes prêt à aller au bout, et évitez de la répéter sans raison.
+
+Le jeton distant a une durée de vie technique très courte (**~15 minutes**). Le plugin le **renouvelle
+automatiquement et silencieusement à chaque passage du cron**, par un simple rafraîchissement — **sans
+code OTP ni SMS** — tant que cette chaîne de renouvellement fonctionne : vous ne devriez normalement
+**jamais avoir à intervenir vous-même**.
+
+Si ce renouvellement automatique **échoue durablement** (jeton de renouvellement distant invalide ou
+révoqué), l'état passe à « Expiré — renouvellement nécessaire ». Dans ce cas seulement, cliquez sur le
+bouton **Renouveler le jeton distant** : il réutilise l'appareil OTP déjà enregistré, **sans nouveau
+SMS**, mais génère un nouveau code OTP et **consomme donc 1 unité du quota strict de 6 codes / 24 h**
+évoqué ci-dessus — n'utilisez ce bouton que lorsque l'état l'indique réellement. Ne refaites
+l'activation complète en 3 étapes que si ce renouvellement échoue à son tour.
+
+> Le pilotage à distance (OTP, commandes) n'est disponible que sur le **compte principal** (le
+> premier compte configuré) — les comptes secondaires (section suivante) restent en lecture seule.
+
+## Comptes secondaires (multi-marques, lecture seule)
+
+Vous pouvez rattacher jusqu'à deux comptes/marques supplémentaires (sections repliables « Compte
+secondaire 2 »/« Compte secondaire 3 », visibles une fois le compte principal configuré) : même
+procédure d'obtention des identifiants et de connexion que ci-dessus, mais ces comptes restent en
+**lecture seule** (télémétrie uniquement) — aucune activation OTP ni commande à distance n'y est
+disponible.
+
+## Fonctions disponibles
+
+- **Télémétrie** : batterie/état de charge, autonomie (électrique, carburant, totale), position GPS,
+  kilométrage, état des portes/ouvrants (portes, coffre, capot…), pression des pneus (alerte), entretien
+  (échéance de révision).
+- **Commandes à distance** (compte principal, après activation OTP) : réveil, démarrage/arrêt de la
+  charge et programmation d'horaire, préconditionnement climatique, verrouillage/déverrouillage,
+  klaxon, feux.
+- **Panneau carte « Mes véhicules »** : vue d'ensemble de la position de vos véhicules, accessible
+  depuis le menu d'accueil de Jeedom.
+- **Geofencing / zone domicile** : détection « au domicile » / distance au domicile, à partir d'une
+  zone domicile unique configurée pour le foyer.
+- **Alertes véhicule** : remontée générique des alertes constructeur (pneus, AdBlue, lave-glace,
+  voyants…) sous forme de commandes exploitables en scénario.
+- **Statistiques de charge** : détection des sessions de charge, énergie/durée/coût estimés.
+
+## Limites & bonnes pratiques
+
+- **Fraîcheur des données** : la télémétrie est obtenue par **interrogation périodique** (~5 minutes
+  par défaut) — l'API Stellantis ne propose pas de notification en temps réel (« push »). Les
+  informations affichées peuvent donc avoir quelques minutes de retard.
+- **Batterie 12 V** : réveiller un véhicule (manuellement ou via le réveil automatique adaptatif,
+  désactivé par défaut) sollicite la batterie de servitude 12 V. Un réveil trop fréquent peut la
+  fragiliser ; laissez la cadence par défaut sauf besoin réel.
+- **Anti-ban** : le plugin applique volontairement des quotas et délais (cooldowns) sur les appels à
+  l'API et les commandes, pour limiter le risque de blocage temporaire du compte côté Stellantis. Ne
+  cherchez pas à forcer des rafraîchissements répétés au-delà de ce que propose l'interface.
+- **Mode privacy** : si le partage de données/localisation est coupé côté véhicule (paramètre de
+  confidentialité de l'application mobile), le plugin se met automatiquement en veille pour ce
+  véhicule (moins d'interrogations) et signale la situation — **ce n'est pas une panne du plugin**.
+- **Pilotage à distance mono-compte** : les commandes à distance ne fonctionnent que sur le compte
+  principal ; les comptes secondaires restent en lecture seule (cf. ci-dessus).
+- **API non officielle** : comme rappelé plus haut, cette intégration peut cesser de fonctionner sans
+  préavis en cas de changement côté Stellantis.
