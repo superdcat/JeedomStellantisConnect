@@ -24,3 +24,17 @@ brackets) that `php -l` would catch, without needing a PHP install. **Write the 
 escapes (`'\\'` inside the command string gets collapsed to `'\'`, causing a Python `SyntaxError`) because
 of how the Bash tool's command parameter handles escaping. This is a supplement to reading the diff
 carefully, not a replacement — it doesn't catch semantic bugs, only structural/lexical ones.
+
+**Generalizes beyond Python** (confirmed UC76): the same backslash-collapsing hits **any** inline script
+text passed as a Bash tool command argument — reproduced it with an inline `perl -e '...s/\\t/\t/g...'`
+meant to convert literal two-char `\t`/`\n` escape sequences (written into a scratch file via `Write`) into
+real tab/CRLF bytes for a tab-indented Jeedom template; the double backslashes silently became single
+backslashes before reaching perl, so the substitution ran on the wrong pattern and produced garbled output
+that had to be reverted (`git checkout --`) and redone. **Fix that actually worked**: never put escape-
+sequence *text* (`\t`, `\n`, `\\`) into a Bash command string at all — write the **real** tab/newline
+characters directly into a scratch file via the `Write` tool (the tool call's own string decoding handles
+those correctly, unlike a nested Bash-command string), then do purely *byte-level* file-to-file operations
+(`sed 's/^/\t\t\t\t/'` to flat-prepend real tab characters already typed literally in the sed script, or a
+`perl -0777` script that reads two files and splices their raw bytes with `s/\r\n/\n/;s/\n/\r\n/` for line-
+ending normalization) — no escape-sequence interpretation is needed mid-pipeline because the bytes are
+already correct on disk. See [[feedback-edit-tool-tab-indented-files]] for the full recipe this produced.

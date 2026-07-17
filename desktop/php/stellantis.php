@@ -217,6 +217,21 @@ $iconeConnexion = ($etatConnexion['state'] == 'ok') ? 'fa-check-circle' : (($eta
 									</div>
 								</div>
 							</div>
+							<!-- UC76 : synchronisation sélective — inclure/exclure ce véhicule du rafraîchissement
+							     automatique (cron). L'équipement reste ACTIVÉ (isEnable=1) : ses dernières valeurs sont
+							     conservées, seul le polling périodique est sauté (cf. cron()). Défaut coché (posé par
+							     stellantis::assurerSyncEnabledParDefaut à la création ET au backfill des véhicules
+							     existants), même précédent qu'isVisiblePanel ci-dessous. -->
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Inclure dans le rafraîchissement auto}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Inclure ce véhicule dans le rafraîchissement périodique automatique. Décochez pour l'exclure (économie de quota / anti-ban) sans le supprimer : ses dernières valeurs sont conservées.}}"></i></sup>
+								</label>
+								<div class="col-sm-6">
+									<label class="checkbox-inline">
+										<input type="checkbox" class="eqLogicAttr" data-l1key="configuration" data-l2key="syncEnabled" checked>
+									</label>
+								</div>
+							</div>
 							<!-- UC24 : suivi & statistiques de charge — 2 champs de config éditables (PAS readonly, à la
 							     différence des champs de synchro ci-dessus) : une clé de config absente du formulaire est
 							     effacée au Sauvegarder. -->

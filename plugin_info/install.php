@@ -75,6 +75,20 @@ function stellantis_update() {
       log::add('stellantis', 'warning', 'Mise à jour UC54 : backfill compte ignoré pour un équipement (' . $e->getMessage() . ')');
     }
   }
+  // UC76 : backfill du défaut « inclure dans le rafraîchissement automatique » (syncEnabled=1) pour les
+  // véhicules antérieurs à la synchronisation sélective (mêmes précédent/garanties qu'assurerVisiblePanelParDefaut
+  // ci-dessus : ne pose la clé QUE si absente, jamais de régression sur un choix déjà exprimé). Best-effort,
+  // idempotent, boucle INDÉPENDANTE (un échec ici ne doit pas empêcher les backfills ci-dessus). Sans lien
+  // avec le marqueur 'autoDisabled' (posé uniquement par syncVehicles() lors d'une future désactivation).
+  foreach (eqLogic::byType('stellantis') as $eq) {
+    try {
+      if (stellantis::assurerSyncEnabledParDefaut($eq)) {
+        $eq->save();
+      }
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'warning', 'Mise à jour UC76 : backfill rafraîchissement auto ignoré pour un équipement (' . $e->getMessage() . ')');
+    }
+  }
 }
 
 // Fonction exécutée automatiquement après la suppression du plugin

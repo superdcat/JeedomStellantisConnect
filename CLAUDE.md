@@ -28,7 +28,7 @@ Un plugin Jeedom **n'est pas autonome** : il s'installe sous `<jeedom>/plugins/s
 PHP dépend du core Jeedom, atteint via `require_once __DIR__ . '/../../../../core/php/core.inc.php';`.
 Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 
-> **État d'avancement (2026-07-16)** : l'id a été renommé `template` → `stellantis` (classes
+> **État d'avancement (2026-07-17)** : l'id a été renommé `template` → `stellantis` (classes
 > `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP lecture seule COMPLET** : UC01 à
 > UC10 sont implémentées (configuration du plugin, client HTTP REST, authentification OAuth2 PKCE/token,
 > test de connexion, découverte des véhicules, création/synchronisation des équipements, commandes info
@@ -590,6 +590,31 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > re-notification sur expiration TTL/`cache::flush()` (précédent UC74). Reviews croisées : sécurité **RAS**
 > (après fix HIGH), qualité **PASS** (1 nit cosmétique résiduel non bloquant : commentaire `preRemove` citant
 > la valeur littérale du TTL).
+> **Post-MVP : UC76** — **synchronisation sélective par véhicule** (supervision/robustesse, 100 % local,
+> **AUCUN appel réseau/MQTT neuf**) : deux concepts **orthogonaux**. (1) **Inclusion dans le rafraîchissement
+> auto** — nouvelle config eqLogic `syncEnabled` (checkbox « Inclure dans le rafraîchissement auto »,
+> **défaut 1 / opt-out**, backfill `assurerSyncEnabledParDefaut()` miroir d'`assurerVisiblePanelParDefaut` +
+> `install.php`) : `cron()` **saute** le véhicule décoché — gate `if (!getConfiguration('syncEnabled',1))
+> continue;` placée **APRÈS** le bloc `CMD_PENDING` (un refresh post-commande est la conséquence d'une action
+> explicite, **jamais gaté**) et **AVANT** la branche cadence ; l'auto-wakeup UC73 est **aussi** gaté (pas de
+> réveil batterie 12 V inutile). L'eqLogic reste `isEnable=1` (visible, dernières valeurs conservées) et une
+> ligne page Santé « Rafraîchissement automatique désactivé » (state=true, avant le bloc privacy) l'explique.
+> La cadence `autorefresh` par véhicule existait **déjà** (inchangée). (2) **Véhicule disparu** —
+> `syncVehicles()` **désactive** (jamais supprime) un véhicule absent de la découverte (déjà en place, filtré
+> par compte UC54) et pose un **marqueur `autoDisabled`** ; à la **réapparition**, un véhicule
+> **auto-désactivé** (`autoDisabled==1`) est **réactivé automatiquement** (compteur `$reactivesAuto`), tandis
+> qu'une désactivation **manuelle** — ou héritée d'avant UC76, **sans marqueur** — est **respectée** (jamais
+> réactivée, **pas de réactivation en masse à l'upgrade**). ⚠️ **Robustesse du marqueur** : `preSave()`
+> (jusqu'ici vide) efface `autoDisabled` sur **toute bascule manuelle de `isEnable`** (formulaire OU toggle
+> rapide de la liste) — comparaison `eqLogic::byId()` (**requête DB fraîche** ⇒ ancienne valeur en preSave,
+> **vérifié en source core**) vs valeur courante, dans un `try/catch \Throwable` (**ne bloque JAMAIS** un
+> `save()`) ; une **garde statique transitoire** `self::$synchroEnCours` (posée en **`try/finally`** autour des
+> `save()` de `syncVehicles`) empêche `preSave` d'effacer le marqueur que la synchro vient elle-même de poser
+> (cf. mémoire `jeedom-eqlogic-presave-change-detection`). Le marqueur `autoDisabled` = **serveur uniquement**
+> (pas de champ formulaire ; survit au save via la fusion `a2o()`, dégradation fail-safe si effacé). **Sync
+> manuel** (bouton) rafraîchit **tous** les véhicules découverts, y compris `syncEnabled=0` (action explicite
+> ≠ polling auto). Reviews croisées : sécurité **RAS**, qualité **PASS** (findings mineurs corrigés : docblock/
+> commentaire de retour, libellé UI différencié de « Auto-actualisation », renommage `$reactivesAuto`).
 > Suite = post-MVP (supervision, robustesse, livraison…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
@@ -705,7 +730,11 @@ Configuration & secrets :
   défauts 1000 km / 30 j via `seuilAlerteKm/Jours()` si vides). **UC73** ajoute 3 champs **éditables**
   (formulaire desktop, opt-in réveil auto adaptatif, slot 1 uniquement) : `auto_wakeup` (case, **OFF par
   défaut**), `auto_wakeup_charge_min` / `auto_wakeup_idle_min` (cadences en charge/veille min ; repli
-  défauts 5 / 60 min via `cadenceChargeMin/IdleMin()` si vides).
+  défauts 5 / 60 min via `cadenceChargeMin/IdleMin()` si vides). **UC76** ajoute `syncEnabled` (case
+  « Inclure dans le rafraîchissement auto », défaut 1 posé par `assurerSyncEnabledParDefaut()` — décochée =
+  véhicule exclu du polling cron + auto-wakeup, mais **reste activé/visible**) + le marqueur **serveur**
+  `autoDisabled` (**pas de champ formulaire** ; distingue une désactivation auto-par-le-plugin d'une
+  désactivation manuelle, pour la réactivation auto à la réapparition d'un véhicule disparu).
 - **Tokens** OAuth2 (access/refresh) + **remote token OTP** (UC12, clé cache `stellantis::remote_token`,
   **distinct** du token OAuth2 — c'est le mot de passe MQTT, TTL ~890 s) : en cache **chiffré** (classe
   `cache`). ⚠️ `access_token` OAuth2 à durée courte (~15 min) → refresh proactif/réactif.

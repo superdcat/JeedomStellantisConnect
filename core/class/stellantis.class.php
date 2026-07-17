@@ -35,6 +35,12 @@ class stellantis extends eqLogic {
   // configKeyForSlot()) chiffrés au repos comme client_secret (slot 1).
   public static $_encryptConfigKey = array('client_secret', 'client_secret_2', 'client_secret_3', 'home_lat', 'home_lon');
 
+  // UC76 : garde transitoire (portée requête, PAS persistée) posée par syncVehicles() autour de ses save()
+  // pour que preSave() distingue une bascule isEnable PILOTÉE PAR LA SYNCHRO (gérée explicitement par
+  // syncVehicles() via 'autoDisabled') d'une bascule MANUELLE de l'utilisateur (formulaire/toggle liste des
+  // équipements), seule concernée par l'effacement automatique du marqueur en preSave().
+  private static $synchroEnCours = false;
+
   // UC54 — Multi-comptes : nombre de « slots » de compte fixes (1 = compte principal, PILOTAGE À
   // DISTANCE inclus ; 2..N = comptes secondaires, LECTURE SEULE). Couvre Peugeot + Citroën + 1 marge.
   // Le slot 1 reste la config globale ACTUELLE (clés NON suffixées) : zéro migration pour les installs
@@ -576,7 +582,7 @@ class stellantis extends eqLogic {
    * Synchronise les véhicules de TOUS les comptes configurés avec les équipements Jeedom (idempotent,
    * clé logicalId = VIN). Crée les équipements manquants, met à jour les champs techniques des existants
    * SANS écraser la personnalisation utilisateur (nom, objet parent, activation), désactive ceux disparus
-   * du compte. Retourne TOUJOURS ['ok','created','updated','disabled','reactivables','message'] —
+   * du compte. Retourne TOUJOURS ['ok','created','updated','disabled','reactivables','reactivated','message'] —
    * stellantisException mappée en interne (pas de levée), comme testConnection(). Appelée par l'action
    * AJAX 'sync' (bouton unique, pas de paramètre — boucle en interne sur slotsConfigures()).
    * UC54 : chaque compte est synchronisé indépendamment. Un échec de découverte sur un compte ne bloque
@@ -589,14 +595,14 @@ class stellantis extends eqLogic {
     // double-clic JS est contournable par rejeu POST — même protection que testConnection(). Cooldown
     // GLOBAL (1 seul bouton pour tous les comptes) — décision assumée, cf. 54-tech.md.
     if (cache::byKey('stellantis::sync_cooldown')->getValue('') != '') {
-      return array('ok' => false, 'created' => 0, 'updated' => 0, 'disabled' => 0, 'reactivables' => 0,
+      return array('ok' => false, 'created' => 0, 'updated' => 0, 'disabled' => 0, 'reactivables' => 0, 'reactivated' => 0,
         'message' => __('Une synchronisation vient d\'être effectuée : patientez quelques secondes avant de réessayer', __FILE__));
     }
     cache::set('stellantis::sync_cooldown', '1', 15);
 
     $slots = self::slotsConfigures();
     if (count($slots) == 0) {
-      return array('ok' => false, 'created' => 0, 'updated' => 0, 'disabled' => 0, 'reactivables' => 0,
+      return array('ok' => false, 'created' => 0, 'updated' => 0, 'disabled' => 0, 'reactivables' => 0, 'reactivated' => 0,
         'message' => __('Plugin non configuré : renseignez la marque, le Client ID et le Client Secret puis sauvegardez', __FILE__));
     }
 
@@ -604,122 +610,160 @@ class stellantis extends eqLogic {
     $majs = 0;
     $desactives = 0;
     $reactivables = 0;
+    $reactivesAuto = 0;
     $erreursSlots = array();
 
-    foreach ($slots as $slot) {
-      $vinsDecouverts = array();
-      try {
-        $vehicules = self::discoverVehicles($slot);
-      } catch (stellantisException $e) {
-        log::add('stellantis', 'warning', 'Synchronisation (compte ' . $slot . ') : découverte échouée : ' . $e->getMessage());
-        $erreursSlots[] = sprintf(__('compte %1$d : %2$s', __FILE__), $slot, self::messageDepuisException($e));
-        // 🔴 Aucune désactivation pour ce slot : un échec réseau/auth d'un compte ne doit jamais faire
-        // disparaître les véhicules d'un AUTRE compte, ni les siens propres (cf. 54-tech.md § sync par compte).
-        continue;
-      }
-      foreach ($vehicules as $v) {
-        // Robustesse (convention cron) : un véhicule en erreur n'interrompt pas la synchro
+    // UC76 : garde transitoire (portée requête) posée AUTOUR de tous les save() ci-dessous (découverte,
+    // réactivation, désactivation, ceux internes de createCommands()/refreshTelemetry()) afin que preSave()
+    // distingue une bascule isEnable PILOTÉE PAR LA SYNCHRO (gérée explicitement ici via 'autoDisabled')
+    // d'une bascule MANUELLE de l'utilisateur. `finally` garantit la remise à false même sur exception (une
+    // erreur imprévue — au-delà du try/catch par slot autour de discoverVehicles() ci-dessous — ne doit
+    // jamais laisser la garde bloquée à true pour le reste de la requête).
+    self::$synchroEnCours = true;
+    try {
+      foreach ($slots as $slot) {
+        $vinsDecouverts = array();
         try {
-          $vinsDecouverts[] = $v['vin'];
-          // byLogicalId retrouve aussi les équipements désactivés (pas de filtre onlyEnable) → pas de doublon
-          $eqLogic = eqLogic::byLogicalId($v['vin'], 'stellantis');
-          $creation = !is_object($eqLogic);
-          if ($creation) {
-            $eqLogic = new stellantis();
-            $eqLogic->setLogicalId($v['vin']);
-            $eqLogic->setEqType_name('stellantis');
-            $eqLogic->setIsEnable(1);
-            $eqLogic->setIsVisible(1);
-            $nom = trim($v['brand'] . ' ' . $v['label']);
-            $eqLogic->setName($nom != '' ? $nom : $v['vin']);
-          } else {
-            if (!$eqLogic->getIsEnable()) {
-              // Véhicule de nouveau présent mais équipement désactivé : on NE réactive PAS automatiquement
-              // (impossible de distinguer désactivation auto vs manuelle) — on signale juste la possibilité
-              $reactivables++;
+          $vehicules = self::discoverVehicles($slot);
+        } catch (stellantisException $e) {
+          log::add('stellantis', 'warning', 'Synchronisation (compte ' . $slot . ') : découverte échouée : ' . $e->getMessage());
+          $erreursSlots[] = sprintf(__('compte %1$d : %2$s', __FILE__), $slot, self::messageDepuisException($e));
+          // 🔴 Aucune désactivation pour ce slot : un échec réseau/auth d'un compte ne doit jamais faire
+          // disparaître les véhicules d'un AUTRE compte, ni les siens propres (cf. 54-tech.md § sync par compte).
+          continue;
+        }
+        foreach ($vehicules as $v) {
+          // Robustesse (convention cron) : un véhicule en erreur n'interrompt pas la synchro
+          try {
+            $vinsDecouverts[] = $v['vin'];
+            // byLogicalId retrouve aussi les équipements désactivés (pas de filtre onlyEnable) → pas de doublon
+            $eqLogic = eqLogic::byLogicalId($v['vin'], 'stellantis');
+            $creation = !is_object($eqLogic);
+            if ($creation) {
+              $eqLogic = new stellantis();
+              $eqLogic->setLogicalId($v['vin']);
+              $eqLogic->setEqType_name('stellantis');
+              $eqLogic->setIsEnable(1);
+              $eqLogic->setIsVisible(1);
+              $nom = trim($v['brand'] . ' ' . $v['label']);
+              $eqLogic->setName($nom != '' ? $nom : $v['vin']);
+            } else {
+              if (!$eqLogic->getIsEnable()) {
+                if ((int) $eqLogic->getConfiguration('autoDisabled', 0) === 1) {
+                  // UC76 : le plugin lui-même avait désactivé ce véhicule (disparition antérieure de CE
+                  // compte) ⇒ sa réapparition dans la découverte courante suffit à le réactiver
+                  // automatiquement (contrairement à une désactivation MANUELLE, jamais réactivée ici).
+                  $eqLogic->setIsEnable(1);
+                  $eqLogic->setConfiguration('autoDisabled', 0);
+                  $reactivesAuto++;
+                } else {
+                  // Désactivation MANUELLE (ou héritée d'avant UC76, sans marqueur) : jamais réactivée en
+                  // masse ici — on signale juste la possibilité (comportement historique inchangé).
+                  $reactivables++;
+                }
+              } else {
+                // UC76 : véhicule activé — effacer un éventuel marqueur résiduel (invariant : 'autoDisabled'
+                // ne vaut 1 QUE pour un véhicule que le plugin a désactivé et qui n'a pas été réactivé
+                // depuis, manuellement ou par la branche ci-dessus).
+                if ((int) $eqLogic->getConfiguration('autoDisabled', 0) === 1) {
+                  $eqLogic->setConfiguration('autoDisabled', 0);
+                }
+              }
+              // UC54 : un même VIN redécouvert sur un compte différent de celui déjà enregistré (mauvaise
+              // config / VIN partagé) est journalisé — la découverte du compte COURANT fait autorité (comme 'brand').
+              $slotExistant = (int) $eqLogic->getConfiguration('accountSlot', $slot);
+              if ($slotExistant != $slot) {
+                log::add('stellantis', 'warning', 'Synchronisation : véhicule déjà rattaché au compte ' . $slotExistant
+                  . ', redécouvert sur le compte ' . $slot . ' — la découverte de ce compte fait autorité');
+              }
             }
-            // UC54 : un même VIN redécouvert sur un compte différent de celui déjà enregistré (mauvaise
-            // config / VIN partagé) est journalisé — la découverte du compte COURANT fait autorité (comme 'brand').
-            $slotExistant = (int) $eqLogic->getConfiguration('accountSlot', $slot);
-            if ($slotExistant != $slot) {
-              log::add('stellantis', 'warning', 'Synchronisation : véhicule déjà rattaché au compte ' . $slotExistant
-                . ', redécouvert sur le compte ' . $slot . ' — la découverte de ce compte fait autorité');
+            // Champs techniques : jamais name/object_id/isEnable sur un équipement existant (perso préservée)
+            $eqLogic->setConfiguration('apiId', $v['id']); // requis pour les appels REST (UC07+), réécrit → self-heal
+            $eqLogic->setConfiguration('vin', $v['vin']);
+            $eqLogic->setConfiguration('brand', $v['brand']);
+            // UC51 : libellé du véhicule (découverte = autorité, réécrit à chaque sync, comme 'brand' — jamais
+            // conditionné, contrairement à 'energy' qui est raffinée par le /status).
+            $eqLogic->setConfiguration('label', $v['label']);
+            // UC54 : compte de rattachement (découverte = autorité, réécrit à chaque sync, comme 'brand'/'label').
+            // accountSlotLabel = texte lisible pré-calculé (affiché en readonly sur le formulaire eqLogic) :
+            // 3 valeurs FIXES sous notre contrôle (pas une donnée externe) → __() avec chaîne LITTÉRALE légitime.
+            $eqLogic->setConfiguration('accountSlot', $slot);
+            $eqLogic->setConfiguration('accountSlotLabel', ($slot == 1)
+              ? __('Compte principal', __FILE__)
+              : sprintf(__('Compte secondaire %s — lecture seule', __FILE__), $slot));
+            // energy : écrit seulement si absent — ne jamais écraser une valeur raffinée par le /status (UC07)
+            if (trim((string) $eqLogic->getConfiguration('energy', '')) == '' && $v['energy'] != '') {
+              $eqLogic->setConfiguration('energy', $v['energy']);
             }
+            // UC32 : backfill du défaut « visible dans le panneau carte » (création ET équipements existants
+            // qui n'ont jamais reçu cette clé) — posé AVANT l'unique save() ci-dessous (pas de second write).
+            self::assurerVisiblePanelParDefaut($eqLogic);
+            // UC76 : backfill du défaut « inclure dans le rafraîchissement automatique » — même point d'entrée
+            // (avant l'unique save() ci-dessous, pas de second write).
+            self::assurerSyncEnabledParDefaut($eqLogic);
+            $eqLogic->save();
+            if ($creation) {
+              $crees++;
+            } else {
+              $majs++;
+            }
+            // UC52 : image d'équipement (photo modèle best-effort → sinon icône de marque). Best-effort, ne
+            // lève jamais (try/catch interne) : un échec image ne doit pas perturber la synchro (précédent
+            // suivreMaintenance). Appelée au sync uniquement (pas au cron — pas de fetch d'image périodique).
+            self::assurerImageVehicule($eqLogic, $v['brand'], $v['pictures']);
+            // UC07 : créer les commandes info (selon motorisation) puis les peupler via le /status
+            // (best-effort). Après save() (id disponible) et hors postSave → pas de récursion. La boucle
+            // périodique de rafraîchissement est en UC08 ; ici c'est une passe unique au clic Synchroniser.
+            // UC54 : createCommands()/refreshTelemetry() routent désormais eux-mêmes par accountSlot.
+            $eqLogic->createCommands();
+            $eqLogic->refreshTelemetry();
+          } catch (Exception $e) {
+            // Jamais de VIN en clair dans les logs (convention CLAUDE.md). Englobe erreur de save ET erreur
+            // API du refreshTelemetry : message générique (l'équipement peut avoir été créé malgré tout).
+            log::add('stellantis', 'warning', 'Synchronisation (compte ' . $slot . ') : erreur sur un véhicule : ' . $e->getMessage());
           }
-          // Champs techniques : jamais name/object_id/isEnable sur un équipement existant (perso préservée)
-          $eqLogic->setConfiguration('apiId', $v['id']); // requis pour les appels REST (UC07+), réécrit → self-heal
-          $eqLogic->setConfiguration('vin', $v['vin']);
-          $eqLogic->setConfiguration('brand', $v['brand']);
-          // UC51 : libellé du véhicule (découverte = autorité, réécrit à chaque sync, comme 'brand' — jamais
-          // conditionné, contrairement à 'energy' qui est raffinée par le /status).
-          $eqLogic->setConfiguration('label', $v['label']);
-          // UC54 : compte de rattachement (découverte = autorité, réécrit à chaque sync, comme 'brand'/'label').
-          // accountSlotLabel = texte lisible pré-calculé (affiché en readonly sur le formulaire eqLogic) :
-          // 3 valeurs FIXES sous notre contrôle (pas une donnée externe) → __() avec chaîne LITTÉRALE légitime.
-          $eqLogic->setConfiguration('accountSlot', $slot);
-          $eqLogic->setConfiguration('accountSlotLabel', ($slot == 1)
-            ? __('Compte principal', __FILE__)
-            : sprintf(__('Compte secondaire %s — lecture seule', __FILE__), $slot));
-          // energy : écrit seulement si absent — ne jamais écraser une valeur raffinée par le /status (UC07)
-          if (trim((string) $eqLogic->getConfiguration('energy', '')) == '' && $v['energy'] != '') {
-            $eqLogic->setConfiguration('energy', $v['energy']);
+        }
+        // 🔴 Désactivation FILTRÉE PAR COMPTE (corrige le bug historique qui itérait TOUS les véhicules,
+        // toutes marques/comptes confondus) : seuls les véhicules RATTACHÉS À CE COMPTE et absents de SA
+        // découverte sont désactivés. On n'atteint ce point QUE si discoverVehicles($slot) a réussi
+        // ci-dessus (sinon `continue` a déjà sauté au compte suivant) — jamais de désactivation sur un
+        // compte en échec.
+        foreach (eqLogic::byType('stellantis') as $eqExistant) {
+          $slotEq = (int) $eqExistant->getConfiguration('accountSlot', 1);
+          if ($slotEq != $slot) {
+            continue; // pas le compte en cours de traitement : jamais touché ici (traité à son propre tour)
           }
-          // UC32 : backfill du défaut « visible dans le panneau carte » (création ET équipements existants
-          // qui n'ont jamais reçu cette clé) — posé AVANT l'unique save() ci-dessous (pas de second write).
-          self::assurerVisiblePanelParDefaut($eqLogic);
-          $eqLogic->save();
-          if ($creation) {
-            $crees++;
-          } else {
-            $majs++;
+          if (!in_array($eqExistant->getLogicalId(), $vinsDecouverts, true) && $eqExistant->getIsEnable()) {
+            $eqExistant->setIsEnable(0);
+            // UC76 : marqueur « désactivé PAR LE PLUGIN » (distinct d'une désactivation manuelle) — seul ce
+            // marqueur autorise la réactivation automatique à la réapparition du véhicule (voir ci-dessus).
+            $eqExistant->setConfiguration('autoDisabled', 1);
+            $eqExistant->save();
+            $desactives++;
           }
-          // UC52 : image d'équipement (photo modèle best-effort → sinon icône de marque). Best-effort, ne
-          // lève jamais (try/catch interne) : un échec image ne doit pas perturber la synchro (précédent
-          // suivreMaintenance). Appelée au sync uniquement (pas au cron — pas de fetch d'image périodique).
-          self::assurerImageVehicule($eqLogic, $v['brand'], $v['pictures']);
-          // UC07 : créer les commandes info (selon motorisation) puis les peupler via le /status
-          // (best-effort). Après save() (id disponible) et hors postSave → pas de récursion. La boucle
-          // périodique de rafraîchissement est en UC08 ; ici c'est une passe unique au clic Synchroniser.
-          // UC54 : createCommands()/refreshTelemetry() routent désormais eux-mêmes par accountSlot.
-          $eqLogic->createCommands();
-          $eqLogic->refreshTelemetry();
-        } catch (Exception $e) {
-          // Jamais de VIN en clair dans les logs (convention CLAUDE.md). Englobe erreur de save ET erreur
-          // API du refreshTelemetry : message générique (l'équipement peut avoir été créé malgré tout).
-          log::add('stellantis', 'warning', 'Synchronisation (compte ' . $slot . ') : erreur sur un véhicule : ' . $e->getMessage());
         }
       }
-      // 🔴 Désactivation FILTRÉE PAR COMPTE (corrige le bug historique qui itérait TOUS les véhicules,
-      // toutes marques/comptes confondus) : seuls les véhicules RATTACHÉS À CE COMPTE et absents de SA
-      // découverte sont désactivés. On n'atteint ce point QUE si discoverVehicles($slot) a réussi
-      // ci-dessus (sinon `continue` a déjà sauté au compte suivant) — jamais de désactivation sur un
-      // compte en échec.
-      foreach (eqLogic::byType('stellantis') as $eqExistant) {
-        $slotEq = (int) $eqExistant->getConfiguration('accountSlot', 1);
-        if ($slotEq != $slot) {
-          continue; // pas le compte en cours de traitement : jamais touché ici (traité à son propre tour)
-        }
-        if (!in_array($eqExistant->getLogicalId(), $vinsDecouverts, true) && $eqExistant->getIsEnable()) {
-          $eqExistant->setIsEnable(0);
-          $eqExistant->save();
-          $desactives++;
-        }
-      }
-    }
 
-    log::add('stellantis', 'info', 'Synchronisation : ' . $crees . ' créé(s), ' . $majs . ' mis à jour, ' . $desactives . ' désactivé(s)'
-      . (count($slots) > 1 ? ' (' . count($slots) . ' compte(s))' : ''));
-    $message = sprintf(__('Synchronisation terminée : %1$d créé(s), %2$d mis à jour, %3$d désactivé(s)', __FILE__), $crees, $majs, $desactives);
-    if ($reactivables > 0) {
-      $message .= ' — ' . sprintf(__('%d véhicule(s) réapparu(s) laissé(s) désactivé(s) : réactivez-les manuellement si besoin', __FILE__), $reactivables);
+      log::add('stellantis', 'info', 'Synchronisation : ' . $crees . ' créé(s), ' . $majs . ' mis à jour, ' . $desactives . ' désactivé(s)'
+        . (count($slots) > 1 ? ' (' . count($slots) . ' compte(s))' : ''));
+      $message = sprintf(__('Synchronisation terminée : %1$d créé(s), %2$d mis à jour, %3$d désactivé(s)', __FILE__), $crees, $majs, $desactives);
+      if ($reactivesAuto > 0) {
+        $message .= ' — ' . sprintf(__('%d véhicule(s) réapparu(s) réactivé(s) automatiquement', __FILE__), $reactivesAuto);
+      }
+      if ($reactivables > 0) {
+        $message .= ' — ' . sprintf(__('%d véhicule(s) réapparu(s) laissé(s) désactivé(s) : réactivez-les manuellement si besoin', __FILE__), $reactivables);
+      }
+      if (count($erreursSlots) > 0) {
+        $message .= ' — ' . implode(' ; ', $erreursSlots);
+      }
+      // ok=false SEULEMENT si TOUS les comptes configurés ont échoué (aucune donnée exploitable) — un échec
+      // partiel (ex. compte secondaire hors-ligne) laisse ok=true : la synchro a bien avancé pour le reste.
+      $ok = (count($erreursSlots) < count($slots));
+      return array('ok' => $ok, 'created' => $crees, 'updated' => $majs, 'disabled' => $desactives,
+        'reactivables' => $reactivables, 'reactivated' => $reactivesAuto, 'message' => $message);
+    } finally {
+      self::$synchroEnCours = false;
     }
-    if (count($erreursSlots) > 0) {
-      $message .= ' — ' . implode(' ; ', $erreursSlots);
-    }
-    // ok=false SEULEMENT si TOUS les comptes configurés ont échoué (aucune donnée exploitable) — un échec
-    // partiel (ex. compte secondaire hors-ligne) laisse ok=true : la synchro a bien avancé pour le reste.
-    $ok = (count($erreursSlots) < count($slots));
-    return array('ok' => $ok, 'created' => $crees, 'updated' => $majs, 'disabled' => $desactives, 'reactivables' => $reactivables, 'message' => $message);
   }
 
   /* * ******************* UC07 — Commandes info de télémétrie ******************* */
@@ -1724,6 +1768,20 @@ class stellantis extends eqLogic {
           'advice' => '',
           'state' => ($statut !== 'failure'),
         );
+      }
+      // UC76 : véhicule EXCLU du rafraîchissement automatique (choix utilisateur) — il reste isEnable=1
+      // (donc listé ici par eqLogic::byType('stellantis', true) ci-dessus) : signalé explicitement, sinon
+      // son ancienneté (« Dernière donnée reçue il y a … ») croîtrait sans explication apparente. state=true :
+      // ce n'est pas une erreur. Placé AVANT le bloc privacy (les deux terminent par continue : un véhicule
+      // exclu ne doit pas afficher la fraîcheur/privacy qui ne sera plus mise à jour).
+      if (!$eqLogic->getConfiguration('syncEnabled', 1)) {
+        $lignes[] = array(
+          'test' => $nom,
+          'result' => __('Rafraîchissement automatique désactivé', __FILE__),
+          'advice' => __('Ce véhicule est exclu du rafraîchissement périodique (choix utilisateur) : ce n\'est pas une erreur', __FILE__),
+          'state' => true,
+        );
+        continue;
       }
       // Privacy connu du dernier /status (cf. refreshTelemetry) : signalé sans être une erreur dure.
       $privacy = (string) cache::byKey('stellantis::privacy::' . $eqLogic->getId())->getValue('');
@@ -4193,7 +4251,10 @@ class stellantis extends eqLogic {
       // UC73 : réveil automatique adaptatif (opt-in) — SLOT 1 uniquement (pilotage à distance). ÉVALUÉ À
       // CHAQUE PASSE (indépendant de la gate de phase du polling REST ci-dessous, AC3) : la cadence propre
       // de declencherAutoWakeupSiDu() régule elle-même la fréquence. Best-effort, ne lève jamais.
-      if ($slot == 1) {
+      // UC76 : gardé AUSSI par 'syncEnabled' (défaut 1, opt-out) — un véhicule exclu du rafraîchissement
+      // auto ne doit jamais être réveillé en MQTT (réveil batterie 12 V inutile : son refresh consécutif
+      // ne serait de toute façon jamais consommé, cf. gate ci-dessous).
+      if ($slot == 1 && $eqLogic->getConfiguration('syncEnabled', 1)) {
         $eqLogic->declencherAutoWakeupSiDu();
       }
       // UC13/UC14 : une commande MQTT (wakeup, charge…) a été acquittée depuis la dernière passe (flag posé
@@ -4208,6 +4269,15 @@ class stellantis extends eqLogic {
         } catch (\Throwable $e) {
           log::add('stellantis', 'warning', 'Cron : rafraîchissement post-commande en erreur pour l\'équipement #' . $eqLogic->getId() . ' : ' . $e->getMessage());
         }
+        continue;
+      }
+      // UC76 : synchronisation sélective — véhicule EXCLU du rafraîchissement périodique automatique (choix
+      // utilisateur, checkbox « Rafraîchissement automatique » décochée). Placé APRÈS le bloc CMD_PENDING
+      // ci-dessus (un refresh post-commande reste la conséquence d'une action explicite, jamais gaté) et
+      // AVANT la branche de cadence ci-dessous (polling périodique + anti-rafale UC72, seuls concernés).
+      // Lecture défensive calquée sur panel.php (`!getConfiguration(...,1)` — défaut 1 = opt-out ; "0" est
+      // falsy en PHP ⇒ décoché ⇒ skip). L'eqLogic reste isEnable=1 : il apparaît toujours en page Santé (UC71).
+      if (!$eqLogic->getConfiguration('syncEnabled', 1)) {
         continue;
       }
       $autorefresh = trim((string) $eqLogic->getConfiguration('autorefresh', ''));
@@ -4325,6 +4395,23 @@ class stellantis extends eqLogic {
   public static function assurerVisiblePanelParDefaut(eqLogic $_eqLogic): bool {
     if (trim((string) $_eqLogic->getConfiguration('isVisiblePanel', '')) === '') {
       $_eqLogic->setConfiguration('isVisiblePanel', 1);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * UC76 : backfill du défaut « inclure dans le rafraîchissement automatique » — MIROIR EXACT
+   * d'assurerVisiblePanelParDefaut() ci-dessus : ne pose la clé 'syncEnabled' QUE si absente (ne réécrase
+   * jamais un choix utilisateur explicite, y compris un décochage à 0). Retourne true si modifié (le caller
+   * mutualise le save()). Appelée par syncVehicles() (avant le save() de la boucle de découverte) ET par
+   * install.php::stellantis_update() (backfill des installs antérieures à UC76) — d'où la visibilité
+   * PUBLIQUE malgré son rôle de pure plomberie interne (install.php est un point d'entrée externe qui ne
+   * peut appeler qu'une méthode publique de la classe stellantis, cf. CLAUDE.md § autoload).
+   */
+  public static function assurerSyncEnabledParDefaut(eqLogic $_eqLogic): bool {
+    if (trim((string) $_eqLogic->getConfiguration('syncEnabled', '')) === '') {
+      $_eqLogic->setConfiguration('syncEnabled', 1);
       return true;
     }
     return false;
@@ -4862,7 +4949,29 @@ class stellantis extends eqLogic {
   }
 
   // Fonction exécutée automatiquement avant la sauvegarde (création ou mise à jour) de l'équipement
+  // UC76 : refléter IMMÉDIATEMENT toute bascule MANUELLE de l'état d'activation (formulaire OU toggle
+  // rapide de la liste des équipements — les deux passent par save()→preSave). Une intervention manuelle
+  // sur isEnable exprime un choix explicite ⇒ efface le marqueur 'autoDisabled' (sinon une réactivation
+  // manuelle suivie d'une redésactivation manuelle laisserait le marqueur périmé et un futur
+  // syncVehicles() réactiverait contre la volonté de l'utilisateur). Pilotée par $synchroEnCours pour ne
+  // PAS interférer avec les bascules faites par syncVehicles() lui-même (qui gère le marqueur explicitement).
+  // eqLogic::byId() fait une requête DB FRAÎCHE (vérifié en source core) ⇒ retourne ici l'ANCIENNE valeur
+  // persistée (preSave s'exécute avant l'UPDATE). Défensif : ne lève JAMAIS (un throw bloquerait le save()).
   public function preSave() {
+    if (self::$synchroEnCours) {
+      return;
+    }
+    try {
+      if ($this->getId() == '') {
+        return; // création : pas d'ancien état à comparer
+      }
+      $ancien = eqLogic::byId($this->getId());
+      if (is_object($ancien) && $ancien->getIsEnable() != $this->getIsEnable()) {
+        $this->setConfiguration('autoDisabled', 0);
+      }
+    } catch (\Throwable $e) {
+      // Fail-safe : au pire le marqueur n'est pas effacé (dégradation vers le comportement documenté).
+    }
   }
 
   // Fonction exécutée automatiquement après la sauvegarde (création ou mise à jour) de l'équipement

@@ -29,3 +29,34 @@ guarantees byte-exact indentation consistency with the surrounding template inst
 `old_string`/`new_string` matches. See also [[feedback-no-local-php-verification]] (same environment, no
 local `php`/lint to catch the fallout of a bad manual edit — another reason to prefer the derived-indent
 script over retyped whitespace).
+
+**Concrete recipe that worked end-to-end (UC76, inserting a new `<div class="form-group">` block into
+`desktop/php/stellantis.php`, tabs+CRLF):**
+1. `Write` the new block to a scratch file using **real tab characters** for indentation (typed literally,
+   not `\t`) and **real newlines** (`\n`, i.e. normal multi-line string) — use *relative* nesting depth
+   starting wherever is convenient (e.g. 0/1/2/3 tabs), don't try to match the target file's absolute depth
+   yet.
+2. Inspect the target file's actual absolute tab depth at the insertion point with
+   `sed -n '<n>,<m>p' file | cat -A` (counts `^I` per line) to get the base indent (e.g. 7 tabs for a
+   `form-group` at that nesting level in this template).
+3. Flat-prepend the missing base tabs to *every* line of the scratch block in one shot:
+   `sed -i 's/^/\t\t\t\t/' scratchfile` (count = target base − what you used in step 1) — since every line
+   in the block was written at a consistent *relative* depth, a single flat prefix correctly re-bases the
+   whole block without touching relative nesting.
+4. Splice the now correctly-indented block into the target file with a `perl -0777` script that: reads
+   both files raw (`<:raw`), normalizes the block's line endings (`s/\r\n/\n/g; s/\n/\r\n/g` — cheap
+   idempotent CRLF enforcement), finds a **stable literal anchor substring already containing real tabs**
+   (e.g. `"\t\t\t\t\t\t\t<!-- UC24 : suivi"` — copy this from a `Grep`/`Read` of the target file, not
+   retyped) via `index($content, $marker)`, and writes `substr(...,0,$idx) . $block . substr($content,$idx)`
+   back to the target file. No regex substitution of escape-sequence text is needed at any point (avoids
+   the Bash-argument backslash-collapsing pitfall in [[feedback-no-local-php-verification]]).
+5. Verify structurally: `git diff --stat` (expect a small, clean insertion, no reformatting of surrounding
+   lines) and a brace/paren-balance script (see [[feedback-no-local-php-verification]]) on the *whole*
+   file, comparing the mismatch count against the same check run on `git show HEAD:<file>` — an unchanged
+   mismatch count (e.g. from pre-existing `{{...}}` i18n placeholders in HTML being miscounted as code
+   braces by a naive stripper) confirms the insertion didn't introduce a *new* imbalance, even when the
+   file was never balanced to begin with.
+
+If step 1-4 goes wrong (e.g. wrong tab count guessed), don't try to patch the damage in place — `git status`
+then `git checkout -- <file>` to reset to pristine and redo the sequence with the corrected tab count; much
+faster than surgical fixes on a mangled CRLF/tab file.

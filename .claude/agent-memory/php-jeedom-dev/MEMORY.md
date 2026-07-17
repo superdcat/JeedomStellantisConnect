@@ -1,5 +1,5 @@
 # Index mémoire
 
 - [Skill `dev` indisponible en session](feedback_dev_skill_unavailable.md) — l'outil Skill échoue sur "dev" malgré le system prompt ; ne pas retenter, suivre directement la méthodologie inline (cadrer→incréments→vérifier→auto-revue).
-- [Vérif PHP sans `php -l` local](feedback_no_local_php_verification.md) — pas de binaire php dans ce shell ; script Python (strip commentaires/strings + équilibrage {}()[]) via fichier Write (pas de heredoc bash, casse les backslash) pour sécuriser un gros diff avant remise.
-- [Edit tool échoue sur fichiers indentés en tabs](feedback_edit_tool_tab_indented_files.md) — desktop/php/*.php = tabs+CRLF, retyper l'indentation à la main ne matche pas ; dériver l'indentation réelle via script Python (regex sur le fichier) plutôt que de réessayer Edit en boucle.
+- [Vérif PHP sans `php -l` local](feedback_no_local_php_verification.md) — pas de binaire php dans ce shell ; script Python/perl (strip commentaires/strings + équilibrage {}()[]) via fichier Write ; JAMAIS d'escapes `\t`/`\n` inline dans une commande Bash (collapsés silencieusement) — écrire les vrais octets via Write puis manipuler fichier-à-fichier.
+- [Edit tool échoue sur fichiers indentés en tabs](feedback_edit_tool_tab_indented_files.md) — desktop/php/*.php = tabs+CRLF ; recette éprouvée UC76 : Write bloc à profondeur relative (vrais tabs) → sed prefixe plat pour re-baser → perl -0777 splice sur ancre littérale + normalisation CRLF ; si raté, git checkout -- et recommencer plutôt que rafistoler.

@@ -94,7 +94,7 @@ try {
         ajax::success(stellantis::renewRemoteToken());
     }
 
-    // syncVehicles répond en structure uniforme {ok, created, updated, disabled, reactivables, message}
+    // syncVehicles répond en structure uniforme {ok, created, updated, disabled, reactivables, reactivated, message}
     // (mappe stellantisException en interne, comme testConnection)
     if (init('action') == 'sync') {
         ajax::success(stellantis::syncVehicles());
