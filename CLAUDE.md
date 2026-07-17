@@ -642,6 +642,30 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > wakeup/debounce dédiés) ; **`downloadToFile()`** (APK GitHub, UC61) **non compté** (chemin cURL séparé,
 > pas l'API PSA — commenté dans son docblock). Reviews croisées : sécurité **RAS**, qualité **PASS** (1
 > finding minor cosmétique i18n corrigé). Alimente UC71 (Santé) & UC72 (anti-ban).
+> **Post-MVP : UC81** — **recette fonctionnelle manuelle complétée** (domaine livraison, livrable **100 %
+> documentaire** : aucun code, aucun appel API, aucune chaîne UI ; le seul artefact est le fichier
+> `.memory/specs/post-mvp/80-livraison/81-validation-manuelle.md`, doc **vivant** repris à chaque
+> `/feature`) : satisfaction de l'unique critère d'acceptation *« chaque UC livrée a au moins un scénario
+> de recette observable »* — **28 scénarios ajoutés** pour les UC livrées jusque-là non couvertes (UC12-18,
+> 21, 22, 24, 31-34, 41-44, 51-54, 61, 71, 74, 75, 76, 83), les blocs déjà présents (Auth, Token,
+> Découverte, Télémétrie, Robustesse, UC11, UC19, UC23, UC72, UC73, UC77) **préservés mot pour mot**. La
+> checklist est **réorganisée en sections `###` par domaine** (calquées sur le `README.md` des specs :
+> Socle MVP → 10-commandes → 20-énergie → 30-localisation → 40-entretien → 50-gestion → 60-config →
+> 70-supervision → 80-livraison) ; le placeholder vague « Commandes (12-x) » est **remplacé** par les blocs
+> complets UC12→18 ; UC23 déplacé en 20-énergie. Une **section « Conventions de ce document »** en tête fige
+> les règles pour les futurs cycles (ordre domaine+UC ; gabarit de bloc **avec date « ajouté »
+> obligatoire** ; **UC doc-only = pointer vers l'existant, jamais fabriquer** un scénario — appliqué à UC53
+> qui renvoie à Découverte 05-06 + Anti-ban 72 + UC54 ; **écart spec-vs-réel = annoter `⚠️` + assertion
+> vérifiable positive**). ⚠️ **Principe directeur** : un scénario s'ancre sur le **comportement réellement
+> implémenté** (code + cette note), **pas** sur le texte *cible* d'une spec figée avant codage — écarts
+> reflétés fidèlement (UC42 : aucune commande « pression par roue / en bar », que le binaire `tyre_alert` ;
+> UC22 : aucun seuil % ; UC18 : aucun re-publish auto sur code 400 ; UC51 : aucune commande `vin`/`model` ;
+> UC44 : 8 `door_<id>` statiques + `opening_alert` ; UC33 : 8 infos trajet). **Dette signalée, hors
+> périmètre** (ligne NB + `81-tech.md`) : les en-têtes « Statut » de ~25 specs fonctionnelles livrées sont
+> **périmés** (« à spécifier ») → **commit séparé** mécanique ultérieur (ne pas diluer la revue de 81).
+> Reviews : **sécurité sans objet** (aucun code) + garde anti-fuite (grep VIN/token) OK ; **qualité PASS**
+> (2 findings minor corrigés : flag `otp_sms_pending` ≠ compteur `otp_sms_count` ; liste des blocs datés de
+> `81-tech.md` rectifiée). **i18n sans objet** (fichier interne FR). Spec technique : `81-tech.md`.
 > Suite = post-MVP (supervision, robustesse, livraison…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
