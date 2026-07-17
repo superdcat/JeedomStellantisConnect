@@ -21,6 +21,32 @@ $iconeConnexion = ($etatConnexion['state'] == 'ok') ? 'fa-check-circle' : (($eta
 			<strong>{{État de la connexion}} :</strong>
 			<?php echo htmlspecialchars($etatConnexion['detail'], ENT_QUOTES, 'UTF-8'); ?>
 		</div>
+		<!-- UC77 : consommation de l'API REST (lecture cache seule, restitution serveur au chargement) -->
+		<div class="alert alert-info" style="margin-bottom:10px;">
+			<strong><i class="fas fa-chart-bar"></i> {{Consommation de l'API REST}}</strong>
+			<?php
+			$statsApi = stellantis::recapStatistiquesApi();
+			if ($statsApi['today']['total'] == 0) {
+				echo '<br>{{Aucun appel enregistré}}';
+			} else {
+				echo '<br>{{Appels aujourd\'hui}} : ' . (int) $statsApi['today']['total'];
+				echo ' &mdash; {{Sur 7 jours}} : ' . (int) $statsApi['total_periode'];
+				if (count($statsApi['par_compte']) > 1) {
+					foreach ($statsApi['par_compte'] as $slotCompte => $totalCompte) {
+						echo '<br>{{Compte}} ' . (int) $slotCompte . ' : ' . (int) $totalCompte;
+					}
+				}
+				if (count($statsApi['today']['byEndpoint']) > 0) {
+					arsort($statsApi['today']['byEndpoint']);
+					$parts = array();
+					foreach ($statsApi['today']['byEndpoint'] as $label => $count) {
+						$parts[] = htmlspecialchars((string) $label, ENT_QUOTES, 'UTF-8') . ' (' . (int) $count . ')';
+					}
+					echo '<br>{{Détail par endpoint}} : ' . implode(', ', $parts);
+				}
+			}
+			?>
+		</div>
 		<legend><i class="fas fa-cog"></i> {{Gestion}}</legend>
 		<!-- Boutons de gestion du plugin -->
 		<div class="eqLogicThumbnailContainer">

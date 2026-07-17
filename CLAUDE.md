@@ -615,6 +615,33 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > manuel** (bouton) rafraîchit **tous** les véhicules découverts, y compris `syncEnabled=0` (action explicite
 > ≠ polling auto). Reviews croisées : sécurité **RAS**, qualité **PASS** (findings mineurs corrigés : docblock/
 > commentaire de retour, libellé UI différencié de « Auto-actualisation », renommage `$reactivesAuto`).
+> **Post-MVP : UC77** — **statistiques d'appels API** (supervision/robustesse, 100 % local, **AUCUN appel
+> réseau/MQTT neuf** : ne fait qu'*instrumenter/compter* les appels REST déjà émis) : compteur au **point
+> unique HTTP `stellantisApi::httpRequest()`**, inséré **juste après la garde d'échec transport** (⇒ compté
+> **uniquement après réponse serveur**, 2xx **ET** erreurs 4xx/5xx = signal anti-ban ; jamais sur échec
+> transport). Compte **tout le trafic REST** (télémétrie `call`, OAuth `requestToken`, **OTP = face REST des
+> commandes** `smsCode`/`token`). Persistance `cache` **cloisonnée par compte** (UC54, `cacheKeyForSlot`) :
+> clé jour `stellantis::stats::day::AAAA-MM-JJ` → `{total, byEndpoint}` (TTL ~8 j, **auto-purge** ⇒ pas
+> d'orphelin multi-comptes) + clé minute `::min::AAAA-MM-JJ HH:MM` (TTL 120 s) pour la **dérive**
+> edge-triggered (`compteMinute === STATS_DERIVE_SEUIL` ⇒ **log `warning` une seule fois/min/compte** ;
+> seuil **60 = ESTIMATION non calibrée** assumée façon UC72, cas de recette dans `81-validation-manuelle.md`).
+> Normalisation d'endpoint pure `normaliserEndpoint()` : `parse_url(PHP_URL_PATH)` (retire host + query, dont
+> le `client_id` ⇒ **jamais de secret dans le label**) + **un seul** remplacement ciblé du seul segment
+> variable de l'API `#/user/vehicles/[^/]+#` → `/user/vehicles/{id}` (pas de whitelist fragile ; un futur
+> endpoint dégrade proprement). `compterAppel()` **intégralement `try/catch \Throwable`** (AC3 : jamais
+> d'exception vers l'appel métier) ; RMW cache **non-atomique** assumé (précédent `consommerQuotaRefresh`) ;
+> cap défensif `STATS_MAX_ENDPOINTS=50` (bucket `(autres)`, précédent `ALERT_MAX_TYPES` UC43). **Restitution
+> sur 2 surfaces** via `stellantis::recapStatistiquesApi()` (lecture cache seule, agrégat par
+> `slotsConfigures()` → `{today:{total,byEndpoint}, total_periode, par_compte}`, appelée par `health()` **et**
+> la page plugin — jamais `stellantisApi::` direct depuis un point d'entrée externe, règle autoload) : ligne
+> `health()` « Appels API REST (aujourd'hui) » (total + top 3 endpoints, ventilation par compte si
+> multi-comptes, `htmlspecialchars`, state informatif) + bloc `desktop/php/stellantis.php` « Consommation de
+> l'API REST » (jour + 7 j + détail par endpoint). ⚠️ **Limites assumées** (`77-tech.md`) : **commandes MQTT
+> hors périmètre** du compteur (publish *fire-and-forget*, ne passe pas par `stellantisApi`, aucune réponse
+> serveur synchrone ⇒ libellés volontairement « **API REST** » ; volume MQTT déjà borné par quotas
+> wakeup/debounce dédiés) ; **`downloadToFile()`** (APK GitHub, UC61) **non compté** (chemin cURL séparé,
+> pas l'API PSA — commenté dans son docblock). Reviews croisées : sécurité **RAS**, qualité **PASS** (1
+> finding minor cosmétique i18n corrigé). Alimente UC71 (Santé) & UC72 (anti-ban).
 > Suite = post-MVP (supervision, robustesse, livraison…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement

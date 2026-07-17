@@ -102,6 +102,24 @@ manuelle** sur un Jeedom réel : la « preuve » qu'une UC marche vraiment (lint
      (batterie, position…) **continue** à la cadence habituelle ; seuls les réveils MQTT cessent.
   7. **Respect UC72 / anti-ban** : avec plusieurs véhicules en charge simultanée, le quota global compte
      (5/20 min) n'est **jamais** dépassé (un excès est refusé, loggué en `debug`, jamais une rafale).
+- **Statistiques d'appels API (post-MVP 77)** : les 3 AC de `77-statistiques-api.md`.
+  1. **Comptage exhaustif (AC1)** : après un cycle de cron (télémétrie) + une ré-authentification OAuth2 +
+     une activation/renouvellement OTP, la page plugin ET la page Santé affichent un total d'appels **> 0**
+     avec un détail par endpoint reconnaissable (`/user/vehicles`, `/status`, `/access_token`…).
+  2. **Consultable (AC2)** : le bloc « Consommation de l'API REST » est visible sur la page plugin
+     (bandeau, sous l'état de connexion) et une ligne « Appels API REST (aujourd'hui) » apparaît sur la
+     page Santé ; en multi-comptes (UC54), une ventilation « Compte 1 / Compte 2… » apparaît sur les deux
+     surfaces.
+  3. **Non bloquant (AC3)** : provoquer une panne du cache (ex. `cache::flush()` pendant un cron) →
+     le refresh télémétrie **aboutit quand même** (aucune exception remontée depuis le comptage), au pire
+     le compteur repart de zéro.
+  4. **⚠️ Faux positif de dérive (seuil `STATS_DERIVE_SEUIL=60/min/compte`, estimation à confirmer)** :
+     cliquer sur « Synchroniser les véhicules » sur une flotte multi-véhicules/multi-comptes → `grep -i
+     "Dérive du volume d'appels" log/stellantis` doit rester **vide** (un sync d'une dizaine de véhicules
+     reste largement sous le seuil, cloisonné par compte) ; si le warning apparaît en usage normal, le
+     seuil est à recalibrer (pas une régression bloquante, cf. limite assumée de `77-tech.md`).
+  5. **APK non compté** : après « Extraire automatiquement » les credentials APK (UC61), le total
+     d'appels API REST **n'augmente pas** (téléchargement GitHub hors périmètre, cf. `downloadToFile()`).
 
 ## Critères d'acceptation
 - [ ] Chaque UC livrée a au moins un scénario de recette observable, vérifié sur Jeedom réel.

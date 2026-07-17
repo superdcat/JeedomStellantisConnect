@@ -1740,6 +1740,38 @@ class stellantis extends eqLogic {
         'state' => true,
       );
     }
+    // UC77 : consommation de l'API REST du jour (lecture cache seule, AUCUN appel réseau). Ligne
+    // informative (state=true) : une dérive est signalée séparément par un log warning (compterAppel),
+    // pas ici. Ventilation par compte affichée seulement si plusieurs comptes sont configurés.
+    $stats = self::recapStatistiquesApi();
+    if ($stats['today']['total'] == 0) {
+      $lignes[] = array(
+        'test' => __('Appels API REST (aujourd\'hui)', __FILE__),
+        'result' => __('aucun appel enregistré aujourd\'hui', __FILE__),
+        'advice' => '',
+        'state' => true,
+      );
+    } else {
+      arsort($stats['today']['byEndpoint']);
+      $top = array();
+      foreach (array_slice($stats['today']['byEndpoint'], 0, 3, true) as $label => $count) {
+        $top[] = $label . ' (' . $count . ')';
+      }
+      $resultat = sprintf(__('%s appels', __FILE__), $stats['today']['total']) . ($top ? ' — ' . implode(', ', $top) : '');
+      if (count($stats['par_compte']) > 1) {
+        $details = array();
+        foreach ($stats['par_compte'] as $slot => $total) {
+          $details[] = sprintf(__('Compte %s', __FILE__), $slot) . ' : ' . $total;
+        }
+        $resultat .= ' (' . implode(' / ', $details) . ')';
+      }
+      $lignes[] = array(
+        'test' => __('Appels API REST (aujourd\'hui)', __FILE__),
+        'result' => htmlspecialchars($resultat, ENT_QUOTES, 'UTF-8'),
+        'advice' => '',
+        'state' => true,
+      );
+    }
     foreach (eqLogic::byType('stellantis', true) as $eqLogic) {
       $nom = $eqLogic->getName();
       // UC24 : capacité requise pour estimer l'énergie de charge (VE/PHEV). Absente ⇒ énergie jamais estimée →
@@ -1832,6 +1864,51 @@ class stellantis extends eqLogic {
     } catch (\Throwable $e) {
       return '';
     }
+  }
+
+  /**
+   * UC77 — Restitution des statistiques d'appels API REST : lecture cache SEULE, AUCUN appel réseau.
+   * Boucle sur les comptes configurés (slotsConfigures) et agrège, pour chacun, la clé jour du jour
+   * courant (détail par endpoint) et le total glissant sur les $_nbJours derniers jours (jour courant
+   * inclus). Callable depuis health() (même classe) ET depuis desktop/php/stellantis.php (point d'entrée
+   * externe) via `stellantis::` — jamais `stellantisApi::` directement (règle autoload, cf. CLAUDE.md).
+   * @param int $_nbJours fenêtre du total période (défaut 7, cohérent avec le TTL cache ~8 j)
+   * @return array{today: array{total: int, byEndpoint: array<string,int>}, total_periode: int, jours: int, par_compte: array<int,int>}
+   */
+  public static function recapStatistiquesApi(int $_nbJours = 7): array {
+    $nbJours = max(1, $_nbJours);
+    $totalAujourdhui = 0;
+    $byEndpoint = array();
+    $parCompte = array();
+    $totalPeriode = 0;
+    foreach (self::slotsConfigures() as $slot) {
+      for ($i = 0; $i < $nbJours; $i++) {
+        $jour = date('Y-m-d', strtotime('-' . $i . ' day'));
+        $cle = stellantisApi::cacheKeyForSlot(stellantisApi::STATS_DAY_PREFIX . $jour, $slot);
+        $donnees = json_decode((string) cache::byKey($cle)->getValue(''), true);
+        if (!is_array($donnees) || !isset($donnees['total'])) {
+          continue;
+        }
+        $total = (int) $donnees['total'];
+        $totalPeriode += $total;
+        if ($i == 0) {
+          $totalAujourdhui += $total;
+          $parCompte[$slot] = $total;
+          if (isset($donnees['byEndpoint']) && is_array($donnees['byEndpoint'])) {
+            foreach ($donnees['byEndpoint'] as $label => $count) {
+              $label = (string) $label;
+              $byEndpoint[$label] = (isset($byEndpoint[$label]) ? $byEndpoint[$label] : 0) + (int) $count;
+            }
+          }
+        }
+      }
+    }
+    return array(
+      'today' => array('total' => $totalAujourdhui, 'byEndpoint' => $byEndpoint),
+      'total_periode' => $totalPeriode,
+      'jours' => $nbJours,
+      'par_compte' => $parCompte,
+    );
   }
 
   // Âge lisible d'un timestamp Unix (chaînes UI LITTÉRALES pour l'extracteur i18n — cf. definitionsCommandes).
@@ -5202,6 +5279,16 @@ class stellantisApi {
   const REMOTE_TOKEN_TTL = 890; // TTL constaté du remote token (code de référence : MQTT_TOKEN_TTL)
   const REMOTE_TOKEN_MARGE = 120; // refresh proactif quand il reste moins que cette marge
 
+  // UC77 — Statistiques d'appels API REST (supervision anti-ban) : compteur PAR COMPTE (cacheKeyForSlot),
+  // par jour + par endpoint (alimente health() UC71) + fenêtre glissante minute (détection de dérive).
+  // Observationnel (RMW non-atomique assumé, cf. 77-tech.md) — jamais une garde de sécurité.
+  const STATS_DAY_PREFIX = 'stellantis::stats::day::';
+  const STATS_MIN_PREFIX = 'stellantis::stats::min::';
+  const STATS_TTL = 691200;        // ~8 jours : couvre la restitution 7 j + marge, auto-purge (pas d'orphelin multi-comptes)
+  const STATS_MIN_TTL = 120;       // fenêtre glissante minute + marge
+  const STATS_DERIVE_SEUIL = 60;   // appels/min/compte ⇒ log warning — ⚠️ ESTIMATION non calibrée (cf. 81-validation-manuelle.md)
+  const STATS_MAX_ENDPOINTS = 50;  // cap défensif anti-prolifération de byEndpoint (jeu réel ~9 labels, cf. UC43 ALERT_MAX_TYPES)
+
   /**
    * UC54 : nom de la clé de cache niveau-COMPTE pour le slot $_slot (1 = clé NON suffixée = comportement
    * ACTUEL, zéro migration ; 2..N = clé suffixée ::N). À appeler à CHAQUE accès à une clé de cache
@@ -5586,6 +5673,10 @@ class stellantisApi {
       log::add('stellantis', 'warning', $_method . ' ' . $urlSansQuery . ' → erreur de transport cURL #' . $curlErrno . ' : ' . $curlError);
       throw new stellantisException('Erreur de transport vers l\'API (cURL #' . $curlErrno . ' : ' . $curlError . ')', 0, 'transport');
     }
+    // UC77 : comptage APRÈS réception d'une réponse serveur (2xx ET erreurs HTTP 4xx/5xx — un 429/401
+    // reste un appel réel et un signal anti-ban) ; jamais sur un échec de transport ci-dessus (aucune
+    // réponse serveur). Point unique d'instrumentation (AC1), non bloquant (AC3, cf. compterAppel()).
+    self::compterAppel($_url, $_slot);
     log::add('stellantis', 'debug', $_method . ' ' . $urlSansQuery . ' → HTTP ' . $httpCode);
     $decoded = null;
     if (trim($body) !== '') {
@@ -5632,6 +5723,10 @@ class stellantisApi {
    * pas de file://, gopher://…).
    * ⚠️ Ne porte JAMAIS le header Authorization: Bearer de call()/callWithToken() : l'URL est un dépôt
    * public GitHub, un token n'a rien à y faire (barrière contre un futur refactor de mutualisation).
+   * ⚠️ UC77 : chemin cURL SÉPARÉ de httpRequest() → volontairement HORS du compteur de statistiques
+   * d'appels API (compterAppel()). Ce n'est pas un appel à l'API PSA (GitHub, pas api.groupe-psa.com),
+   * ni un appel « métier » récurrent (déclenché ponctuellement par l'admin) : le compter mélangerait la
+   * télémétrie de consommation PSA (objectif anti-ban) avec un téléchargement d'APK rarissime.
    * @throws stellantisException type 'transport' sur erreur réseau / fichier / HTTP non-2xx
    */
   public static function downloadToFile(string $_url, string $_destPath): void {
@@ -5821,5 +5916,63 @@ class stellantisApi {
     }
     $token = json_decode(utils::decrypt($brut), true);
     return (is_array($token) && isset($token['access_token']) && isset($token['exp'])) ? $token : null;
+  }
+
+  /**
+   * UC77 — Réduit une URL d'appel à un label d'endpoint stable pour l'agrégation (retire host + query,
+   * dont le client_id) : `parse_url(..., PHP_URL_PATH)` puis un SEUL remplacement ciblé du segment
+   * variable connu de l'API (`/user/vehicles/{vin-ou-id}` → `/user/vehicles/{id}`). Volontairement PAS
+   * une whitelist de chemins fixes (ne peut donc jamais mislabeler `v4`/`cvs`/`access_token`) : un futur
+   * endpoint à segment variable non prévu ici dégrade proprement (groupé par id brut), jamais faux.
+   */
+  private static function normaliserEndpoint(string $_url): string {
+    $path = (string) parse_url($_url, PHP_URL_PATH);
+    if ($path == '') {
+      return '(inconnu)';
+    }
+    return preg_replace('#/user/vehicles/[^/]+#', '/user/vehicles/{id}', $path);
+  }
+
+  /**
+   * UC77 — Compteur d'appels API REST, PAR COMPTE ($_slot) : incrémente le total + le détail par
+   * endpoint du jour courant (cache TTL ~8 j), et la fenêtre glissante de la minute courante (détection
+   * de dérive, edge-triggered au franchissement du seuil). Appelé UNE SEULE FOIS, depuis httpRequest()
+   * juste après la garde d'échec transport (donc uniquement sur réponse serveur reçue, 2xx ou erreur).
+   * ⚠️ Intégralement best-effort (AC3) : une panne d'instrumentation (cache indisponible, JSON corrompu…)
+   * ne doit JAMAIS remonter vers l'appel métier — try/catch \Throwable, silencieux.
+   * RMW non-atomique (même pattern que consommerQuotaRefresh/consommerQuotaWakeup) : sous forte
+   * concurrence, léger sous-comptage possible — acceptable, compteur observationnel (pas une garde).
+   */
+  private static function compterAppel(string $_url, int $_slot): void {
+    try {
+      $label = self::normaliserEndpoint($_url);
+      $jour = date('Y-m-d');
+      $cleJour = self::cacheKeyForSlot(self::STATS_DAY_PREFIX . $jour, $_slot);
+      $donnees = json_decode((string) cache::byKey($cleJour)->getValue(''), true);
+      if (!is_array($donnees) || !isset($donnees['total']) || !isset($donnees['byEndpoint']) || !is_array($donnees['byEndpoint'])) {
+        $donnees = array('total' => 0, 'byEndpoint' => array());
+      }
+      $donnees['total'] = (int) $donnees['total'] + 1;
+      if (!isset($donnees['byEndpoint'][$label]) && count($donnees['byEndpoint']) >= self::STATS_MAX_ENDPOINTS) {
+        // Cap défensif anti-prolifération (endpoint inconnu supplémentaire au-delà du plafond) : agrégé
+        // dans un bucket générique, le total reste exact (cf. UC43 ALERT_MAX_TYPES).
+        $label = '(autres)';
+      }
+      $donnees['byEndpoint'][$label] = (isset($donnees['byEndpoint'][$label]) ? (int) $donnees['byEndpoint'][$label] : 0) + 1;
+      cache::set($cleJour, json_encode($donnees), self::STATS_TTL);
+
+      $minute = date('Y-m-d H:i');
+      $cleMinute = self::cacheKeyForSlot(self::STATS_MIN_PREFIX . $minute, $_slot);
+      $compteMinute = (int) cache::byKey($cleMinute)->getValue(0) + 1;
+      cache::set($cleMinute, $compteMinute, self::STATS_MIN_TTL);
+      if ($compteMinute === self::STATS_DERIVE_SEUIL) {
+        // Edge-triggered : n'avertit qu'UNE FOIS par minute, au franchissement exact du seuil (pas à
+        // chaque appel au-delà). Seuil = ESTIMATION à valider en recette (cf. 81-validation-manuelle.md).
+        log::add('stellantis', 'warning', 'Dérive du volume d\'appels API REST : ' . $compteMinute . ' appels cette minute'
+          . ($_slot > 1 ? ' (compte ' . $_slot . ')' : '') . ' — vérifiez l\'absence de boucle anormale');
+      }
+    } catch (\Throwable $e) {
+      // Instrumentation non bloquante (AC3) : une panne ici ne doit jamais casser l'appel métier.
+    }
   }
 }

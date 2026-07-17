@@ -38,3 +38,16 @@ those correctly, unlike a nested Bash-command string), then do purely *byte-leve
 `perl -0777` script that reads two files and splices their raw bytes with `s/\r\n/\n/;s/\n/\r\n/` for line-
 ending normalization) — no escape-sequence interpretation is needed mid-pipeline because the bytes are
 already correct on disk. See [[feedback-edit-tool-tab-indented-files]] for the full recipe this produced.
+
+**Refinement (confirmed UC77) — the balance checker must respect `<?php ?>` tag boundaries on mixed
+HTML/PHP files** (`desktop/php/*.php`). Running the naive whole-file comment/string-stripper (designed for
+pure-PHP `core/class/*.php`) on a template file produced a false-positive brace imbalance. Root cause: raw
+HTML text sitting *outside* `<?php ?>` tags routinely contains a bare apostrophe (a French contraction, e.g.
+`l'API`, inside an `<!-- HTML comment -->`) which the stripper — unaware it isn't looking at PHP — reads as
+the *start of a single-quoted string literal*, then silently swallows everything up to the next `'` as
+"inside a string", desyncing all brace counts that follow. **Fix**: before stripping, first split the file
+on `<?php` / `?>` and concatenate only the PHP segments; run the comment/string stripper (and the brace/
+paren/bracket balance count) on that PHP-only text, ignoring HTML segments entirely (HTML's own `{{...}}`
+i18n markers and stray punctuation are not PHP syntax and don't need balance-checking). Sanity-check the
+tool itself by also running it against the file's last-committed (`git show HEAD:<path>`) version — if HEAD
+already reports a nonzero imbalance, the checker (not the new edit) is broken, not the code.

@@ -272,7 +272,11 @@
         "La connexion au compte Stellantis a expiré (jeton de rafraîchissement invalide ou révoqué). Reconnectez-vous depuis la configuration du plugin.": "Die Verbindung zum Stellantis-Konto ist abgelaufen (ungültiges oder widerrufenes Refresh-Token). Verbinden Sie sich erneut über die Plugin-Konfiguration.",
         "La connexion au compte secondaire %s a expiré (jeton de rafraîchissement invalide ou révoqué). Reconnectez-vous depuis la configuration du plugin.": "Die Verbindung zum Zweitkonto %s ist abgelaufen (ungültiges oder widerrufenes Refresh-Token). Verbinden Sie sich erneut über die Plugin-Konfiguration.",
         "Mode vie privée": "Privatsphäre-Modus",
-        "Le véhicule « %s » est en mode vie privée : le partage des données (Data / Géolocalisation) a été coupé côté véhicule. Réactivez le partage de données depuis l'écran du véhicule pour retrouver la position et la télémétrie. Ce n'est pas une panne du plugin.": "Das Fahrzeug «%s» befindet sich im Privatsphäre-Modus: Die Datenfreigabe (Data / Geolokalisierung) wurde fahrzeugseitig deaktiviert. Aktivieren Sie die Datenfreigabe erneut über den Bildschirm des Fahrzeugs, um Position und Telemetriedaten wiederzuerhalten. Dies ist keine Fehlfunktion des Plugins."
+        "Le véhicule « %s » est en mode vie privée : le partage des données (Data / Géolocalisation) a été coupé côté véhicule. Réactivez le partage de données depuis l'écran du véhicule pour retrouver la position et la télémétrie. Ce n'est pas une panne du plugin.": "Das Fahrzeug «%s» befindet sich im Privatsphäre-Modus: Die Datenfreigabe (Data / Geolokalisierung) wurde fahrzeugseitig deaktiviert. Aktivieren Sie die Datenfreigabe erneut über den Bildschirm des Fahrzeugs, um Position und Telemetriedaten wiederzuerhalten. Dies ist keine Fehlfunktion des Plugins.",
+        "Appels API REST (aujourd'hui)": "REST-API-Aufrufe (heute)",
+        "aucun appel enregistré aujourd'hui": "heute wurde kein Aufruf erfasst",
+        "%s appels": "%s Aufrufe",
+        "Compte %s": "Konto %s"
     },
     "plugins/stellantis/core/template/dashboard/cmd.info.string.stellantisMap.html": {
         "Carte de position": "Positionskarte",
@@ -285,6 +289,12 @@
     "plugins/stellantis/desktop/php/stellantis.php": {
         "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert",
         "État de la connexion": "Verbindungsstatus",
+        "Consommation de l'API REST": "Nutzung der REST-API",
+        "Aucun appel enregistré": "Kein Aufruf erfasst",
+        "Appels aujourd'hui": "Aufrufe heute",
+        "Sur 7 jours": "Über 7 Tage",
+        "Compte": "Konto",
+        "Détail par endpoint": "Details je Endpoint",
         "Gestion": "Verwaltung",
         "Ajouter": "Hinzufügen",
         "Configuration": "Konfiguration",
