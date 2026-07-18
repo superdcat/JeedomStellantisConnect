@@ -693,6 +693,22 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > minor corrigés). Traduction en/de/es : **3 docs réécrites section par section** (erreur APK corrigée dans
 > les 3 langues) + i18n `configuration.txt` (3 clés modifiées + lacune « Tester la connexion » comblée), 3
 > JSON valides. Spec technique : `82-tech.md`.
+> **Post-MVP : UC84** — **internationalisation (multilingue), passe de complétude & certification**
+> (domaine livraison, UC « vivante ») : audit i18n transverse (les 3 `core/i18n/*.json` étaient déjà
+> **symétriques**, 371 clés — maintenance continue du sous-agent `translator` OK) + comblement des 3
+> écarts résiduels. (1) **AC3 — `description` d'`info.json` en 4 langues** (gap jamais clos) : ajout
+> `en_US`/`de_DE`/`es_ES` au **dict inline du manifeste** (mécanisme réel confirmé doc Jeedom
+> `structure_info_json` : objet à clés de langue **dans `info.json`**, **PAS** une section `"info.json"`
+> des `core/i18n/*.json` — ⚠️ **l'exemple i18n de `CLAUDE.md` était faux**, corrigé), chacune ≥ 80 car.
+> (règle market). (2) **AC1 — zéro chaîne UI en dur** : sweep systématique (élargi au HTML **concaténé en
+> JS** + `confirm`/`bootbox.confirm`/`showAlert` + attributs `placeholder`/`title`/`alt`) → 2 hardcodés
+> enveloppés — `desktop/js/stellantis.js:130` `placeholder="{{Unité}}"` (clé préexistante) et
+> `desktop/php/stellantis.php:239` `title="{{Assistant cron}}"` (**nouvelle** clé traduite) ; + clé
+> `401 - Accès non autorisé` (`modal.stellantis.php`) comblée. (3) **AC2 — hygiène orphelines PAR
+> (section, clé)** : suppression de 2 clés mortes (`Connexion au compte`@class, `Ajouter`@stellantis.php)
+> en **conservant** `Connexion au compte`@configuration.php (**vivante** — un même texte FR peut exister
+> dans 2 sections ⇒ jamais de suppression par texte global). Reviews croisées : **sécurité RAS**,
+> **qualité PASS** (0 finding). Spec technique : `84-tech.md`.
 > Suite = post-MVP (supervision, robustesse, livraison…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement
@@ -888,10 +904,14 @@ Le plugin est **nativement multilingue**. Langues : **`fr_FR` (source/défaut)**
 - Les traductions vivent dans `core/i18n/<langue>.json`, **un fichier par langue cible**
   (`en_US.json`, `de_DE.json`, `es_ES.json` — **pas** de `fr_FR.json`). Format :
   ```json
-  { "plugins/stellantis/<chemin/relatif/fichier>": { "Texte français": "Traduction" },
-    "info.json": { "Description française": "Traduction" } }
+  { "plugins/stellantis/<chemin/relatif/fichier>": { "Texte français": "Traduction" } }
   ```
-- La `description` d'`info.json` est fournie pour **les 4 langues** ; docs dupliquées par langue.
+- ⚠️ **Exception `info.json` — mécanisme DISTINCT** (confirmé doc Jeedom `structure_info_json`, UC84) :
+  la `description` (et `name`) du manifeste se traduit via un **objet à clés de langue INLINE dans
+  `plugin_info/info.json`** — `"description": {"fr_FR": …, "en_US": …, "de_DE": …, "es_ES": …}` — **PAS**
+  via une section `"info.json"` des fichiers `core/i18n/*.json` (ne jamais en créer une). `name` =
+  « Stellantis » (nom propre, non traduit). `description` fournie pour **les 4 langues**, **≥ 80
+  caractères** chacune (règle market Jeedom) ; docs dupliquées par langue.
 - **Règle d'or** : toute clé UI **livrée** doit avoir ses **3 traductions**. *Quand* les produire :
   - **Dans `/feature`** : traduction faite **en fin de cycle par le sous-agent `translator`** (code figé,
     contexte isolé) ; pendant le dev on enveloppe en français mais on **ne touche pas** aux `*.json`.

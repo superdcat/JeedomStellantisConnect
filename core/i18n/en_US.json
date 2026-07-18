@@ -129,7 +129,6 @@
         "Erreur API (HTTP %d) : consultez les logs du plugin pour le détail": "API error (HTTP %d): check the plugin logs for details",
         "Erreur au dernier rafraîchissement : consultez les logs du plugin": "Error during the last refresh: check the plugin logs",
         "Connecté au compte Stellantis": "Connected to Stellantis account",
-        "Connexion au compte": "Account connection",
         "Reconnectez-vous depuis la configuration du plugin": "Reconnect from the plugin configuration",
         "Mode privacy actif — données de localisation restreintes": "Privacy mode active — location data restricted",
         "Le véhicule masque ses données (mode vie privée) : ce n'est pas une erreur": "The vehicle is hiding its data (privacy mode): this is not an error",
@@ -298,7 +297,6 @@
         "Compte": "Account",
         "Détail par endpoint": "Detail by endpoint",
         "Gestion": "Management",
-        "Ajouter": "Add",
         "Configuration": "Configuration",
         "Tester la connexion": "Test connection",
         "Synchroniser les véhicules": "Synchronize vehicles",
@@ -333,6 +331,7 @@
         "Auto-actualisation": "Auto-refresh",
         "Fréquence de rafraîchissement des commandes infos de l'équipement": "Refresh frequency of the device's info commands",
         "Cliquer sur ? pour afficher l'assistant cron": "Click ? to display the cron wizard",
+        "Assistant cron": "Cron wizard",
         "Inclure dans le rafraîchissement auto": "Include in auto-refresh",
         "Inclure ce véhicule dans le rafraîchissement périodique automatique. Décochez pour l'exclure (économie de quota / anti-ban) sans le supprimer : ses dernières valeurs sont conservées.": "Include this vehicle in the automatic periodic refresh. Uncheck to exclude it (quota savings / anti-ban) without deleting it: its latest values are kept.",
         "Capacité batterie": "Battery capacity",
@@ -387,5 +386,8 @@
         "Unité": "Unit",
         "Tester": "Test",
         "Supprimer la commande": "Delete the command"
+    },
+    "plugins/stellantis/desktop/modal/modal.stellantis.php": {
+        "401 - Accès non autorisé": "401 - Unauthorized access"
     }
 }

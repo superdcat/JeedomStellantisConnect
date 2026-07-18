@@ -129,7 +129,6 @@
         "Erreur API (HTTP %d) : consultez les logs du plugin pour le détail": "API-Fehler (HTTP %d): Weitere Details finden Sie in den Plugin-Protokollen",
         "Erreur au dernier rafraîchissement : consultez les logs du plugin": "Fehler bei der letzten Aktualisierung: Prüfen Sie die Plugin-Protokolle",
         "Connecté au compte Stellantis": "Mit Stellantis-Konto verbunden",
-        "Connexion au compte": "Kontoverbindung",
         "Reconnectez-vous depuis la configuration du plugin": "Verbinden Sie sich erneut über die Plugin-Konfiguration",
         "Mode privacy actif — données de localisation restreintes": "Privatsphäre-Modus aktiv — Standortdaten eingeschränkt",
         "Le véhicule masque ses données (mode vie privée) : ce n'est pas une erreur": "Das Fahrzeug verbirgt seine Daten (Privatsphäre-Modus): das ist kein Fehler",
@@ -298,7 +297,6 @@
         "Compte": "Konto",
         "Détail par endpoint": "Details je Endpoint",
         "Gestion": "Verwaltung",
-        "Ajouter": "Hinzufügen",
         "Configuration": "Konfiguration",
         "Tester la connexion": "Verbindung testen",
         "Synchroniser les véhicules": "Fahrzeuge synchronisieren",
@@ -333,6 +331,7 @@
         "Auto-actualisation": "Automatische Aktualisierung",
         "Fréquence de rafraîchissement des commandes infos de l'équipement": "Aktualisierungshäufigkeit der Info-Befehle des Geräts",
         "Cliquer sur ? pour afficher l'assistant cron": "Klicken Sie auf ?, um den Cron-Assistenten anzuzeigen",
+        "Assistant cron": "Cron-Assistent",
         "Inclure dans le rafraîchissement auto": "In die automatische Aktualisierung einbeziehen",
         "Inclure ce véhicule dans le rafraîchissement périodique automatique. Décochez pour l'exclure (économie de quota / anti-ban) sans le supprimer : ses dernières valeurs sont conservées.": "Dieses Fahrzeug in die automatische periodische Aktualisierung einbeziehen. Deaktivieren, um es auszuschließen (Kontingent sparen / Anti-Sperre), ohne es zu löschen: seine letzten Werte bleiben erhalten.",
         "Capacité batterie": "Batteriekapazität",
@@ -387,5 +386,8 @@
         "Unité": "Einheit",
         "Tester": "Testen",
         "Supprimer la commande": "Befehl löschen"
+    },
+    "plugins/stellantis/desktop/modal/modal.stellantis.php": {
+        "401 - Accès non autorisé": "401 - Zugriff nicht autorisiert"
     }
 }

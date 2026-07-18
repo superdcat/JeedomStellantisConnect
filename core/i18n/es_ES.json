@@ -129,7 +129,6 @@
         "Erreur API (HTTP %d) : consultez les logs du plugin pour le détail": "Error de la API (HTTP %d): consulte los registros del plugin para más detalles",
         "Erreur au dernier rafraîchissement : consultez les logs du plugin": "Error en la última actualización: consulte los registros del plugin",
         "Connecté au compte Stellantis": "Conectado a la cuenta Stellantis",
-        "Connexion au compte": "Conexión de la cuenta",
         "Reconnectez-vous depuis la configuration du plugin": "Vuelva a conectarse desde la configuración del plugin",
         "Mode privacy actif — données de localisation restreintes": "Modo privacidad activo — datos de localización restringidos",
         "Le véhicule masque ses données (mode vie privée) : ce n'est pas une erreur": "El vehículo oculta sus datos (modo privacidad): no es un error",
@@ -298,7 +297,6 @@
         "Compte": "Cuenta",
         "Détail par endpoint": "Detalle por endpoint",
         "Gestion": "Gestión",
-        "Ajouter": "Añadir",
         "Configuration": "Configuración",
         "Tester la connexion": "Probar la conexión",
         "Synchroniser les véhicules": "Sincronizar vehículos",
@@ -333,6 +331,7 @@
         "Auto-actualisation": "Actualización automática",
         "Fréquence de rafraîchissement des commandes infos de l'équipement": "Frecuencia de actualización de los comandos de información del dispositivo",
         "Cliquer sur ? pour afficher l'assistant cron": "Haga clic en ? para mostrar el asistente de cron",
+        "Assistant cron": "Asistente de cron",
         "Inclure dans le rafraîchissement auto": "Incluir en la actualización automática",
         "Inclure ce véhicule dans le rafraîchissement périodique automatique. Décochez pour l'exclure (économie de quota / anti-ban) sans le supprimer : ses dernières valeurs sont conservées.": "Incluir este vehículo en la actualización periódica automática. Desmárquelo para excluirlo (ahorro de cuota / anti-baneo) sin eliminarlo: se conservan sus últimos valores.",
         "Capacité batterie": "Capacidad de la batería",
@@ -387,5 +386,8 @@
         "Unité": "Unidad",
         "Tester": "Probar",
         "Supprimer la commande": "Eliminar el comando"
+    },
+    "plugins/stellantis/desktop/modal/modal.stellantis.php": {
+        "401 - Accès non autorisé": "401 - Acceso no autorizado"
     }
 }
