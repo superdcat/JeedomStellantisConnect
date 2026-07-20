@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **Langue des réponses** : toujours s'adresser à l'utilisateur **en français** (explications, résumés,
+> questions, messages de commit et de PR). Le français est la langue de travail du projet — ne jamais
+> répondre en anglais.
+
 ## Présentation
 
 Plugin **Jeedom** (id cible `stellantis`) qui connecte les **véhicules Stellantis / ex-Groupe PSA**
