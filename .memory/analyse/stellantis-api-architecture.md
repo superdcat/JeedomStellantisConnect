@@ -86,11 +86,21 @@ C'est **le** piège conceptuel. Il y a deux systèmes de tokens **indépendants*
   et **20 activations SMS / compte** au total → un compte peut se **bloquer** définitivement.
 - À l'expiration : « redo otp procedure » (impossible à automatiser → **alerter l'utilisateur**, ne pas
   re-tenter en boucle).
-- **Endpoints confirmés (UC12, 2026-07-09, vs `RemoteClient`/`psa_client`)** : SMS = `POST
-  api.groupe-psa.com/applications/cvs/v4/mobile/smsCode?client_id=…` ; remote token = `POST
-  …/applications/cvs/v4/mobile/token?client_id=…` (grant `password`=code OTP, puis `refresh_token`) — les
-  deux avec Bearer OAuth2 + `x-introspect-realm`. **PAS** `virtualkey/remoteaccess/token`. Réponse
+- **Endpoints (⚠️ CORRIGÉ au runtime 2026-07-20 — les deux ne partagent PAS la même base)** : SMS =
+  `POST api.groupe-psa.com/applications/cvs/v4/mobile/smsCode?client_id=…` ; remote token = `POST
+  api.groupe-psa.com/connectedcar/v4/virtualkey/remoteaccess/token?client_id=…` (grant `password`=code
+  OTP, puis `refresh_token`) — les deux avec Bearer OAuth2 + `x-introspect-realm`. Réponse
   `{access_token, refresh_token}`, TTL ~890 s. Crypto OTP vendorisée (`resources/otp_vendor`).
+  > ⚠️ **Erreur d'analyse UC12 corrigée (2026-07-20)** : la note « endpoints confirmés (2026-07-09) »
+  > plaçait le remote token sur `…/applications/cvs/v4/mobile/token` et affirmait **PAS**
+  > `virtualkey/remoteaccess/token` — c'était **l'inverse de la réalité**. En prod, ce chemin renvoie
+  > **HTTP 404** (l'activation OTP réussit, le device est provisionné, mais l'obtention du token
+  > échoue). La constante `REMOTE_URL` de `psa_car_controller` (`psa/constants.py`) est bien
+  > `https://api.groupe-psa.com/connectedcar/v4/virtualkey/remoteaccess/token?client_id=` (**base
+  > connectedcar/v4**, PAS la base mobile qui, elle, ne porte QUE `smsCode`). Corrigé côté code :
+  > `stellantisApi::REMOTE_TOKEN_URL` + `remoteTokenUrl()` (distinct de `remoteUrl()` du smsCode).
+  > **Leçon** : « confirmé vs le code de référence » sans exécution réelle ne prouve rien — un endpoint
+  > du canal OTP/commandes doit être vérifié au runtime (404 ≠ 401/403).
 
 ### 1.2 API REST (lecture) — base `connected_car v4`
 

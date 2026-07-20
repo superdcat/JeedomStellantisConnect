@@ -5273,8 +5273,14 @@ class stellantisApi {
   const RATELIMIT_COOLDOWN = 900;
 
   // UC12 — Remote token OTP (canal des commandes MQTT), DISTINCT du token OAuth2 REST ci-dessus.
-  // Base « mobile » (≠ connectedcar/v4) : smsCode + token (grants password/refresh_token).
+  // ⚠️ Les deux endpoints du canal OTP ne partagent PAS la même base (contrat RemoteClient de
+  // psa_car_controller, vérifié au runtime — un 404 en prod avait été causé par la mise du /token
+  // sur la base mobile) :
+  //  - smsCode : base « mobile » applications/cvs/v4/mobile/smsCode
+  //  - token   : connectedcar/v4/virtualkey/remoteaccess/token (grants password/refresh_token,
+  //    = constante REMOTE_URL de psa_car_controller)
   const REMOTE_API_BASE = 'https://api.groupe-psa.com/applications/cvs/v4/mobile';
+  const REMOTE_TOKEN_URL = 'https://api.groupe-psa.com/connectedcar/v4/virtualkey/remoteaccess/token';
   const REMOTE_TOKEN_CACHE_KEY = 'stellantis::remote_token';
   const REMOTE_TOKEN_TTL = 890; // TTL constaté du remote token (code de référence : MQTT_TOKEN_TTL)
   const REMOTE_TOKEN_MARGE = 120; // refresh proactif quand il reste moins que cette marge
@@ -5802,10 +5808,18 @@ class stellantisApi {
     return $headers;
   }
 
-  // URL « mobile » avec client_id en query (comme le code de référence RemoteClient).
+  // URL « mobile » avec client_id en query (comme le code de référence RemoteClient) — utilisée par
+  // smsCode. Le remote token a une base DISTINCTE (cf. remoteTokenUrl / REMOTE_TOKEN_URL).
   private static function remoteUrl(string $_endpoint): string {
     $config = stellantis::getApiConfig();
     return self::REMOTE_API_BASE . $_endpoint . '?' . http_build_query(array('client_id' => $config['clientId']));
+  }
+
+  // URL du remote token (base connectedcar/v4/virtualkey/remoteaccess, ≠ base mobile du smsCode),
+  // client_id en query — contrat REMOTE_URL de psa_car_controller.
+  private static function remoteTokenUrl(): string {
+    $config = stellantis::getApiConfig();
+    return self::REMOTE_TOKEN_URL . '?' . http_build_query(array('client_id' => $config['clientId']));
   }
 
   /**
@@ -5823,7 +5837,7 @@ class stellantisApi {
    * chiffrés, séparés du token OAuth2). @throws stellantisException
    */
   public static function requestRemoteToken(string $_otpCode): void {
-    $reponse = self::httpRequest('POST', self::remoteUrl('/token'), self::remoteHeaders(true),
+    $reponse = self::httpRequest('POST', self::remoteTokenUrl(), self::remoteHeaders(true),
       json_encode(array('grant_type' => 'password', 'password' => $_otpCode)), true);
     self::storeRemoteTokenResponse($reponse, null);
     log::add('stellantis', 'info', 'Remote token OTP obtenu');
@@ -5845,7 +5859,7 @@ class stellantisApi {
     // distant renvoie « invalid_grant », que typeFromResponse classerait à tort en auth_required).
     $headers = self::remoteHeaders(true);
     try {
-      $reponse = self::httpRequest('POST', self::remoteUrl('/token'), $headers,
+      $reponse = self::httpRequest('POST', self::remoteTokenUrl(), $headers,
         json_encode(array('grant_type' => 'refresh_token', 'refresh_token' => $token['refresh_token'])), true);
     } catch (stellantisException $e) {
       cache::delete(self::REMOTE_TOKEN_CACHE_KEY);
