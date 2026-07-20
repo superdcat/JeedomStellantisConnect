@@ -2512,6 +2512,7 @@ class stellantis extends eqLogic {
       log::add('stellantis', 'warning', 'UC12 : échec du renouvellement du remote token (' . $e->getMessage() . ')');
       return array('ok' => false, 'message' => __('Le renouvellement a échoué : refaites l\'activation complète (SMS + code PIN).', __FILE__));
     }
+    self::resolveCustomerId(); // parité avec activateOtp : le CID peut manquer si la 1ʳᵉ activation a échoué
     self::reconnecterDemonSiLance();
     cache::delete(self::OTP_ALERT_KEY);
     message::removeAll('stellantis', 'otp_required');
@@ -2653,23 +2654,25 @@ class stellantis extends eqLogic {
   }
 
   /**
-   * Résout le customer id (CID) nécessaire aux topics MQTT via GET /user (best-effort, jamais bloquant).
-   * Cherche une valeur de forme AP-ACNT…/OV-ACNT… dans la réponse (structure non figée). Ne loggue jamais
-   * le corps /user (PII) — seulement le CID trouvé. Échec → repli sur la saisie manuelle (champ config).
+   * Résout le customer id (CID) nécessaire aux topics MQTT via l'endpoint « car-associations » du flux
+   * OAuth PKCE moderne (best-effort, jamais bloquant). Le CID est le champ `customer` de la réponse (utilisé
+   * tel quel : l'API renvoie le CID COMPLET, ex. `AP-ACNT…` — ⚠️ pas de préfixe marque à recomposer,
+   * contrairement à l'ancien flux « brandid » de psa_car_controller). Ne loggue jamais le corps (PII) —
+   * seulement le CID trouvé. Échec → repli sur la saisie manuelle (champ config).
    */
   private static function resolveCustomerId(): void {
     if (self::getCustomerId() != '') {
       return; // déjà connu (config manuelle ou résolution antérieure)
     }
     try {
-      $reponse = stellantisApi::callWithToken('GET', '/user');
+      $reponse = stellantisApi::fetchCarAssociations();
     } catch (\Throwable $e) {
       log::add('stellantis', 'info', 'UC12 : résolution du customer id ignorée (' . $e->getMessage() . ')');
       return;
     }
     $cid = self::extraireCustomerId($reponse);
     if ($cid == '') {
-      log::add('stellantis', 'info', 'UC12 : customer id introuvable dans /user (repli : saisie manuelle dans la config)');
+      log::add('stellantis', 'info', 'UC12 : customer id introuvable dans car-associations (repli : saisie manuelle dans la config)');
       return;
     }
     config::save('customer_id', $cid, 'stellantis');
@@ -2683,24 +2686,28 @@ class stellantis extends eqLogic {
     }
   }
 
-  // Motif du customer id MQTT (AP-ACNT… Peugeot/Citroën/DS, OV-ACNT… Opel/Vauxhall). Pleinement ancré :
-  // le CID est ensuite interpolé dans les topics MQTT (subscribeTopics) → jamais de valeur non conforme.
-  const OTP_CID_REGEX = '/^(AP|OV)-ACNT[A-Za-z0-9._-]*$/';
+  // Motif du customer id MQTT : préfixe marque à 2 lettres + tiret + identifiant de compte (ex. AP- Peugeot,
+  // AC- Citroën, DS- DS, OP- Opel, VX- Vauxhall ; le suffixe est souvent « ACNT… » mais ce n'est PAS garanti
+  // marque par marque, d'où un motif volontairement large). Pleinement ANCRÉ et topic-safe (aucun / + # ni
+  // espace) : le CID est interpolé dans les topics MQTT (subscribeTopics) → jamais de valeur non conforme.
+  const OTP_CID_REGEX = '/^[A-Za-z0-9]{2,3}-[A-Za-z0-9._-]{3,60}$/';
 
-  // Recherche récursive d'une valeur de forme AP-ACNT…/OV-ACNT… (customer id MQTT) dans la réponse /user.
+  // Extrait le customer id d'une réponse « car-associations » : priorité au champ `customer` (contrat de
+  // l'endpoint), replis `customer_id`/`customerId`. Descend récursivement (le corps est une LISTE
+  // d'associations, CID dans chaque entrée). Valide la forme (topic-safe) avant de retenir une valeur.
   private static function extraireCustomerId($_data): string {
-    if (is_string($_data)) {
-      return preg_match(self::OTP_CID_REGEX, $_data) ? $_data : '';
+    if (!is_array($_data)) {
+      return '';
     }
-    if (is_array($_data)) {
-      foreach (array('customer_id', 'customerId', 'id') as $cle) {
-        if (isset($_data[$cle]) && is_string($_data[$cle]) && preg_match(self::OTP_CID_REGEX, $_data[$cle])) {
-          return $_data[$cle];
-        }
+    foreach (array('customer', 'customer_id', 'customerId') as $cle) {
+      if (isset($_data[$cle]) && is_string($_data[$cle]) && preg_match(self::OTP_CID_REGEX, $_data[$cle])) {
+        return $_data[$cle];
       }
-      foreach ($_data as $valeur) {
+    }
+    foreach ($_data as $valeur) {
+      if (is_array($valeur)) {
         $trouve = self::extraireCustomerId($valeur);
-        if ($trouve != '') {
+        if ($trouve !== '') {
           return $trouve;
         }
       }
@@ -2842,7 +2849,12 @@ class stellantis extends eqLogic {
     // Pré-requis d'abord : un échec (CID/démon) ne doit PAS consommer le quota anti-ban (compté seulement
     // pour une publication réellement émise).
     if (self::getCustomerId() == '') {
-      throw new stellantisException(__('Identifiant client (CID) inconnu : refaites l\'activation OTP', __FILE__), 0, 'not_configured');
+      // Le CID a pu ne jamais être résolu (1ʳᵉ activation partielle, renouvellement…). L'OAuth étant frais
+      // au moment d'une commande, tenter la résolution à chaud (best-effort, ne lève pas) avant d'échouer.
+      self::resolveCustomerId();
+    }
+    if (self::getCustomerId() == '') {
+      throw new stellantisException(__('Identifiant client (CID) introuvable automatiquement. Renouvelez le jeton distant, ou saisissez le CID manuellement dans la configuration du plugin.', __FILE__), 0, 'not_configured');
     }
     if (self::deamon_info()['state'] != 'ok') {
       throw new stellantisException(__('Démon MQTT non démarré : impossible d\'envoyer la commande', __FILE__), 0, 'not_configured');
@@ -5281,6 +5293,10 @@ class stellantisApi {
   //    = constante REMOTE_URL de psa_car_controller)
   const REMOTE_API_BASE = 'https://api.groupe-psa.com/applications/cvs/v4/mobile';
   const REMOTE_TOKEN_URL = 'https://api.groupe-psa.com/connectedcar/v4/virtualkey/remoteaccess/token';
+  // UC12 — Résolution du customer id (CID) du flux OAuth PKCE moderne : endpoint « car-associations »
+  // (base applications/cvs/v4/mauv, Bearer OAuth2 + realm), champ `customer` = CID utilisé tel quel dans
+  // les topics MQTT. Contrat de l'intégration HA homeassistant-stellantis-vehicles (get_user_info).
+  const CAR_ASSOCIATIONS_URL = 'https://api.groupe-psa.com/applications/cvs/v4/mauv/car-associations';
   const REMOTE_TOKEN_CACHE_KEY = 'stellantis::remote_token';
   const REMOTE_TOKEN_TTL = 890; // TTL constaté du remote token (code de référence : MQTT_TOKEN_TTL)
   const REMOTE_TOKEN_MARGE = 120; // refresh proactif quand il reste moins que cette marge
@@ -5830,6 +5846,32 @@ class stellantisApi {
   public static function requestSmsOtp(): void {
     self::httpRequest('POST', self::remoteUrl('/smsCode'), self::remoteHeaders(false), '');
     log::add('stellantis', 'info', 'SMS d\'activation OTP demandé');
+  }
+
+  /**
+   * UC12 — Récupère les « car-associations » du compte (flux OAuth PKCE moderne) pour en dériver le
+   * customer id (CID) MQTT. GET sur la base `applications/cvs/v4/mauv` (≠ connectedcar/v4), avec le même
+   * jeu de headers que le canal OTP (Bearer OAuth2 + realm + Accept hal+json). Le corps est une liste
+   * d'associations dont chaque entrée porte un champ `customer` (= le CID complet). Renvoie le corps
+   * décodé (liste/objet) ; l'extraction du CID est faite par l'appelant (stellantis). @throws stellantisException
+   */
+  public static function fetchCarAssociations(): array {
+    $config = stellantis::getApiConfig();
+    $url = self::CAR_ASSOCIATIONS_URL . '?' . http_build_query(array(
+      'client_id' => $config['clientId'],
+      'locale' => self::localePourApi(),
+    ));
+    // x-transaction-id : présent dans le contrat de référence (gateway) ; valeur non significative.
+    $headers = self::remoteHeaders(false);
+    $headers[] = 'x-transaction-id: 1';
+    return self::httpRequest('GET', $url, $headers);
+  }
+
+  // Locale (format xx_XX) pour les endpoints « mobile » qui l'exigent en query : on réutilise la langue
+  // de l'instance Jeedom (best-effort — le CID ne dépend pas de sa valeur exacte). Défaut fr_FR.
+  private static function localePourApi(): string {
+    $lang = trim((string) config::byKey('language', 'core', 'fr_FR'));
+    return $lang != '' ? $lang : 'fr_FR';
   }
 
   /**

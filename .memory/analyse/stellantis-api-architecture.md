@@ -124,8 +124,23 @@ C'est **le** piège conceptuel. Il y a deux systèmes de tokens **indépendants*
   > marque reste l'alternative documentée si une marque le nécessite. TLS via `tls_set_context()`
   > (vérif certif/hostname par défaut), MQTTv311, `clean_session`.
 - Topics : publish `psa/RemoteServices/from/cid/{CID}/{ServiceType}/state` ; subscribe
-  `psa/RemoteServices/to/cid/{CID}/#` + `psa/RemoteServices/events/MPHRTServices/{vin}`. `CID` = format
-  `AP-ACNT…` (Peugeot/Citroën/DS) ou `OV-ACNT…` (Opel/Vauxhall).
+  `psa/RemoteServices/to/cid/{CID}/#` + `psa/RemoteServices/events/MPHRTServices/{vin}`. `CID` = préfixe
+  marque à **2 lettres** + tiret + identifiant de compte, ex. `AP-ACNT…` (Peugeot), `AC-…` (Citroën),
+  `DS-…` (DS), `OP-…` (Opel), `VX-…` (Vauxhall).
+  > ⚠️ **Correction runtime (2026-07-21) — résolution du CID & format**. Deux erreurs de la note UC12 :
+  > (1) le plugin résolvait le CID via `GET connectedcar/v4/user` en cherchant une valeur `AP-ACNT…`/
+  > `OV-ACNT…` : **faux de bout en bout** (le modèle `User` n'a pas d'`id`, et `OV`/`AP` ne couvrent pas
+  > toutes les marques) → CID jamais résolu → toute commande échouait « Identifiant client (CID) inconnu ».
+  > (2) Le **flux OAuth PKCE moderne** (le nôtre, = intégration HA `homeassistant-stellantis-vehicles`)
+  > résout le CID via `GET api.groupe-psa.com/applications/cvs/v4/mauv/car-associations?client_id=…&locale=…`
+  > (Bearer OAuth2 + `x-introspect-realm`, base **mauv** ≠ connectedcar/v4) : le corps est une **liste**
+  > d'associations, le CID est le champ **`customer`**, **utilisé tel quel** (déjà complet). ⚠️ NE PAS
+  > confondre avec l'**ancien flux** de `psa_car_controller` (`firstLaunchConfig`) qui, lui, recompose
+  > `brand_code + "-" + id` via un login email/mot de passe « brandid » + `host_brandid_prod`/`site_code`
+  > extraits de l'APK (androguard) — flux plus lourd, hors de notre architecture. Brand codes réels :
+  > Peugeot `AP`, Citroën `AC`, DS `DS`, Opel `OP`, Vauxhall `VX`. Côté plugin : `stellantisApi::
+  > fetchCarAssociations()` + `stellantis::resolveCustomerId()`/`extraireCustomerId()` (champ `customer`),
+  > appelé après `activateOtp`/`renewRemoteToken` et **à chaud** dans `publishRemoteCommand` si le CID manque.
   > ⚠️ **Correction audit UC11-16 (2026-07-10)** : le topic d'événements est
   > `.../events/MPHRTServices/{vin}` (le code de référence s'abonne **par VIN**). Un préfixe NU
   > `.../events/MPHRTServices/` (tel que noté à tort ici auparavant, et recopié dans le code UC11)
