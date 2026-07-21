@@ -253,9 +253,7 @@ $iconeConnexion = ($etatConnexion['state'] == 'ok') ? 'fa-check-circle' : (($eta
 									<sup><i class="fas fa-question-circle tooltips" title="{{Inclure ce véhicule dans le rafraîchissement périodique automatique. Décochez pour l'exclure (économie de quota / anti-ban) sans le supprimer : ses dernières valeurs sont conservées.}}"></i></sup>
 								</label>
 								<div class="col-sm-6">
-									<label class="checkbox-inline">
-										<input type="checkbox" class="eqLogicAttr" data-l1key="configuration" data-l2key="syncEnabled" checked>
-									</label>
+									<input type="checkbox" class="eqLogicAttr" data-l1key="configuration" data-l2key="syncEnabled" style="margin-top:9px;" checked>
 								</div>
 							</div>
 							<!-- UC24 : suivi & statistiques de charge — 2 champs de config éditables (PAS readonly, à la
@@ -309,9 +307,7 @@ $iconeConnexion = ($etatConnexion['state'] == 'ok') ? 'fa-check-circle' : (($eta
 									<sup><i class="fas fa-question-circle tooltips" title="{{Réveille périodiquement le véhicule pour rafraîchir la télémétrie (batterie, position, charge…) que le polling REST seul ne peut pas obtenir. Cadence adaptative : fréquente en charge, rare en veille. Nécessite l'activation de l'OTP (pilotage à distance).}}"></i></sup>
 								</label>
 								<div class="col-sm-6">
-									<label class="checkbox-inline">
-										<input type="checkbox" class="eqLogicAttr" data-l1key="configuration" data-l2key="auto_wakeup">
-									</label>
+									<input type="checkbox" class="eqLogicAttr" data-l1key="configuration" data-l2key="auto_wakeup" style="margin-top:9px;">
 									<div class="alert alert-warning" style="margin-top:5px;margin-bottom:0;">
 										<i class="fas fa-exclamation-triangle"></i>
 										{{⚠️ Risque batterie 12 V : réveiller le véhicule consomme la batterie de servitude. Un usage excessif peut la décharger (démarrage / accès sans clé inopérants). À n'activer qu'en connaissance de cause.}}
@@ -343,9 +339,7 @@ $iconeConnexion = ($etatConnexion['state'] == 'ok') ? 'fa-check-circle' : (($eta
 									<sup><i class="fas fa-question-circle tooltips" title="{{Affiche ce véhicule dans le panneau « Mes véhicules » du menu}}"></i></sup>
 								</label>
 								<div class="col-sm-6">
-									<label class="checkbox-inline">
-										<input type="checkbox" class="eqLogicAttr" data-l1key="configuration" data-l2key="isVisiblePanel" checked>
-									</label>
+									<input type="checkbox" class="eqLogicAttr" data-l1key="configuration" data-l2key="isVisiblePanel" style="margin-top:9px;" checked>
 								</div>
 							</div>
 						</div>
