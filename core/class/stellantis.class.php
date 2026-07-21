@@ -62,6 +62,18 @@ class stellantis extends eqLogic {
     'vauxhall' => array('tld' => 'vauxhall.co.uk', 'realm' => 'clientsB2CVauxhall', 'redirectUri' => 'mymvxsdk://oauth2redirect/{pays}', 'apkFile' => 'myvauxhall'),
   );
 
+  // Bugfix recette (Marque/Libellé vides en config véhicule) : BRANDS ci-dessus ne porte que des données
+  // TECHNIQUES (tld/realm/redirectUri/apkFile), aucun libellé humain — table dédiée pour l'affichage,
+  // consommée par libelleMarque() en repli quand l'API /user/vehicles ne renvoie pas 'brand' pour un
+  // véhicule donné (constaté : souvent absent par véhicule alors que connu au niveau du compte).
+  const LIBELLES_MARQUES = array(
+    'peugeot' => 'Peugeot',
+    'citroen' => 'Citroën',
+    'ds' => 'DS',
+    'opel' => 'Opel',
+    'vauxhall' => 'Vauxhall',
+  );
+
   // Base commune de l'API REST consommateur (identique pour toutes les marques)
   const API_BASE_URL = 'https://api.groupe-psa.com/connectedcar/v4';
 
@@ -202,6 +214,17 @@ class stellantis extends eqLogic {
       'apiBaseUrl' => self::API_BASE_URL,
       'redirectUri' => $redirectUri,
     );
+  }
+
+  /**
+   * Bugfix recette (Marque vide en config véhicule) : libellé d'affichage d'une marque à partir de son
+   * code de config (attendu en minuscule, ex. retour de getApiConfig()['brand']) — table LIBELLES_MARQUES
+   * ci-dessus, repli ucfirst() pour un code inconnu (ne devrait pas arriver : getApiConfig() normalise déjà
+   * sur une clé connue de BRANDS, mais défensif — jamais de levée).
+   */
+  private static function libelleMarque(string $_codeMarque): string {
+    $code = strtolower(trim($_codeMarque));
+    return isset(self::LIBELLES_MARQUES[$code]) ? self::LIBELLES_MARQUES[$code] : ucfirst($code);
   }
 
   /**
@@ -524,6 +547,13 @@ class stellantis extends eqLogic {
       if (isset($brut['pictures'])) {
         log::add('stellantis', 'debug', 'Découverte : forme brute pictures = ' . self::aseptiser((string) json_encode($brut['pictures']), 500));
       }
+      // Bugfix recette (Marque/Libellé vides en config véhicule) : log debug des CLÉS + valeurs brutes
+      // brand/label du véhicule, pour confirmer la shape réelle renvoyée par /user/vehicles sur le compte
+      // de l'utilisateur (même esprit que le log 'pictures' ci-dessus — diagnostic recette/beta uniquement,
+      // aseptisé + borné). Ne journalise QUE des noms de clés + brand/label (jamais le VIN ni un secret).
+      log::add('stellantis', 'debug', 'Découverte : clés véhicule brut = ' . self::aseptiser((string) json_encode(array_keys($brut)), 300)
+        . ' ; brand brut = "' . self::aseptiser((isset($brut['brand']) && is_scalar($brut['brand'])) ? (string) $brut['brand'] : '', 60)
+        . '" ; label brut = "' . self::aseptiser((isset($brut['label']) && is_scalar($brut['label'])) ? (string) $brut['label'] : '', 60) . '"');
       $vehicules[] = array(
         'id' => trim((string) $brut['id']),
         'vin' => trim((string) $brut['vin']),
@@ -632,6 +662,11 @@ class stellantis extends eqLogic {
           // disparaître les véhicules d'un AUTRE compte, ni les siens propres (cf. 54-tech.md § sync par compte).
           continue;
         }
+        // Bugfix recette (Marque vide en config véhicule) : l'API /user/vehicles ne renvoie pas toujours
+        // 'brand' par véhicule, alors que la marque est connue au niveau du COMPTE (config du slot en
+        // cours de synchro) — libellé de repli calculé UNE FOIS par compte, réutilisé pour tous les
+        // véhicules de ce slot (évite des lectures config répétées dans la boucle véhicule ci-dessous).
+        $brandCompte = self::libelleMarque(self::getApiConfig($slot)['brand']);
         foreach ($vehicules as $v) {
           // Robustesse (convention cron) : un véhicule en erreur n'interrompt pas la synchro
           try {
@@ -645,7 +680,14 @@ class stellantis extends eqLogic {
               $eqLogic->setEqType_name('stellantis');
               $eqLogic->setIsEnable(1);
               $eqLogic->setIsVisible(1);
-              $nom = trim($v['brand'] . ' ' . $v['label']);
+              // Bugfix recette : nom TOUJOURS non vide et distinguable entre plusieurs véhicules de même
+              // marque — marque d'affichage (brand API si présent, sinon marque du compte, jamais vide) +
+              // label si présent, SINON les 6 derniers caractères du VIN (au lieu d'un nom "Peugeot" nu
+              // partagé par toute la flotte). Repli ultime sur le VIN complet si tout le reste est vide.
+              $brandAffichageNom = (trim($v['brand']) != '') ? $v['brand'] : $brandCompte;
+              $nom = (trim($v['label']) != '')
+                ? trim($brandAffichageNom . ' ' . $v['label'])
+                : trim($brandAffichageNom . ' ' . substr($v['vin'], -6));
               $eqLogic->setName($nom != '' ? $nom : $v['vin']);
             } else {
               if (!$eqLogic->getIsEnable()) {
@@ -680,11 +722,21 @@ class stellantis extends eqLogic {
             // Champs techniques : jamais name/object_id/isEnable sur un équipement existant (perso préservée)
             $eqLogic->setConfiguration('apiId', $v['id']); // requis pour les appels REST (UC07+), réécrit → self-heal
             $eqLogic->setConfiguration('vin', $v['vin']);
-            $eqLogic->setConfiguration('brand', $v['brand']);
-            // UC51 : libellé du véhicule (découverte = autorité, réécrit à chaque sync, comme 'brand' — jamais
-            // conditionné, contrairement à 'energy' qui est raffinée par le /status).
-            $eqLogic->setConfiguration('label', $v['label']);
-            // UC54 : compte de rattachement (découverte = autorité, réécrit à chaque sync, comme 'brand'/'label').
+            // Bugfix recette : 'brand' souvent absent/vide par véhicule côté API → repli sur la marque du
+            // compte ($brandCompte, calculée ci-dessus) plutôt que d'écrire du vide (Marque restait vide en
+            // config véhicule). Toujours non vide (getApiConfig()/libelleMarque() ne renvoient jamais '').
+            $eqLogic->setConfiguration('brand', (trim($v['brand']) != '') ? $v['brand'] : $brandCompte);
+            // UC51 (bugfix recette) : libellé du véhicule — souvent VIDE côté API (surnom optionnel, pas
+            // toujours renseigné dans l'app mobile). Réécrit à chaque sync SEULEMENT si non vide : un
+            // label vide ne doit JAMAIS écraser une valeur déjà présente (découverte antérieure) ou saisie
+            // manuellement par l'utilisateur (champ désormais éditable, cf. desktop/php/stellantis.php) —
+            // contrairement à 'brand'/'accountSlot' ci-dessus/dessous qui font toujours autorité.
+            if (trim($v['label']) != '') {
+              $eqLogic->setConfiguration('label', $v['label']);
+            }
+            // UC54 : compte de rattachement (découverte = autorité, réécrit à chaque sync sans condition,
+            // comme 'brand' ci-dessus — 'label' fait exception depuis le bugfix recette ci-dessus : jamais
+            // écrasé par du vide).
             // accountSlotLabel = texte lisible pré-calculé (affiché en readonly sur le formulaire eqLogic) :
             // 3 valeurs FIXES sous notre contrôle (pas une donnée externe) → __() avec chaîne LITTÉRALE légitime.
             $eqLogic->setConfiguration('accountSlot', $slot);

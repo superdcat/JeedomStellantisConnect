@@ -385,7 +385,7 @@
         "Etat": "Status",
         "Actions": "Aktionen",
         "Libellé du véhicule": "Fahrzeugbezeichnung",
-        "Nom du véhicule tel que défini dans l'application mobile (pré-rempli avec la désignation commerciale, modifiable ; renseigné par la synchronisation)": "Name des Fahrzeugs, wie in der mobilen App definiert (vorausgefüllt mit der Handelsbezeichnung, änderbar; wird durch die Synchronisierung ausgefüllt)",
+        "Surnom du véhicule : renseigné dans l'application mobile ou saisi ici directement (souvent vide côté API — pré-rempli par la synchronisation si disponible, sans jamais écraser une valeur existante)": "Spitzname des Fahrzeugs: in der mobilen App festgelegt oder hier direkt eingegeben (auf API-Seite oft leer — bei Verfügbarkeit durch die Synchronisierung vorausgefüllt, ohne einen vorhandenen Wert jemals zu überschreiben)",
         "Compte du véhicule": "Fahrzeugkonto",
         "Compte Stellantis auquel ce véhicule est rattaché (renseigné par la synchronisation) — seul le compte principal permet le pilotage à distance": "Stellantis-Konto, dem dieses Fahrzeug zugeordnet ist (wird durch die Synchronisierung ausgefüllt) — nur das Hauptkonto ermöglicht die Fernsteuerung",
         "Réveil automatique adaptatif": "Adaptives automatisches Aufwecken",

@@ -37,6 +37,23 @@ surnom renommable côté app ; `engine` = liste de `{class: Thermic|Electric, en
 Biologic}` — `energy` absent sur Electric).
 `id` ≠ VIN. Stocker `id` (config eqLogic `apiId`) et `vin` (`logicalId`).
 
+> **⚠️ `brand`/`label` présents dans le MODÈLE mais souvent VIDES au runtime (constaté recette, 2026-07-21)** :
+> `brand` et `label` sont bien des champs plats de `_embedded.vehicles[]` (modèle `models/vehicle.py`, lus
+> par `psa_car_controller.get_vehicles()`), mais **fréquemment vides** pour un compte donné → les champs
+> « Marque » et « Libellé » de la config eqLogic ne se remplissaient pas. Raisons : `label` = **surnom que
+> l'utilisateur définit dans l'app mobile** (souvent jamais renseigné ⇒ chaîne vide) ; `brand` **pas
+> toujours renvoyé par véhicule** alors qu'il est **connu au niveau du COMPTE** (config marque du slot).
+> ⚠️ **Conflit de références éclairant** : l'intégration HA `homeassistant-stellantis-vehicles` (endpoint
+> `CAR_API_VEHICLES_URL`, plus récent) ne lit **que** `id`/`vin`/`motorization`/`pictures` — **ni** `brand`
+> **ni** `label` — et lit la motorisation via un champ plat `motorization` (≠ `engine[]` du connectedcar v4).
+> **Décision plugin** : `brand` ⇒ **repli sur la marque du compte** (`getApiConfig($slot)['brand']` →
+> libellé via `LIBELLES_MARQUES`) quand le champ véhicule est vide (toujours renseigné) ; `label` ⇒
+> **écrit seulement si non vide** (jamais écrasé par du vide) + champ eqLogic **rendu éditable** (surnom
+> optionnel saisissable) ; nom d'équipement à la création = `marque + label` sinon `marque + 6 derniers
+> du VIN` (jamais nu/collision). Un `log::add('debug')` de la forme brute confirme le contenu réel par
+> compte (même pattern que `pictures`). Leçon transverse (§ 3, comme `/maintenance`/`/alerts`/`pictures`) :
+> un champ **présent dans le modèle Swagger n'est pas garanti peuplé au runtime**.
+
 > **`pictures` (UC52, 2026-07-15)** : typé `list[Url]` dans `models/vehicle.py`, mais `Url` y est un
 > **stub Swagger VIDE** et **aucune** référence (`psa_car_controller`, HA) ne lit ce champ → **shape
 > runtime NON vérifiée** (3ᵉ instance de la leçon `/maintenance`+`/alerts`). UC52 (photo modèle) le lit
