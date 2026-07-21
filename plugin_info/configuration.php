@@ -731,10 +731,19 @@ $otpSmsCount = stellantis::otpSmsCount();
         var lienTelechargement = document.createElement('a');
         lienTelechargement.href = URL.createObjectURL(blob);
         lienTelechargement.download = data.result.filename;
+        // Jeedom intercepte les clics <a> (navigation AJAX interne) et ferait un preventDefault +
+        // fetch de l'URL blob: (&ajax=1) → le téléchargement natif n'aurait jamais lieu. On stoppe la
+        // propagation AVANT que l'événement n'atteigne le handler délégué du core (body/document).
+        lienTelechargement.addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (e.stopImmediatePropagation) { e.stopImmediatePropagation(); }
+        });
         document.body.appendChild(lienTelechargement);
         lienTelechargement.click();
         document.body.removeChild(lienTelechargement);
-        URL.revokeObjectURL(lienTelechargement.href);
+        // Revoke différé : un revoke immédiat peut annuler le téléchargement en cours dans certains navigateurs.
+        var urlARevoquer = lienTelechargement.href;
+        setTimeout(function () { URL.revokeObjectURL(urlARevoquer); }, 1500);
         $('#stellantis_authPassphrase').val('');
         $('#stellantis_authPassphraseConfirm').val('');
         $('#div_alert').showAlert({ message: data.result.message, level: 'success' });
