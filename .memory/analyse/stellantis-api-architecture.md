@@ -213,6 +213,21 @@ C'est **le** piège conceptuel. Il y a deux systèmes de tokens **indépendants*
 - **Instabilité backend** : régressions Stellantis non documentées en 2024-2025 (erreurs 400,
   `NoneType` sur `get_vehicles()`) → logger finement les réponses HTTP, prévoir un **mode dégradé**.
 - **FCA hors périmètre** : Jeep/Fiat/Dodge/Ram/Alfa = infra différente (Uconnect/Smartcar), pas `idpcvs`.
+- **⚠️ Surface RCE du `otp_device` (pickle) — dette sécurité tracée (UC62, 2026-07-21)** : le device OTP
+  est un **`base64(pickle)`** désérialisé par `resources/otp_helper.py` via un **`pickle.loads()` NON
+  restreint** (`find_class` non surchargé ; le `RenameUnpickler` du vendor n'est qu'un shim de compat,
+  **pas** un contrôle de sécurité). Tant que ce blob ne provient que du cache config chiffré du plugin
+  (circuit fermé PHP→PSA→PHP), le risque est théorique. **UC62 (restauration depuis un fichier) ouvre une
+  1ʳᵉ porte d'ingestion EXTERNE** vers cette désérialisation. Atténuation UC62 : le fichier est **chiffré
+  authentifié** (AES-256-GCM + passphrase) et `storeOtpDevice()` n'est atteint qu'**après** vérification du
+  tag AEAD → sûr contre un attaquant qui **ignore** la passphrase, **mais pas** contre une fuite conjointe
+  fichier+passphrase (un pickle forgé sous la bonne passphrase ⇒ RCE sous l'utilisateur Apache/Jeedom lors
+  du prochain `runOtpHelper('code')`). **Décision (challenge advisor + utilisateur) : durcir
+  `pickle.loads()` est DIFFÉRÉ à une UC de durcissement dédiée** (unpickler restreint par préfixe de module
+  `otp_vendor.*`/`Cryptodome.*`/`copyreg.*`/`collections.*`, à valider en **recette OTP live** car un
+  allowlist mal calibré casse la génération de code → pilotage HS). Toute future UC touchant à l'import de
+  secrets, au chemin OTP, ou une passe sécurité transverse **doit** traiter ce point — cf. `62-tech.md`
+  § Hors périmètre et mémoire `[[stellantis-otp-pickle-rce-surface]]`.
 
 ---
 

@@ -51,6 +51,13 @@ try {
         ajax::success(stellantis::extractCredentialsFromApk((string) init('brand'), (string) init('country'), (string) init('apk_url'), $slotDemande));
     }
 
+    // UC62 — Restauration de la configuration d'authentification. AVANT le garde isConfigured() (comme
+    // extractCredentials) : une installation NEUVE à restaurer est précisément non configurée — sinon
+    // cette action serait inutilisable sur son cas d'usage principal (fix advisor).
+    if (init('action') == 'restoreAuth') {
+        ajax::success(stellantis::restoreAuthConfig((string) init('file'), (string) init('passphrase'), init('renew') == '1'));
+    }
+
     // Garde-fou autoload : appeler stellantis:: AVANT tout stellantisApi::/stellantisException
     // (l'autoloader Jeedom ne connaît que stellantis.class.php — cf. CLAUDE.md)
     // UC54 : garde GLOBALE inchangée (compte PRINCIPAL, slot 1) — un compte secondaire ne peut être
@@ -98,6 +105,12 @@ try {
     // (mappe stellantisException en interne, comme testConnection)
     if (init('action') == 'sync') {
         ajax::success(stellantis::syncVehicles());
+    }
+
+    // UC62 — Sauvegarde de la configuration d'authentification (n'a de sens que sur une instance déjà
+    // configurée, contrairement à restoreAuth ci-dessus). APRÈS le garde isConfigured().
+    if (init('action') == 'exportAuth') {
+        ajax::success(stellantis::exportAuthConfig((string) init('passphrase')));
     }
 
     throw new Exception(__('Aucune méthode correspondante à', __FILE__) . ' : ' . init('action'));

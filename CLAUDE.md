@@ -32,7 +32,7 @@ Un plugin Jeedom **n'est pas autonome** : il s'installe sous `<jeedom>/plugins/s
 PHP dépend du core Jeedom, atteint via `require_once __DIR__ . '/../../../../core/php/core.inc.php';`.
 Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 
-> **État d'avancement (2026-07-17)** : l'id a été renommé `template` → `stellantis` (classes
+> **État d'avancement (2026-07-21)** : l'id a été renommé `template` → `stellantis` (classes
 > `stellantis`/`stellantisCmd`, `info.json` id `stellantis`). **MVP lecture seule COMPLET** : UC01 à
 > UC10 sont implémentées (configuration du plugin, client HTTP REST, authentification OAuth2 PKCE/token,
 > test de connexion, découverte des véhicules, création/synchronisation des équipements, commandes info
@@ -713,6 +713,41 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > en **conservant** `Connexion au compte`@configuration.php (**vivante** — un même texte FR peut exister
 > dans 2 sections ⇒ jamais de suppression par texte global). Reviews croisées : **sécurité RAS**,
 > **qualité PASS** (0 finding). Spec technique : `84-tech.md`.
+> **Post-MVP : UC62** — **sauvegarde & restauration de la configuration d'authentification/activation**
+> (domaine configuration avancée, 100 % PHP, aucun appel réseau au cœur — seule la *reprise*
+> post-restauration best-effort touche le réseau) : exporter dans un **fichier JSON versionné chiffré**
+> l'auth/activation (identifiants OAuth **par slot** UC54 `client_id`/`client_secret`/`brand`/`country`/
+> `redirect_uri` ; OTP/CID/broker slot 1 : `otp_device`/`otp_sms_count`/`otp_sms_pending`/`customer_id`/
+> `broker_host`/`socketport` ; tokens OAuth+remote **best-effort**), pour restaurer sur une **install neuve
+> SANS reconsommer de SMS** (quota dur 20/vie). ⚠️ **Chiffrement AT-REST propre à l'instance ⇒ non
+> portable** : l'export **déchiffre** (`config::byKey` auto pour `client_secret*` ; `readOtpDevice()` ;
+> nouveaux accesseurs `stellantisApi::export/importTokenCache`/`export/importRemoteTokenCache`), l'import
+> **re-chiffre** avec la clé de la nouvelle instance (cf. mémoire `jeedom-encrypt-config-key`). **Sécurité
+> critique** : le fichier transporte des secrets HORS de la protection Jeedom → **chiffrement AUTHENTIFIÉ
+> AES-256-GCM** (`openssl_encrypt/decrypt`, `OPENSSL_RAW_DATA`, tag 16 o), clé **PBKDF2-SHA256 210000 iter**
+> (sel 16 o + IV 12 o `random_bytes`, itérations lues de la constante **jamais** du fichier = anti-DoS), tag
+> invalide (mauvaise passphrase / fichier forgé) ⇒ **refus net, AUCUNE écriture**, message générique
+> indistinct. ⚠️ **Invariant pickle préservé** : `otp_device` (= `base64(pickle)` désérialisé par
+> `otp_helper.py`) n'est réécrit qu'**après** succès du tag AEAD, jamais passé au helper pendant la
+> restauration ; **le durcissement du `pickle.loads()` non restreint est DIFFÉRÉ à une UC dédiée** (dette
+> tracée — cf. `stellantis-api-architecture.md` § 1.4 + mémoire `stellantis-otp-pickle-rce-surface`).
+> Méthodes `stellantis::exportAuthConfig()`/`restoreAuthConfig()` (+ helpers purs `chiffrerPayloadAuth`/
+> `dechiffrerFichierAuth`/`opensslGcmDisponible`/`validerGardesAuth`, IO `collecterPayloadAuth`/
+> `appliquerPayloadAuth`) ; consts `AUTH_EXPORT_SCHEMA_VERSION=1`/`AUTH_EXPORT_PBKDF2_ITER`/
+> `AUTH_EXPORT_TAILLE_MAX=1 Mo`/`AUTH_PASSPHRASE_MIN=12`. **2 actions AJAX** admin-only :
+> `restoreAuth` placée **AVANT** le garde `isConfigured()` (install neuve = non configurée), `exportAuth`
+> **après**. **Download/upload SANS `$_FILES`** : export renvoie `{content:base64(fichier),filename}` →
+> **Blob + `<a download>`** côté JS ; restore lit le fichier via `FileReader`→base64→POST standard (token
+> CSRF natif, **aucun fichier temporaire serveur**). Validation stricte **avant toute écriture** (openssl
+> dispo → passphrase ≥12 → plafond taille avant decode → `plugin=='stellantis'` → `schema_version` connu
+> sinon refus explicite → longueurs AEAD 16/12/16 → tag) ; restauration **idempotente/ré-exécutable**
+> (chaque écriture isolée `try/catch`, **rapport d'erreurs consommé** en log + synthèse) ; `otp_sms_count`
+> restauré via **`max(actuel, importé)`** (jamais de régression du compteur à vie) ; reprise post-restore
+> **OPT-IN** (case `renew` → `renewRemoteToken()` sans SMS, au pire 1 code du quota 6/24 h) + best-effort
+> `resolveCustomerId`/`reconnecterDemonSiLance`. Nouveau fieldset « Sauvegarde & restauration » dans
+> `configuration.txt`. Reviews croisées : **sécurité RAS** (après fix : garde `json_encode false`,
+> longueurs AEAD, gardes `is_string`), **qualité PASS** (après fix : rapport d'erreurs consommé, catch
+> aligné, helper `validerGardesAuth`). Spec technique : `62-tech.md`.
 > Suite = post-MVP (supervision, robustesse, livraison…).
 > Cette note est
 > **mise à jour en fin de chaque `/feature`** (dernière étape du workflow) — elle reflète l'avancement

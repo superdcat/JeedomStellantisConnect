@@ -2789,6 +2789,390 @@ class stellantis extends eqLogic {
     cache::delete(self::DAEMON_CONN_STATE_KEY);
   }
 
+  /* * ******************* UC62 — Sauvegarde & restauration de la configuration d'authentification ******************* */
+
+  const AUTH_EXPORT_SCHEMA_VERSION = 1;
+  const AUTH_EXPORT_PBKDF2_ITER = 210000;
+  const AUTH_EXPORT_TAILLE_MAX = 1048576; // 1 Mo : plafond du fichier restauré (avant tout decode/openssl_decrypt, anti-DoS mémoire)
+  const AUTH_PASSPHRASE_MIN = 12;
+
+  // Garde de dépendance : le chiffrement authentifié (AEAD) requiert ext-openssl avec le cipher
+  // aes-256-gcm. Quasi toujours présent (Debian/Raspberry Pi) : vérifié au runtime pour un refus
+  // explicite propre plutôt qu'un openssl_encrypt/decrypt qui échouerait silencieusement (false).
+  private static function opensslGcmDisponible(): bool {
+    if (!extension_loaded('openssl')) {
+      return false;
+    }
+    return in_array('aes-256-gcm', array_map('strtolower', openssl_get_cipher_methods()), true);
+  }
+
+  /**
+   * UC62 — Chiffre le payload EN CLAIR en fichier JSON versionné complet (AES-256-GCM, clé dérivée
+   * PBKDF2/SHA-256, sel + IV aléatoires). Pure (aucune IO Jeedom) : uniquement de la crypto + structuration.
+   * @throws stellantisException si le chiffrement échoue (openssl_encrypt renvoie false)
+   */
+  private static function chiffrerPayloadAuth(array $_clair, string $_passphrase): string {
+    $sel = random_bytes(16);
+    $iv = random_bytes(12);
+    $cle = hash_pbkdf2('sha256', $_passphrase, $sel, self::AUTH_EXPORT_PBKDF2_ITER, 32, true);
+    $tag = '';
+    // Garde JSON (review UC62 #1) : json_encode() peut renvoyer false (donnée non-UTF-8 dans un secret) —
+    // sans cette garde, une coercion implicite en '' produirait une sauvegarde VIDE chiffrée avec succès,
+    // découverte seulement à la restauration. Refus net AVANT tout chiffrement.
+    $json = json_encode($_clair);
+    if ($json === false) {
+      throw new stellantisException(__('Échec du chiffrement de la sauvegarde.', __FILE__), 0, 'invalid_input');
+    }
+    $chiffre = openssl_encrypt($json, 'aes-256-gcm', $cle, OPENSSL_RAW_DATA, $iv, $tag, '', 16);
+    if ($chiffre === false) {
+      throw new stellantisException(__('Échec du chiffrement de la sauvegarde.', __FILE__), 0, 'invalid_input');
+    }
+    return json_encode(array(
+      'plugin' => 'stellantis',
+      'schema_version' => self::AUTH_EXPORT_SCHEMA_VERSION,
+      'exported_at' => gmdate('c'),
+      'kdf' => array('algo' => 'pbkdf2', 'hash' => 'sha256', 'iter' => self::AUTH_EXPORT_PBKDF2_ITER, 'salt' => base64_encode($sel)),
+      'cipher' => 'aes-256-gcm',
+      'iv' => base64_encode($iv),
+      'tag' => base64_encode($tag),
+      'data' => base64_encode($chiffre),
+    ));
+  }
+
+  /**
+   * UC62 — Déchiffre + valide STRICTEMENT un fichier de sauvegarde (structure, version, tag AEAD),
+   * AVANT toute écriture (appelée uniquement par restoreAuthConfig). La dérivation de clé utilise
+   * TOUJOURS la constante AUTH_EXPORT_PBKDF2_ITER (jamais une valeur lue dans le fichier) : un fichier
+   * forgé ne peut donc jamais imposer un coût de dérivation arbitraire (anti-DoS).
+   * @throws stellantisException 'invalid_input' — message volontairement générique pour le refus de tag
+   *         (mauvaise passphrase / fichier corrompu / fichier forgé sont indistinguables), jamais de
+   *         passphrase ni de ciphertext dans le message.
+   */
+  private static function dechiffrerFichierAuth(string $_fichierJson, string $_passphrase): array {
+    $fichier = json_decode($_fichierJson, true);
+    if (!is_array($fichier) || ($fichier['plugin'] ?? '') !== 'stellantis' || ($fichier['cipher'] ?? '') !== 'aes-256-gcm') {
+      throw new stellantisException(__('Fichier de sauvegarde invalide (format non reconnu).', __FILE__), 0, 'invalid_input');
+    }
+    $version = (int) ($fichier['schema_version'] ?? 0);
+    if ($version !== self::AUTH_EXPORT_SCHEMA_VERSION) {
+      throw new stellantisException(sprintf(__('Version de sauvegarde non prise en charge (%d).', __FILE__), $version), 0, 'invalid_input');
+    }
+    $kdf = is_array($fichier['kdf'] ?? null) ? $fichier['kdf'] : array();
+    $selBrut = $kdf['salt'] ?? '';
+    $ivBrut = $fichier['iv'] ?? '';
+    $tagBrut = $fichier['tag'] ?? '';
+    $dataBrut = $fichier['data'] ?? '';
+    // Garde de type (review UC62 #3) : un champ non-scalaire (ex. sous-tableau JSON forgé) déclencherait
+    // un warning « Array to string conversion » avant tout cast — rejet net et silencieux, AVANT cast.
+    if (!is_string($selBrut) || !is_string($ivBrut) || !is_string($tagBrut) || !is_string($dataBrut)) {
+      throw new stellantisException(__('Fichier de sauvegarde invalide (format non reconnu).', __FILE__), 0, 'invalid_input');
+    }
+    $sel = base64_decode($selBrut, true);
+    $iv = base64_decode($ivBrut, true);
+    $tag = base64_decode($tagBrut, true);
+    $data = base64_decode($dataBrut, true);
+    if ($sel === false || $iv === false || $tag === false || $data === false || $sel == '' || $iv == '' || $tag == '' || $data == '') {
+      throw new stellantisException(__('Fichier de sauvegarde invalide (format non reconnu).', __FILE__), 0, 'invalid_input');
+    }
+    // Longueurs AEAD EXACTES (review UC62 #2) : la seule non-vacuité ne suffit pas — un tag/IV/sel tronqué
+    // affaiblirait l'authentification GCM. Mêmes tailles que chiffrerPayloadAuth (16/12/16 octets).
+    if (strlen($sel) !== 16 || strlen($iv) !== 12 || strlen($tag) !== 16) {
+      throw new stellantisException(__('Fichier de sauvegarde invalide (format non reconnu).', __FILE__), 0, 'invalid_input');
+    }
+    $cle = hash_pbkdf2('sha256', $_passphrase, $sel, self::AUTH_EXPORT_PBKDF2_ITER, 32, true);
+    $clairJson = openssl_decrypt($data, 'aes-256-gcm', $cle, OPENSSL_RAW_DATA, $iv, $tag);
+    if ($clairJson === false) {
+      // Refus net : ni écriture, ni indice permettant de distinguer une mauvaise passphrase d'un fichier
+      // forgé (l'invariant pickle de storeOtpDevice() dépend de ce refus étanche — cf. otp_device ci-dessous).
+      throw new stellantisException(__('Fichier invalide ou passphrase incorrecte.', __FILE__), 0, 'invalid_input');
+    }
+    $clair = json_decode($clairJson, true);
+    if (!is_array($clair) || !isset($clair['accounts']) || !is_array($clair['accounts']) || count($clair['accounts']) === 0) {
+      throw new stellantisException(__('Fichier invalide ou passphrase incorrecte.', __FILE__), 0, 'invalid_input');
+    }
+    return $clair;
+  }
+
+  /**
+   * UC62 — Construit le payload EN CLAIR de sauvegarde depuis les slots configurés (UC54) + OTP/CID/
+   * broker (slot 1 uniquement) + tokens best-effort. Lecture pure (config::byKey déchiffre déjà
+   * automatiquement client_secret* via $_encryptConfigKey) : aucun appel réseau, aucune écriture.
+   */
+  private static function collecterPayloadAuth(): array {
+    $clair = array('accounts' => array());
+    foreach (self::slotsConfigures() as $slot) {
+      $compte = array();
+      foreach (array('client_id', 'client_secret', 'brand', 'country', 'redirect_uri') as $champ) {
+        $compte[$champ] = trim((string) config::byKey(self::configKeyForSlot($champ, $slot), 'stellantis'));
+      }
+      $clair['accounts'][(string) $slot] = $compte;
+    }
+
+    // OTP / CID / broker = SLOT 1 UNIQUEMENT (pilotage à distance mono-compte, cf. UC12/UC54)
+    $device = self::readOtpDevice();
+    if ($device !== null) {
+      $clair['otp'] = array(
+        'device' => $device,
+        'sms_count' => self::otpSmsCount(),
+        'sms_pending' => (string) config::byKey(self::OTP_SMS_PENDING_KEY, 'stellantis', ''),
+      );
+    }
+    $cid = self::getCustomerId();
+    if ($cid != '') {
+      $clair['customer_id'] = $cid;
+    }
+    $brokerHost = trim((string) config::byKey('broker_host', 'stellantis'));
+    $socketport = trim((string) config::byKey('socketport', 'stellantis'));
+    if ($brokerHost != '' || $socketport != '') {
+      $clair['broker'] = array('broker_host' => $brokerHost, 'socketport' => $socketport);
+    }
+
+    // Tokens best-effort (jamais garantis : durée de vie courte, rotation serveur — simples accélérateurs)
+    $tokensOauth = array();
+    foreach (self::slotsConfigures() as $slot) {
+      $t = stellantisApi::exportTokenCache($slot);
+      if ($t !== null) {
+        $tokensOauth[(string) $slot] = $t;
+      }
+    }
+    $tokenRemote = stellantisApi::exportRemoteTokenCache();
+    if (count($tokensOauth) > 0 || $tokenRemote !== null) {
+      $clair['tokens'] = array();
+      if (count($tokensOauth) > 0) {
+        $clair['tokens']['oauth'] = $tokensOauth;
+      }
+      if ($tokenRemote !== null) {
+        $clair['tokens']['remote'] = $tokenRemote;
+      }
+    }
+    return $clair;
+  }
+
+  /**
+   * UC62 — Réécrit la config/cache DE L'INSTANCE COURANTE depuis le payload en clair déjà validé
+   * (jamais appelée avant dechiffrerFichierAuth). Chaque écriture est isolée (try/catch \Throwable,
+   * jamais de rollback transactionnel — la restauration est idempotente/ré-exécutable). Retourne un
+   * rapport {comptes:int[], otp:bool, pilotage:bool, erreurs:string[]} consommé par restoreAuthConfig
+   * pour construire le message de synthèse (jamais un simple OK/KO opaque).
+   */
+  private static function appliquerPayloadAuth(array $_clair, bool $_renew): array {
+    $rapport = array('comptes' => array(), 'otp' => false, 'pilotage' => false, 'erreurs' => array());
+    $accounts = is_array($_clair['accounts'] ?? null) ? $_clair['accounts'] : array();
+    foreach ($accounts as $slotBrut => $compte) {
+      $slot = (int) $slotBrut;
+      if ($slot < 1 || $slot > self::MAX_ACCOUNTS || !is_array($compte)) {
+        continue;
+      }
+      try {
+        foreach (array('client_id', 'client_secret', 'brand', 'country', 'redirect_uri') as $champ) {
+          if (isset($compte[$champ])) {
+            config::save(self::configKeyForSlot($champ, $slot), (string) $compte[$champ], 'stellantis');
+          }
+        }
+        $rapport['comptes'][] = $slot;
+      } catch (\Throwable $e) {
+        $rapport['erreurs'][] = 'compte ' . $slot;
+      }
+    }
+
+    // Cohérence slot 1 (fix advisor) : otp_device jamais réécrit sans les identifiants slot 1 DU MÊME
+    // fichier (jamais de device orphelin incohérent avec des credentials qui viendraient d'ailleurs).
+    $slot1Restaure = in_array(1, $rapport['comptes'], true);
+    $otp = is_array($_clair['otp'] ?? null) ? $_clair['otp'] : null;
+    // Garde de type (review UC62 #3) : 'device'/'sms_pending' non-scalaires (sous-tableau JSON forgé)
+    // déclencheraient un warning « Array to string conversion » avant cast — is_string/is_scalar AVANT.
+    if ($slot1Restaure && $otp !== null && isset($otp['device']) && is_string($otp['device']) && $otp['device'] !== '') {
+      try {
+        self::storeOtpDevice($otp['device']);
+        // Ne redescend JAMAIS le compteur à vie (quota dur, définitif côté serveur) : max(actuel, importé).
+        $compteActuel = self::otpSmsCount();
+        $compteImporte = isset($otp['sms_count']) ? (int) $otp['sms_count'] : 0;
+        config::save(self::OTP_SMS_COUNT_KEY, (string) max($compteActuel, $compteImporte), 'stellantis');
+        $smsPending = (isset($otp['sms_pending']) && is_scalar($otp['sms_pending'])) ? (string) $otp['sms_pending'] : '';
+        config::save(self::OTP_SMS_PENDING_KEY, $smsPending, 'stellantis');
+        $rapport['otp'] = true;
+      } catch (\Throwable $e) {
+        $rapport['erreurs'][] = 'otp';
+      }
+    }
+
+    if ($slot1Restaure && !empty($_clair['customer_id'])) {
+      try {
+        config::save('customer_id', (string) $_clair['customer_id'], 'stellantis');
+      } catch (\Throwable $e) {
+        $rapport['erreurs'][] = 'customer_id';
+      }
+    }
+
+    if ($slot1Restaure && is_array($_clair['broker'] ?? null)) {
+      try {
+        if (!empty($_clair['broker']['broker_host'])) {
+          config::save('broker_host', (string) $_clair['broker']['broker_host'], 'stellantis');
+        }
+        if (!empty($_clair['broker']['socketport'])) {
+          config::save('socketport', (string) $_clair['broker']['socketport'], 'stellantis');
+        }
+      } catch (\Throwable $e) {
+        $rapport['erreurs'][] = 'broker';
+      }
+    }
+
+    // Tokens best-effort, SEULEMENT pour un compte dont les identifiants viennent d'être restaurés avec
+    // succès (jamais un token orphelin sur un slot absent du fichier ou en échec d'écriture ci-dessus).
+    $tokens = is_array($_clair['tokens'] ?? null) ? $_clair['tokens'] : array();
+    if (is_array($tokens['oauth'] ?? null)) {
+      foreach ($tokens['oauth'] as $slotBrut => $tokenSlot) {
+        $slot = (int) $slotBrut;
+        if (!in_array($slot, $rapport['comptes'], true) || !is_array($tokenSlot)) {
+          continue;
+        }
+        try {
+          stellantisApi::importTokenCache($slot, $tokenSlot);
+        } catch (\Throwable $e) {
+          // best-effort : token périmé/malformé ignoré silencieusement (non critique, cf. spec)
+        }
+      }
+    }
+    if ($slot1Restaure && is_array($tokens['remote'] ?? null)) {
+      try {
+        stellantisApi::importRemoteTokenCache($tokens['remote']);
+      } catch (\Throwable $e) {
+        // best-effort
+      }
+    }
+
+    // Reprise best-effort (chacune isolée, ne lève JAMAIS) : CID, pilotage sans SMS (opt-in), démon.
+    if ($slot1Restaure) {
+      try {
+        self::resolveCustomerId();
+      } catch (\Throwable $e) {
+      }
+      try {
+        if ($_renew && !stellantisApi::hasRemoteToken() && self::hasOtpDevice()) {
+          $resultatRenew = self::renewRemoteToken();
+          $rapport['pilotage'] = !empty($resultatRenew['ok']);
+        } else {
+          $rapport['pilotage'] = stellantisApi::hasRemoteToken();
+        }
+      } catch (\Throwable $e) {
+      }
+      try {
+        self::reconnecterDemonSiLance();
+      } catch (\Throwable $e) {
+      }
+    }
+
+    return $rapport;
+  }
+
+  /**
+   * UC62 — Gardes communes à l'export ET à la restauration (review UC62 #6, anti-duplication) : garde de
+   * dépendance openssl + longueur minimale de la passphrase. Retourne null si tout est OK, sinon un
+   * {ok:false, message} prêt à être renvoyé tel quel par l'appelant (exportAuthConfig/restoreAuthConfig).
+   */
+  private static function validerGardesAuth(string $_passphrase): ?array {
+    if (!self::opensslGcmDisponible()) {
+      return array('ok' => false, 'message' => __('Chiffrement AES-256-GCM indisponible sur ce serveur (extension openssl requise).', __FILE__));
+    }
+    if (mb_strlen($_passphrase, 'UTF-8') < self::AUTH_PASSPHRASE_MIN) {
+      return array('ok' => false, 'message' => sprintf(__('Choisissez une passphrase d\'au moins %d caractères.', __FILE__), self::AUTH_PASSPHRASE_MIN));
+    }
+    return null;
+  }
+
+  /**
+   * UC62 — Génère le fichier de sauvegarde de l'authentification/activation (tous les comptes configurés,
+   * OTP/CID/broker slot 1, tokens best-effort), chiffré par $_passphrase. Retour uniforme {ok, message}
+   * (+ {filename, content:base64(fichier)} si ok) — jamais de levée, jamais de secret loggué.
+   */
+  public static function exportAuthConfig(string $_passphrase): array {
+    $erreurGarde = self::validerGardesAuth($_passphrase);
+    if ($erreurGarde !== null) {
+      return $erreurGarde;
+    }
+    try {
+      $clair = self::collecterPayloadAuth();
+      if (count($clair['accounts']) === 0) {
+        return array('ok' => false, 'message' => __('Aucun compte configuré à sauvegarder.', __FILE__));
+      }
+      $fichier = self::chiffrerPayloadAuth($clair, $_passphrase);
+    } catch (\Throwable $e) {
+      // Message statique (review UC62 #5, aligné sur le pattern défensif de restoreAuthConfig) : ne jamais
+      // logguer $e->getMessage() ici, par précaution contre une future exception qui embarquerait une
+      // donnée sensible (le contenu exact des exceptions internes n'est pas figé/audité comme un contrat).
+      log::add('stellantis', 'warning', 'UC62 : échec de la génération de la sauvegarde');
+      return array('ok' => false, 'message' => __('Échec de la génération de la sauvegarde.', __FILE__));
+    }
+    $nbComptes = count($clair['accounts']);
+    $avecOtp = isset($clair['otp']);
+    log::add('stellantis', 'info', 'UC62 : sauvegarde générée (' . $nbComptes . ' compte(s)' . ($avecOtp ? ', OTP inclus' : '') . ')');
+    return array(
+      'ok' => true,
+      'filename' => 'stellantis-auth-' . date('Ymd-His') . '.json',
+      'content' => base64_encode($fichier),
+      'message' => __('Sauvegarde générée. Conservez ce fichier ET sa passphrase en lieu sûr, jamais par le même canal.', __FILE__),
+    );
+  }
+
+  /**
+   * UC62 — Restaure la configuration d'authentification/activation depuis un fichier de sauvegarde
+   * (reçu en base64, $_fichierB64 — jamais persisté sur disque). Toute la validation + le déchiffrement
+   * se font AVANT la moindre écriture (aucun état à moitié restauré sur entrée invalide). $_renew (opt-in,
+   * défaut false) autorise UN renouvellement du remote token (consomme 1 unité du quota 6/24 h) si le
+   * pilotage n'est pas déjà actif après restauration. Retour uniforme {ok, message}, jamais de levée.
+   */
+  public static function restoreAuthConfig(string $_fichierB64, string $_passphrase, bool $_renew = false): array {
+    $erreurGarde = self::validerGardesAuth($_passphrase);
+    if ($erreurGarde !== null) {
+      return $erreurGarde;
+    }
+    // Anti-DoS mémoire : plafond AVANT tout decode (marge ×2 pour l'overhead base64 du b64-du-b64 côté JS)
+    if (strlen($_fichierB64) > self::AUTH_EXPORT_TAILLE_MAX * 2) {
+      log::add('stellantis', 'warning', 'UC62 : restauration refusée (fichier trop volumineux)');
+      return array('ok' => false, 'message' => __('Fichier de sauvegarde trop volumineux : restauration refusée.', __FILE__));
+    }
+    $fichierJson = base64_decode($_fichierB64, true);
+    if ($fichierJson === false || $fichierJson == '') {
+      log::add('stellantis', 'warning', 'UC62 : restauration refusée (fichier illisible)');
+      return array('ok' => false, 'message' => __('Fichier de sauvegarde invalide (format non reconnu).', __FILE__));
+    }
+    if (strlen($fichierJson) > self::AUTH_EXPORT_TAILLE_MAX) {
+      log::add('stellantis', 'warning', 'UC62 : restauration refusée (fichier trop volumineux)');
+      return array('ok' => false, 'message' => __('Fichier de sauvegarde trop volumineux : restauration refusée.', __FILE__));
+    }
+    try {
+      $clair = self::dechiffrerFichierAuth($fichierJson, $_passphrase);
+    } catch (stellantisException $e) {
+      log::add('stellantis', 'warning', 'UC62 : restauration refusée (' . $e->getMessage() . ')');
+      return array('ok' => false, 'message' => $e->getMessage());
+    } catch (\Throwable $e) {
+      log::add('stellantis', 'warning', 'UC62 : restauration refusée (échec inattendu)');
+      return array('ok' => false, 'message' => __('Fichier invalide ou passphrase incorrecte.', __FILE__));
+    }
+
+    $rapport = self::appliquerPayloadAuth($clair, $_renew);
+    $nbComptes = count($rapport['comptes']);
+    log::add('stellantis', 'info', 'UC62 : restauration OK (' . $nbComptes . ' compte(s)' . ($rapport['otp'] ? ', OTP restauré' : '') . ')');
+
+    $synthese = array(sprintf(__('Restauration réussie : %d compte(s) restauré(s).', __FILE__), $nbComptes));
+    if ($rapport['otp']) {
+      $synthese[] = $rapport['pilotage']
+        ? __('Pilotage à distance restauré.', __FILE__)
+        : __('Utilisez « Renouveler le jeton distant » pour réactiver le pilotage.', __FILE__);
+    }
+    $synthese[] = __('Lancez la découverte des véhicules pour recréer les équipements.', __FILE__);
+    $synthese[] = __('Si la connexion reste en erreur, refaites l\'échange d\'autorisation (bouton OAuth).', __FILE__);
+    // Review UC62 #4 : $rapport['erreurs'] était alimenté par appliquerPayloadAuth() mais jamais consommé
+    // ici — un échec partiel (otp/customer_id/broker/compte N) retournait {ok:true, "Restauration
+    // réussie"} sans AUCUNE trace, contredisant le docblock d'appliquerPayloadAuth (« jamais un simple
+    // OK/KO opaque »). Les libellés ('compte N', 'otp', 'customer_id', 'broker') ne sont pas sensibles.
+    if (!empty($rapport['erreurs'])) {
+      log::add('stellantis', 'warning', 'UC62 : restauration partielle, échecs sur : ' . implode(', ', $rapport['erreurs']));
+      $synthese[] = sprintf(__('Certains éléments n\'ont pas pu être restaurés (%s).', __FILE__), implode(', ', $rapport['erreurs']));
+    }
+    return array('ok' => true, 'message' => implode(' ', $synthese));
+  }
+
   /* * ******************* UC13 — Wakeup / rafraîchissement à la demande ******************* */
 
   const WAKEUP_SERVICE = '/VehCharge/state';                     // segment de service du topic MQTT (contrat RemoteClient.wakeup)
@@ -5558,6 +5942,30 @@ class stellantisApi {
   }
 
   /**
+   * UC62 — Exporte le cache token OAuth2 DÉCHIFFRÉ du compte $_slot (pour la sauvegarde d'authentification).
+   * Lecture pure : ne purge ni ne rafraîchit rien, aucun appel réseau. Null si absent/illisible.
+   */
+  public static function exportTokenCache(int $_slot = 1): ?array {
+    return self::readTokenCache($_slot);
+  }
+
+  /**
+   * UC62 — Réimporte un token OAuth2 EN CLAIR dans le cache DU COMPTE $_slot (re-chiffré à l'écriture,
+   * même format que storeTokenResponse). Best-effort : un token malformé (champs manquants) est ignoré
+   * silencieusement — l'appelant (restauration) ne doit jamais échouer sur un token best-effort.
+   */
+  public static function importTokenCache(int $_slot, array $_token): void {
+    if (!isset($_token['access_token']) || $_token['access_token'] == '' || !isset($_token['exp'])) {
+      return;
+    }
+    cache::set(self::cacheKeyForSlot(self::TOKEN_CACHE_KEY, $_slot), utils::encrypt(json_encode(array(
+      'access_token' => (string) $_token['access_token'],
+      'refresh_token' => (string) ($_token['refresh_token'] ?? ''),
+      'exp' => (int) $_token['exp'],
+    ))), 0);
+  }
+
+  /**
    * Rafraîchit l'access_token DU COMPTE $_slot (rotation du refresh_token persistée).
    * Concurrence sans mutex : sur invalid_grant, si le refresh_token en cache diffère de celui qui a
    * échoué, un process concurrent a déjà tourné le token → on rend le cache (un seul niveau, pas de
@@ -5947,6 +6355,29 @@ class stellantisApi {
 
   public static function purgeRemoteTokenCache(): void {
     cache::delete(self::REMOTE_TOKEN_CACHE_KEY);
+  }
+
+  /**
+   * UC62 — Exporte le remote token OTP DÉCHIFFRÉ (mono-compte, slot 1) pour la sauvegarde
+   * d'authentification. Lecture pure, aucun appel réseau. Null si absent/illisible.
+   */
+  public static function exportRemoteTokenCache(): ?array {
+    return self::readRemoteTokenCache();
+  }
+
+  /**
+   * UC62 — Réimporte le remote token OTP EN CLAIR (re-chiffré à l'écriture, même format que
+   * storeRemoteTokenResponse). Best-effort : un token malformé est ignoré silencieusement.
+   */
+  public static function importRemoteTokenCache(array $_token): void {
+    if (!isset($_token['access_token']) || $_token['access_token'] == '' || !isset($_token['exp'])) {
+      return;
+    }
+    cache::set(self::REMOTE_TOKEN_CACHE_KEY, utils::encrypt(json_encode(array(
+      'access_token' => (string) $_token['access_token'],
+      'refresh_token' => (string) ($_token['refresh_token'] ?? ''),
+      'exp' => (int) $_token['exp'],
+    ))), 0);
   }
 
   // Persiste la réponse remote token (chiffrée) ; conserve l'ancien refresh si non renvoyé. TTL par

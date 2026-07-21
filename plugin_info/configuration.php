@@ -360,6 +360,49 @@ $otpSmsCount = stellantis::otpSmsCount();
       </div>
     </div>
   </fieldset>
+  <fieldset>
+    <legend><i class="fas fa-file-export"></i> {{Sauvegarde & restauration de l'authentification}}</legend>
+    <div class="alert alert-warning">{{Ce fichier contient vos identifiants et votre appareil OTP (les « clés » de votre compte). Chiffrez-le avec une passphrase forte, conservez-le en lieu sûr, et ne transmettez jamais le fichier et la passphrase par le même canal.}}</div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{Passphrase}}</label>
+      <div class="col-md-4">
+        <input type="password" autocomplete="new-password" class="form-control" id="stellantis_authPassphrase" placeholder="{{Passphrase}}"/>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{Confirmer la passphrase}}</label>
+      <div class="col-md-4">
+        <input type="password" autocomplete="new-password" class="form-control" id="stellantis_authPassphraseConfirm" placeholder="{{Confirmer la passphrase}}"/>
+        <div class="help-block">{{La confirmation ne s'applique qu'à la sauvegarde.}}</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label"></label>
+      <div class="col-md-6">
+        <a class="btn btn-default" id="stellantis_btAuthExport"><i class="fas fa-download"></i> {{Sauvegarder la configuration d'authentification}}</a>
+        <div class="help-block">{{La passphrase n'est jamais stockée : sans elle, le fichier est inutilisable.}}</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label">{{Fichier de sauvegarde}}</label>
+      <div class="col-md-6">
+        <input type="file" class="form-control" id="stellantis_authFile" accept=".json"/>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label"></label>
+      <div class="col-md-6">
+        <label class="checkbox-inline"><input type="checkbox" id="stellantis_authRenew"/> {{Tenter de réactiver le pilotage à distance maintenant (consomme 1 code du quota journalier)}}</label>
+        <div class="help-block">{{Renouvelle le jeton distant sans consommer de SMS d'activation, contrairement à une nouvelle activation complète.}}</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="col-md-4 control-label"></label>
+      <div class="col-md-6">
+        <a class="btn btn-warning" id="stellantis_btAuthRestore"><i class="fas fa-upload"></i> {{Restaurer}}</a>
+      </div>
+    </div>
+  </fieldset>
 </form>
 <script>
   $('body').off('click', '#stellantis_btExtraireApk').on('click', '#stellantis_btExtraireApk', function () {
@@ -647,5 +690,106 @@ $otpSmsCount = stellantis::otpSmsCount();
         $('#div_alert').showAlert({ message: data.result.message, level: data.result.ok ? 'success' : 'warning' });
       }
     });
+  });
+  // UC62 — Sauvegarde de la configuration d'authentification : téléchargement navigateur (Blob + <a
+  // download>), aucun fichier temporaire côté serveur. content = base64 du fichier JSON complet.
+  $('body').off('click', '#stellantis_btAuthExport').on('click', '#stellantis_btAuthExport', function () {
+    var passphrase = $('#stellantis_authPassphrase').val();
+    var confirmPassphrase = $('#stellantis_authPassphraseConfirm').val();
+    if (passphrase.length < 12) {
+      $('#div_alert').showAlert({ message: "{{Passphrase trop courte (12 caractères minimum)}}", level: 'warning' });
+      return;
+    }
+    if (passphrase !== confirmPassphrase) {
+      $('#div_alert').showAlert({ message: "{{Les deux passphrases sont différentes}}", level: 'warning' });
+      return;
+    }
+    $('#div_alert').showAlert({ message: "{{Sauvegarde en cours…}}", level: 'info' });
+    $.ajax({
+      type: 'POST',
+      url: 'plugins/stellantis/core/ajax/stellantis.ajax.php',
+      data: { action: 'exportAuth', passphrase: passphrase },
+      dataType: 'json',
+      error: function (request, status, error) {
+        handleAjaxError(request, status, error);
+      },
+      success: function (data) {
+        if (data.state != 'ok') {
+          $('#div_alert').showAlert({ message: data.result, level: 'danger' });
+          return;
+        }
+        if (!data.result.ok) {
+          $('#div_alert').showAlert({ message: data.result.message, level: 'danger' });
+          return;
+        }
+        var octets = atob(data.result.content);
+        var tableauOctets = new Uint8Array(octets.length);
+        for (var i = 0; i < octets.length; i++) {
+          tableauOctets[i] = octets.charCodeAt(i);
+        }
+        var blob = new Blob([tableauOctets], { type: 'application/json' });
+        var lienTelechargement = document.createElement('a');
+        lienTelechargement.href = URL.createObjectURL(blob);
+        lienTelechargement.download = data.result.filename;
+        document.body.appendChild(lienTelechargement);
+        lienTelechargement.click();
+        document.body.removeChild(lienTelechargement);
+        URL.revokeObjectURL(lienTelechargement.href);
+        $('#stellantis_authPassphrase').val('');
+        $('#stellantis_authPassphraseConfirm').val('');
+        $('#div_alert').showAlert({ message: data.result.message, level: 'success' });
+      }
+    });
+  });
+  // UC62 — Restauration : lit le fichier sélectionné (FileReader.readAsText, jamais de disque serveur),
+  // l'encode en base64 côté client (UTF-8 safe), confirme l'écrasement, puis POST classique ($.ajax
+  // encode correctement +/// = via encodeURIComponent : pas besoin de base64url).
+  $('body').off('click', '#stellantis_btAuthRestore').on('click', '#stellantis_btAuthRestore', function () {
+    var passphrase = $('#stellantis_authPassphrase').val();
+    var fichiers = document.getElementById('stellantis_authFile').files;
+    if (passphrase.length < 12) {
+      $('#div_alert').showAlert({ message: "{{Passphrase trop courte (12 caractères minimum)}}", level: 'warning' });
+      return;
+    }
+    if (!fichiers || fichiers.length === 0) {
+      $('#div_alert').showAlert({ message: "{{Sélectionnez d'abord un fichier de sauvegarde}}", level: 'warning' });
+      return;
+    }
+    var renew = $('#stellantis_authRenew').is(':checked');
+    bootbox.confirm(
+      "{{La configuration d'authentification actuelle sera remplacée par le contenu du fichier. Continuer ?}}",
+      function (resultat) {
+        if (!resultat) {
+          return;
+        }
+        var lecteur = new FileReader();
+        lecteur.onload = function (evenement) {
+          var contenuBase64 = btoa(unescape(encodeURIComponent(evenement.target.result)));
+          $('#div_alert').showAlert({ message: "{{Restauration en cours…}}", level: 'info' });
+          $.ajax({
+            type: 'POST',
+            url: 'plugins/stellantis/core/ajax/stellantis.ajax.php',
+            data: { action: 'restoreAuth', file: contenuBase64, passphrase: passphrase, renew: renew ? '1' : '0' },
+            dataType: 'json',
+            error: function (request, status, error) {
+              handleAjaxError(request, status, error);
+            },
+            success: function (data) {
+              if (data.state != 'ok') {
+                $('#div_alert').showAlert({ message: data.result, level: 'danger' });
+                return;
+              }
+              $('#div_alert').showAlert({ message: data.result.message, level: data.result.ok ? 'success' : 'danger' });
+              if (data.result.ok) {
+                $('#stellantis_authPassphrase').val('');
+                $('#stellantis_authPassphraseConfirm').val('');
+                $('#stellantis_authFile').val('');
+              }
+            }
+          });
+        };
+        lecteur.readAsText(fichiers[0]);
+      }
+    );
   });
 </script>

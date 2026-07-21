@@ -11,7 +11,16 @@
 >
 > **Maintenance** : à chaque enseignement durable (Étape 12 du workflow `/feature`), écrire dans le bon
 > fichier thématique (ou en créer un) **et mettre à jour cet index** (ligne + déclencheurs § 0 + date).
-> **Dernière synchro** : 2026-07-16 (UC74 : `stellantis-api-architecture.md` § 4.5 — **limite de cycle de
+> **Dernière synchro** : 2026-07-21 (UC62 : `stellantis-api-architecture.md` § 1.4 — **surface RCE du
+> `otp_device` (pickle)** : `resources/otp_helper.py` fait un `pickle.loads()` **non restreint** ; UC62
+> (restauration depuis fichier) ouvre la 1ʳᵉ **porte d'ingestion externe** vers cette désérialisation,
+> atténuée par un chiffrement **authentifié** AES-256-GCM + passphrase (device écrit seulement **après**
+> vérif du tag AEAD) — sûr sauf fuite conjointe fichier+passphrase ⇒ RCE. **Durcissement `pickle.loads()`
+> DIFFÉRÉ à une UC dédiée** (unpickler restreint par préfixe, recette OTP live requise). Format d'export =
+> JSON versionné, cycle **decrypt→fichier→re-encrypt** obligatoire car les blobs `utils::encrypt` ne sont
+> **pas portables** entre instances — cf. mémoires `jeedom-encrypt-config-key` +
+> `stellantis-otp-pickle-rce-surface`, `62-tech.md`).
+> Précédemment 2026-07-16 (UC74 : `stellantis-api-architecture.md` § 4.5 — **limite de cycle de
 > vie des états PAR SLOT** : les tags `message::add` **et** clés cache suffixés par slot
 > (`link_error`/`degraded_warn`/`rate_limited_<slot>`/`auth_required_<slot>`) ne sont effacés que par la
 > branche succès du priming `cron()` ou `storeTokenResponse()` ⇒ **orphelins** si un compte secondaire est
@@ -151,6 +160,7 @@
 | Origine des `client_id`/`client_secret` (extraits de l'APK), `redirect_uri`, setup interactif | `stellantis-api-architecture.md` § 1.1 + § 4 |
 | **Deux systèmes de tokens** (OAuth2 REST vs remote token OTP/SMS pour MQTT) — ne pas confondre | `stellantis-api-architecture.md` § 1.1 |
 | **Commandes à distance** : MQTT (broker `mwa.mpsa.com:8885`, topics, payloads, ack async) | `stellantis-api-architecture.md` § 1.3 |
+| **Sécurité de l'`otp_device`** (pickle) / **sauvegarde-restauration ou import de secrets** : `pickle.loads()` non restreint dans `otp_helper.py`, porte d'ingestion externe (UC62), durcissement différé ; export = decrypt→re-encrypt (blobs non portables entre instances) | `stellantis-api-architecture.md` § 1.4 (+ mémoire `stellantis-otp-pickle-rce-surface`, `62-tech.md`) |
 | **PHP natif vs démon Python** : lecture en PHP, commandes MQTT → démon (inversion vs philosophie « sans démon ») | `stellantis-api-architecture.md` § 2 et § 3 |
 | **Multi-comptes / multi-marques** (foyer Peugeot+Citroën, 2 comptes même marque) : contrainte 1 plugin=1 config/1 token/1 OTP, design UC54 = namespacing par **compte** (pas par marque) ; **cycle de vie des états par slot** (messages/cache orphelins si compte secondaire déconfiguré — UC74) | `stellantis-api-architecture.md` § 4.4-4.5 (+ `specs/.../53-tech.md`, `54-multi-marques.md`, `74-tech.md`) |
 | **Limites** : ban API (wakeup ~2 min), batterie 12 V, mode privacy, quotas OTP (6/24 h), seuil charge | `stellantis-api-architecture.md` § 1.4 |
