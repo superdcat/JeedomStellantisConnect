@@ -21,32 +21,6 @@ $iconeConnexion = ($etatConnexion['state'] == 'ok') ? 'fa-check-circle' : (($eta
 			<strong>{{État de la connexion}} :</strong>
 			<?php echo htmlspecialchars($etatConnexion['detail'], ENT_QUOTES, 'UTF-8'); ?>
 		</div>
-		<!-- UC77 : consommation de l'API REST (lecture cache seule, restitution serveur au chargement) -->
-		<div class="alert alert-info" style="margin-bottom:10px;">
-			<strong><i class="fas fa-chart-bar"></i> {{Consommation de l'API REST}}</strong>
-			<?php
-			$statsApi = stellantis::recapStatistiquesApi();
-			if ($statsApi['today']['total'] == 0) {
-				echo '<br>{{Aucun appel enregistré}}';
-			} else {
-				echo '<br>{{Appels aujourd\'hui}} : ' . (int) $statsApi['today']['total'];
-				echo ' &mdash; {{Sur 7 jours}} : ' . (int) $statsApi['total_periode'];
-				if (count($statsApi['par_compte']) > 1) {
-					foreach ($statsApi['par_compte'] as $slotCompte => $totalCompte) {
-						echo '<br>{{Compte}} ' . (int) $slotCompte . ' : ' . (int) $totalCompte;
-					}
-				}
-				if (count($statsApi['today']['byEndpoint']) > 0) {
-					arsort($statsApi['today']['byEndpoint']);
-					$parts = array();
-					foreach ($statsApi['today']['byEndpoint'] as $label => $count) {
-						$parts[] = htmlspecialchars((string) $label, ENT_QUOTES, 'UTF-8') . ' (' . (int) $count . ')';
-					}
-					echo '<br>{{Détail par endpoint}} : ' . implode(', ', $parts);
-				}
-			}
-			?>
-		</div>
 		<legend><i class="fas fa-cog"></i> {{Gestion}}</legend>
 		<!-- Boutons de gestion du plugin -->
 		<div class="eqLogicThumbnailContainer">
@@ -64,6 +38,11 @@ $iconeConnexion = ($etatConnexion['state'] == 'ok') ? 'fa-check-circle' : (($eta
 				<i class="fas fa-sync"></i>
 				<br>
 				<span>{{Synchroniser les véhicules}}</span>
+			</div>
+			<div class="cursor logoSecondary" id="stellantis_btStats">
+				<i class="fas fa-chart-bar"></i>
+				<br>
+				<span>{{Statistiques d'usage}}</span>
 			</div>
 		</div>
 		<legend><i class="fas fa-table"></i> {{Mes véhicules}}</legend>
@@ -96,6 +75,45 @@ $iconeConnexion = ($etatConnexion['state'] == 'ok') ? 'fa-check-circle' : (($eta
 		}
 		?>
 	</div> <!-- /.eqLogicThumbnailDisplay -->
+
+	<!-- UC77 : page « Statistiques d'usage ». Déplacée hors de la page d'accueil : atteinte par le bouton
+	     « Statistiques d'usage » (à côté de « Synchroniser les véhicules »), l'affichage/masquage est géré
+	     par stellantis.js (bascule vignette↔page, même pattern natif que la vue équipement). Rendu serveur
+	     au chargement (lecture cache seule via recapStatistiquesApi, sans appel réseau — parité avec
+	     l'ancien bandeau). -->
+	<div class="col-xs-12" id="stellantis_statsPage" style="display: none;">
+		<div class="input-group pull-right" style="display:inline-flex;">
+			<span class="input-group-btn">
+				<a class="btn btn-sm btn-default" id="stellantis_btStatsBack"><i class="fas fa-arrow-circle-left"></i> {{Retour}}</a>
+			</span>
+		</div>
+		<legend><i class="fas fa-chart-bar"></i> {{Statistiques d'usage}}</legend>
+		<div class="alert alert-info">
+			<strong><i class="fas fa-chart-bar"></i> {{Consommation de l'API REST}}</strong>
+			<?php
+			$statsApi = stellantis::recapStatistiquesApi();
+			if ($statsApi['today']['total'] == 0) {
+				echo '<br>{{Aucun appel enregistré}}';
+			} else {
+				echo '<br>{{Appels aujourd\'hui}} : ' . (int) $statsApi['today']['total'];
+				echo ' &mdash; {{Sur 7 jours}} : ' . (int) $statsApi['total_periode'];
+				if (count($statsApi['par_compte']) > 1) {
+					foreach ($statsApi['par_compte'] as $slotCompte => $totalCompte) {
+						echo '<br>{{Compte}} ' . (int) $slotCompte . ' : ' . (int) $totalCompte;
+					}
+				}
+				if (count($statsApi['today']['byEndpoint']) > 0) {
+					arsort($statsApi['today']['byEndpoint']);
+					$parts = array();
+					foreach ($statsApi['today']['byEndpoint'] as $label => $count) {
+						$parts[] = htmlspecialchars((string) $label, ENT_QUOTES, 'UTF-8') . ' (' . (int) $count . ')';
+					}
+					echo '<br>{{Détail par endpoint}} : ' . implode(', ', $parts);
+				}
+			}
+			?>
+		</div>
+	</div> <!-- /#stellantis_statsPage -->
 
 	<!-- Page de présentation de l'équipement -->
 	<div class="col-xs-12 eqLogic" style="display: none;">

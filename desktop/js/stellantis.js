@@ -94,6 +94,19 @@ $('body').off('click', '#stellantis_btSync').on('click', '#stellantis_btSync', f
   })
 })
 
+/* UC77 — Statistiques d'usage : bascule vers la « page » dédiée (masque la vignette des véhicules) et
+   retour. Aucun appel réseau : le contenu est rendu côté serveur au chargement, on ne fait que
+   afficher/masquer les vues (même principe natif que vignette↔équipement). Délégation sur body : la page
+   de config plugin peut être rechargée en AJAX (évite les handlers dupliqués). */
+$('body').off('click', '#stellantis_btStats').on('click', '#stellantis_btStats', function () {
+  $('.eqLogicThumbnailDisplay').hide()
+  $('#stellantis_statsPage').show()
+})
+$('body').off('click', '#stellantis_btStatsBack').on('click', '#stellantis_btStatsBack', function () {
+  $('#stellantis_statsPage').hide()
+  $('.eqLogicThumbnailDisplay').show()
+})
+
 /* Fonction permettant l'affichage des commandes dans l'équipement */
 function addCmdToTable(_cmd) {
   if (!isset(_cmd)) {

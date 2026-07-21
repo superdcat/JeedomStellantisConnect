@@ -640,7 +640,10 @@ Pas de build local ; la validation se fait en CI (voir « Workflows / CI »).
 > la page plugin — jamais `stellantisApi::` direct depuis un point d'entrée externe, règle autoload) : ligne
 > `health()` « Appels API REST (aujourd'hui) » (total + top 3 endpoints, ventilation par compte si
 > multi-comptes, `htmlspecialchars`, state informatif) + bloc `desktop/php/stellantis.php` « Consommation de
-> l'API REST » (jour + 7 j + détail par endpoint). ⚠️ **Limites assumées** (`77-tech.md`) : **commandes MQTT
+> l'API REST » (jour + 7 j + détail par endpoint) — **déplacé du haut de la page d'accueil vers une « page »
+> dédiée** (bascule vignette↔page gérée par `stellantis.js`, même pattern natif que la vue équipement)
+> atteinte par le **bouton « Statistiques d'usage »** à côté de « Synchroniser les véhicules » ; rendu
+> serveur au chargement inchangé (lecture cache seule, aucun appel réseau). ⚠️ **Limites assumées** (`77-tech.md`) : **commandes MQTT
 > hors périmètre** du compteur (publish *fire-and-forget*, ne passe pas par `stellantisApi`, aucune réponse
 > serveur synchrone ⇒ libellés volontairement « **API REST** » ; volume MQTT déjà borné par quotas
 > wakeup/debounce dédiés) ; **`downloadToFile()`** (APK GitHub, UC61) **non compté** (chemin cURL séparé,
